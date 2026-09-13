@@ -9,10 +9,29 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertCircle, Camera, CheckCircle2, Key, Loader2, QrCode, ReceiptText, Save, Trash2 } from "lucide-react";
+import { AlertCircle, Camera, CheckCircle2, ExternalLink, Key, Loader2, QrCode, ReceiptText, RefreshCw, Save, Trash2 } from "lucide-react";
 
 type ParsedItem = { name: string; price: string };
 type ImportSource = "qr" | "key";
+type Diagnostics = {
+  htmlLength?: number;
+  lineCount?: number;
+  titleItems?: number;
+  codeItems?: number;
+  tableItems?: number;
+  lineItems?: number;
+  marker?: string | null;
+  classHints?: string[];
+  finalHost?: string;
+  finalPath?: string;
+};
+type BlockedState = {
+  message: string;
+  code: string;
+  url?: string;
+  traceId?: string;
+  diagnostics?: Diagnostics;
+};
 
 const ufUrls: Record<string, string> = {
   "35": "https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaPublica.aspx",
@@ -39,6 +58,15 @@ function buildKeyUrl(key: string) {
   return url.toString();
 }
 
+function blockedTitle(code: string) {
+  if (code === "CAPTCHA_REQUIRED") return "A SEFAZ exige validação humana";
+  if (code === "BLOCKED") return "A SEFAZ bloqueou a consulta automática";
+  if (code === "NO_ITEMS") return "A página abriu, mas o layout ainda não foi reconhecido";
+  if (code === "NOT_FOUND") return "Cupom não encontrado";
+  if (code === "QR_FORMAT") return "Formato do QR Code rejeitado pela SEFAZ";
+  return "A consulta precisa de ajuda";
+}
+
 export default function ReceiptImportPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -51,8 +79,9 @@ export default function ReceiptImportPage() {
   const [supermarket, setSupermarket] = useState("");
   const [receiptDate, setReceiptDate] = useState("");
   const [source, setSource] = useState<ImportSource>("qr");
-  const [blocked, setBlocked] = useState<{ message: string; url?: string } | null>(null);
+  const [blocked, setBlocked] = useState<BlockedState | null>(null);
   const [pageText, setPageText] = useState("");
+  const [lastUrl, setLastUrl] = useState("");
 
   const keyCheck = useMemo(() => validateAccessKey(accessKey), [accessKey]);
 
@@ -66,19 +95,34 @@ export default function ReceiptImportPage() {
 
   const applyResult = (data: any, importSource: ImportSource) => {
     if (data?.error) {
-      setBlocked({ message: data.error, url: data.finalUrl });
-      toast({ title: "Consulta precisa de ajuda", description: data.error, variant: "destructive" });
+      const state: BlockedState = {
+        message: data.error,
+        code: data.code || "UNKNOWN",
+        url: data.finalUrl,
+        traceId: data.traceId,
+        diagnostics: data.diagnostics,
+      };
+      setBlocked(state);
+      toast({
+        title: blockedTitle(state.code),
+        description: state.message,
+        variant: state.code === "NO_ITEMS" ? "default" : "destructive",
+      });
       return;
     }
+
     const parsed = Array.isArray(data?.items)
       ? data.items
           .map((item: any) => ({ name: String(item?.name ?? "").trim(), price: String(item?.price ?? "") }))
           .filter((item: ParsedItem) => item.name && Number(item.price.replace(",", ".")) > 0)
       : [];
+
     if (!parsed.length) {
-      toast({ title: "Nenhum item encontrado", description: "Tente o QR Code completo ou a validação assistida.", variant: "destructive" });
+      setBlocked({ message: "A consulta retornou sem produtos reconhecíveis.", code: "NO_ITEMS", diagnostics: data?.diagnostics, traceId: data?.traceId });
+      toast({ title: "Nenhum item encontrado", description: "A página respondeu, mas o layout ainda não foi reconhecido." });
       return;
     }
+
     setItems(parsed);
     setSupermarket(data?.supermarket ?? "");
     setReceiptDate(data?.date ?? new Date().toISOString().slice(0, 10));
@@ -90,6 +134,7 @@ export default function ReceiptImportPage() {
   const importUrl = async (url: string, importSource: ImportSource) => {
     setLoading(true);
     clearResult();
+    setLastUrl(url);
     try {
       const { data, error } = await supabase.functions.invoke("fetch-receipt-url", { body: { url } });
       if (error) throw error;
@@ -130,7 +175,7 @@ export default function ReceiptImportPage() {
     try {
       const { data, error } = await supabase.functions.invoke("fetch-receipt-url", { body: { pageText } });
       if (error) throw error;
-      applyResult(data, "key");
+      applyResult(data, source);
     } catch (error: any) {
       toast({ title: "Não consegui ler o conteúdo", description: error?.message ?? "Revise o texto colado.", variant: "destructive" });
     } finally {
@@ -139,7 +184,7 @@ export default function ReceiptImportPage() {
   };
 
   const updateItem = (index: number, field: keyof ParsedItem, value: string) => {
-    setItems((current) => current.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
+    setItems((current) => current.map((item, i) => (i === index ? { ...item, [field]: value } : item));
   };
 
   const saveAll = async () => {
@@ -191,6 +236,8 @@ export default function ReceiptImportPage() {
     }
   };
 
+  const d = blocked?.diagnostics;
+
   return (
     <div className="page-container mx-auto w-full max-w-3xl">
       <div className="mb-5">
@@ -231,12 +278,7 @@ export default function ReceiptImportPage() {
                 <p className="font-semibold">Chave de acesso da NFC-e</p>
                 <p className="mt-1 text-sm text-muted-foreground">Cole os 44 dígitos impressos no cupom.</p>
               </div>
-              <Input
-                value={accessKey}
-                onChange={(e) => setAccessKey(extractAccessKey(e.target.value) ?? e.target.value)}
-                placeholder="44 dígitos da chave de acesso"
-                className="font-mono"
-              />
+              <Input value={accessKey} onChange={(e) => setAccessKey(extractAccessKey(e.target.value) ?? e.target.value)} placeholder="44 dígitos da chave de acesso" className="font-mono" />
               {accessKey && !keyCheck.valid && <p className="flex gap-2 text-sm text-destructive"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{keyCheck.error}</p>}
               {keyCheck.valid && <p className="flex gap-2 text-sm text-primary"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />Chave válida · {keyCheck.uf} · {keyCheck.emitted}</p>}
               <Button onClick={() => void importKey()} disabled={!keyCheck.valid || loading}>
@@ -250,14 +292,46 @@ export default function ReceiptImportPage() {
 
       {blocked && (
         <Card className="mt-4 border-amber-500/30 bg-amber-500/5">
-          <CardHeader><CardTitle className="text-base">A SEFAZ pediu validação</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-base">{blockedTitle(blocked.code)}</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">{blocked.message}</p>
-            {blocked.url && <Button variant="outline" onClick={() => window.open(blocked.url, "_blank", "noopener,noreferrer")}>Abrir consulta oficial</Button>}
+
+            {blocked.code === "NO_ITEMS" && (
+              <p className="text-sm text-muted-foreground">Não foi detectado CAPTCHA. A SEFAZ respondeu, mas o formato dessa página ainda não bateu com os padrões que o importador conhece.</p>
+            )}
+            {blocked.code === "CAPTCHA_REQUIRED" && (
+              <p className="text-sm text-muted-foreground">Nesse caso a validação precisa ser feita por você na página oficial. Depois, copie o conteúdo já liberado para o campo abaixo.</p>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              {blocked.url && (
+                <Button variant="outline" onClick={() => window.open(blocked.url, "_blank", "noopener,noreferrer")}> <ExternalLink className="mr-2 h-4 w-4" />Abrir consulta oficial</Button>
+              )}
+              {lastUrl && (
+                <Button variant="outline" disabled={loading} onClick={() => void importUrl(lastUrl, source)}>
+                  <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Tentar novamente
+                </Button>
+              )}
+            </div>
+
+            {d && (
+              <div className="rounded-lg border bg-background/70 p-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground">Diagnóstico do importador</p>
+                <p className="mt-1">Código: <span className="font-mono">{blocked.code}</span>{blocked.traceId ? <> · ref. <span className="font-mono">{blocked.traceId}</span></> : null}</p>
+                <p>HTML: {d.htmlLength ?? 0} caracteres · {d.lineCount ?? 0} linhas</p>
+                <p>Itens detectados: bloco {d.titleItems ?? 0} · código {d.codeItems ?? 0} · tabela {d.tableItems ?? 0} · texto {d.lineItems ?? 0}</p>
+                {d.finalHost && <p>Portal: {d.finalHost}{d.finalPath}</p>}
+                {d.classHints?.length ? <p className="mt-1 break-words">Classes: {d.classHints.slice(0, 10).join(", ")}</p> : null}
+              </div>
+            )}
+
             <div className="rounded-lg border bg-background p-3">
-              <p className="mb-2 text-sm font-medium">Depois de resolver o CAPTCHA, copie o conteúdo da página e cole abaixo:</p>
+              <p className="mb-1 text-sm font-medium">Importação assistida</p>
+              <p className="mb-2 text-xs text-muted-foreground">
+                Abra a consulta oficial. Se os produtos estiverem visíveis, selecione o conteúdo da página, copie e cole abaixo. Isso nos permite importar sem tentar contornar a proteção da SEFAZ.
+              </p>
               <Textarea value={pageText} onChange={(e) => setPageText(e.target.value)} placeholder="Cole aqui o conteúdo da página da SEFAZ..." rows={6} />
-              <Button className="mt-2" onClick={() => void importPastedPage()} disabled={loading || pageText.trim().length < 80}>Importar conteúdo validado</Button>
+              <Button className="mt-2" onClick={() => void importPastedPage()} disabled={loading || pageText.trim().length < 80}>Importar conteúdo da página</Button>
             </div>
           </CardContent>
         </Card>
