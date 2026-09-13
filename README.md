@@ -1,73 +1,52 @@
-# Welcome to your Lovable project
+# Remix of Preço Certo
 
-## Project info
+Crie app full-stack "Preço Tracker" para rastrear preços supermercados BR usando APENAS o banco nativo do Lovable (sem Supabase externo). Design mobile-first, PT-BR.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+**DB Schema auto (tabelas nativas):**
+- products: id (auto), name (string), category (string), userId (string)
+- prices: id (auto), productId (string), supermarket (string), price (number), date (date), imageUrl (string), receiptText (string), userId (string)
 
-## How can I edit this code?
+**Páginas e Fluxo:**
+1. **Home/Dashboard:** Tabela produtos com melhor preço (query: MIN(price) por product + supermarket). Filtros categoria/supermercado. Gráfico linha histórico preços (Chart.js). Botão "Novo produto".
+2. **Novo manual:** Form modal: nome, categoria, preço, supermercado, data. Salva product/price.
+3. **Upload Cupom:** Drag imagem (jpg/png) ou PDF. Botões: "QR Code" (jsQR lib), "OCR Texto" (Tesseract.js para extrair itens/preços/supermercado). Preview tabela editável (confirme produtos/preços), salve múltiplos.
+4. **Detalhe Produto:** Histórico lista + gráfico preços por data/supermercado.
+5. **Auth:** Login Lovable nativo (email/Google), dados filtrados por userId.
 
-There are several ways of editing your application.
+**Lógica OCR/QR (client-side, sem backend extra):**
+- QR: jsQR decodifica > parse XML NF-e para itens/preços (fetch XML se link).
+- Imagem/PDF: pdf.js converte PDF>canvas, Tesseract.js OCR > regex BR cupons ("ARROZ.*R\\$\\s*([0-9,]+)"). Sugira match produtos existentes.
+- Armazene imagem no storage Lovable, texto parseado.
 
-**Use Lovable**
+**UI clean:**
+- Cards produtos: "Arroz 5kg - Melhor: R$10 @Supermercado B".
+- Toasts feedback.
+- Search global.
+- Tema verde, responsive.
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+**Libs:**
+- Chart.js, Tesseract.js, jsQR, pdf.js.
+- Upload imagens storage nativo.
 
-Changes made via Lovable will be committed automatically to this repo.
+Mock dados: Arroz Superm A R$12 (2026-03-14), Superm B R$10 (2026-03-21). Código pronto/deploy. Teste upload imagem mock.
 
-**Use your preferred IDE**
+This project was built with [Lovable](https://lovable.dev).
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## Build with Lovable
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+Continue developing this project in the [Lovable editor](https://lovable.dev/projects/dcf8ddee-c2b2-4b5a-84fb-150bbff00b4e).
 
-Follow these steps:
+- **Ship faster**: describe what you want to build and Lovable handles the code.
+- **Stay in sync**: every change made in Lovable is committed straight to this repository.
+- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
+
+## Development
+
+Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
+git clone <this-repository-url>
+cd <repository-name>
 npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
 npm run dev
 ```
-
-**Edit a file directly in GitHub**
-
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
-
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
