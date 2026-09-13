@@ -184,7 +184,9 @@ export default function ReceiptImportPage() {
   };
 
   const updateItem = (index: number, field: keyof ParsedItem, value: string) => {
-    setItems((current) => current.map((item, i) => (i === index ? { ...item, [field]: value } : item));
+    setItems((current) =>
+      current.map((item, i) => (i === index ? { ...item, [field]: value } : item))
+    );
   };
 
   const saveAll = async () => {
