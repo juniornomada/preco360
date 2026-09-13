@@ -1,0 +1,1 @@
+Parser de NFC-e do Preço 360. O código de produção fica em index.ts. Esta nota existe para registrar que o parser preserva a URL original do QR Code, tenta estruturas comuns de NFC-e (blocos de produto, tabelas e texto visível) e devolve diagnósticos não sensíveis quando um layout ainda não é reconhecido.
