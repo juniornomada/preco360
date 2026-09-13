@@ -8,6 +8,19 @@ const corsHeaders = {
 
 type Item = { name: string; price: string };
 
+type Diagnostics = {
+  htmlLength?: number;
+  lineCount?: number;
+  titleItems?: number;
+  codeItems?: number;
+  tableItems?: number;
+  lineItems?: number;
+  marker?: string | null;
+  classHints?: string[];
+  finalHost?: string;
+  finalPath?: string;
+};
+
 class ImportError extends Error {
   constructor(message: string, public code: string, public finalUrl?: string) {
     super(message);
@@ -20,7 +33,7 @@ const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body)
 });
 
 const decode = (s: string) => s
-  .replace(/&#(x?[0-9a-f]+);/gi, (_, raw) => String.fromCodePoint(raw.toLowerCase().startsWith("x") ? parseInt(raw.slice(1), 16) : parseInt(raw, 10)))
+  .replace(/&#(x?[0-9a-f]+);/gi, (_match, raw) => String.fromCodePoint(raw.toLowerCase().startsWith("x") ? parseInt(raw.slice(1), 16) : parseInt(raw, 10)))
   .replace(/&nbsp;/gi, " ")
   .replace(/&amp;/gi, "&")
   .replace(/&quot;/gi, '"')
@@ -30,7 +43,7 @@ const strip = (html: string) => decode(
   html
     .replace(/<(script|style|noscript)[^>]*>[\s\S]*?<\/\1>/gi, " ")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(?:tr|td|th|div|p|li|section|h[1-6])>/gi, "\n")
+    .replace(/<\/(?:tr|td|th|div|p|li|section|h[1-6]|span)>/gi, "\n")
     .replace(/<[^>]+>/g, " "),
 ).replace(/[ \t]+/g, " ").replace(/\n\s+/g, "\n").trim();
 
@@ -71,10 +84,9 @@ function dedupe(items: Item[]) {
 }
 
 function monetaryValues(text: string) {
-  const values = [...text.matchAll(/(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/g)]
+  return [...text.matchAll(/(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/g)]
     .map((m) => money(m[1]))
     .filter((v): v is string => Boolean(v));
-  return values;
 }
 
 function parseTitleBlocks(html: string): Item[] {
@@ -88,27 +100,37 @@ function parseTitleBlocks(html: string): Item[] {
 
   const items: Item[] = [];
   hits.forEach((hit, i) => {
-    const end = hits[i + 1]?.start ?? Math.min(html.length, hit.end + 4500);
+    const end = hits[i + 1]?.start ?? Math.min(html.length, hit.end + 5000);
     const chunk = html.slice(hit.end, end);
-    const text = strip(chunk);
-
-    const preferred = [
-      /(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i,
-      /class=["'][^"']*(?:valor|vlTotal|valorTotal|vProd)[^"']*["'][^>]*>[\s\S]*?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i,
-    ];
-
-    let price: string | null = null;
-    for (const pattern of preferred) {
-      const found = (chunk.match(pattern) ?? text.match(pattern))?.[1];
-      price = money(found);
-      if (price) break;
-    }
+    const text = strip(chunk).replace(/\s+/g, " ");
+    let price = money(text.match(/(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i)?.[1]);
     if (!price) {
       const values = monetaryValues(text);
       price = values.at(-1) ?? null;
     }
     if (price) items.push({ name: hit.name, price });
   });
+  return items;
+}
+
+function parseCodeLines(lines: string[]): Item[] {
+  const items: Item[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!/\(\s*C[oó]digo\s*:/i.test(line)) continue;
+    const name = normalizeName(line.replace(/\(\s*C[oó]digo\s*:[\s\S]*$/i, ""));
+    if (!name || badName.test(name)) continue;
+    const window = lines.slice(i, i + 7).join(" ");
+    let price = money(window.match(/(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i)?.[1]);
+    if (!price) {
+      const totalIndex = lines.slice(i, i + 7).findIndex((part) => /Vl\.?\s*Total|Valor\s*Total/i.test(part));
+      if (totalIndex >= 0) {
+        const after = lines.slice(i + totalIndex, i + totalIndex + 3).join(" ");
+        price = monetaryValues(after).at(-1) ?? null;
+      }
+    }
+    if (price) items.push({ name, price });
+  }
   return items;
 }
 
@@ -120,11 +142,8 @@ function parseTableRows(html: string): Item[] {
       .map((m) => normalizeName(strip(m[1])))
       .filter(Boolean);
     if (cells.length < 2) continue;
-
-    const allText = cells.join(" | ");
-    const prices = monetaryValues(allText);
+    const prices = monetaryValues(cells.join(" | "));
     if (!prices.length) continue;
-
     const candidates = cells.filter((cell) => /[A-Za-zÀ-ÿ]/.test(cell) && !badName.test(cell) && !/^(UN|KG|LT|L|CX|PCT|PC|UND?)$/i.test(cell));
     const name = candidates.sort((a, b) => b.length - a.length)[0];
     if (!name || name.length > 180) continue;
@@ -138,14 +157,12 @@ function parseLines(lines: string[]): Item[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.length < 3 || badName.test(line)) continue;
-
     const sameLine = line.match(/^(.{3,150}?)\s+(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})$/);
     if (sameLine && /[A-Za-zÀ-ÿ]/.test(sameLine[1])) {
       const price = money(sameLine[2]);
       if (price) items.push({ name: sameLine[1], price });
       continue;
     }
-
     if (!/[A-Za-zÀ-ÿ]/.test(line) || monetaryValues(line).length) continue;
     for (let j = 1; j <= 5 && i + j < lines.length; j++) {
       const next = lines[i + j];
@@ -188,12 +205,22 @@ function markerCode(html: string) {
   return null;
 }
 
+function classHints(html: string) {
+  const hints = new Set<string>();
+  for (const match of html.matchAll(/class=["']([^"']+)["']/gi)) {
+    for (const part of match[1].split(/\s+/)) {
+      if (part && part.length <= 40) hints.add(part);
+      if (hints.size >= 24) return [...hints];
+    }
+  }
+  return [...hints];
+}
+
 async function fetchFiscal(raw: string) {
   const u = new URL(raw);
   if (!/^https?:$/.test(u.protocol) || (!u.hostname.endsWith(".gov.br") && !/(sefaz|fazenda|nfce|nfe|dfe)/i.test(u.hostname))) {
     throw new ImportError("Endereço fiscal inválido.", "INVALID_URL");
   }
-
   const response = await fetch(u.toString(), {
     redirect: "follow",
     headers: {
@@ -202,19 +229,16 @@ async function fetchFiscal(raw: string) {
       "Accept-Language": "pt-BR,pt;q=0.9",
     },
   });
-
   const finalUrl = response.url || u.toString();
-  if (response.status === 403 || response.status === 429) {
-    throw new ImportError("A SEFAZ bloqueou a consulta automática. Use a validação assistida.", "BLOCKED", finalUrl);
-  }
+  if (response.status === 403 || response.status === 429) throw new ImportError("A SEFAZ bloqueou a consulta automática.", "BLOCKED", finalUrl);
   if (!response.ok) throw new ImportError(`SEFAZ respondeu HTTP ${response.status}.`, "HTTP_ERROR", finalUrl);
-
   return { html: await response.text(), finalUrl };
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const traceId = crypto.randomUUID().slice(0, 8);
+  let diagnostics: Diagnostics = {};
 
   try {
     const body = await req.json();
@@ -236,12 +260,36 @@ Deno.serve(async (req) => {
     }
 
     const titleItems = html ? parseTitleBlocks(html) : [];
+    const codeItems = parseCodeLines(lines);
     const tableItems = html ? parseTableRows(html) : [];
     const lineItems = parseLines(lines);
-    const items = dedupe([...titleItems, ...tableItems, ...lineItems]);
+    const marker = html ? markerCode(html) : null;
+
+    if (finalUrl) {
+      try {
+        const parsed = new URL(finalUrl);
+        diagnostics.finalHost = parsed.host;
+        diagnostics.finalPath = parsed.pathname;
+      } catch {
+        // ignora URL final inválida
+      }
+    }
+
+    diagnostics = {
+      ...diagnostics,
+      htmlLength: html.length,
+      lineCount: lines.length,
+      titleItems: titleItems.length,
+      codeItems: codeItems.length,
+      tableItems: tableItems.length,
+      lineItems: lineItems.length,
+      marker,
+      classHints: html ? classHints(html) : [],
+    };
+
+    const items = dedupe([...titleItems, ...codeItems, ...tableItems, ...lineItems]);
 
     if (!items.length) {
-      const marker = html ? markerCode(html) : null;
       if (marker === "CAPTCHA_REQUIRED") throw new ImportError("A SEFAZ exige CAPTCHA nessa consulta.", marker, finalUrl);
       if (marker === "NOT_FOUND") throw new ImportError("Cupom não encontrado pela SEFAZ.", marker, finalUrl);
       if (marker === "QR_FORMAT") throw new ImportError("A SEFAZ rejeitou o formato do QR Code.", marker, finalUrl);
@@ -254,12 +302,7 @@ Deno.serve(async (req) => {
       items,
       traceId,
       sourceUrl: finalUrl,
-      diagnostics: {
-        htmlLength: html.length,
-        titleItems: titleItems.length,
-        tableItems: tableItems.length,
-        lineItems: lineItems.length,
-      },
+      diagnostics,
     });
   } catch (e) {
     const err = e instanceof ImportError ? e : new ImportError(e instanceof Error ? e.message : "Falha inesperada.", "UNKNOWN");
@@ -271,6 +314,7 @@ Deno.serve(async (req) => {
       suggestPhoto: expected,
       finalUrl: err.finalUrl,
       traceId,
+      diagnostics,
     }, expected ? 200 : 500);
   }
 });
