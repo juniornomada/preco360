@@ -10,42 +10,42 @@ interface SefazBlockedNoticeProps {
 
 const TITLES: Record<string, string> = {
   CAPTCHA_REQUIRED: "A SEFAZ pediu verificação CAPTCHA",
+  BLOCKED: "A SEFAZ bloqueou a consulta automática",
   REDIRECTED: "O link foi redirecionado para uma página de erro",
-  QR_FORMAT: "Formato de QR Code não aceito pela SEFAZ",
-  NO_ITEMS: "Não conseguimos ler os produtos da página",
+  QR_FORMAT: "A SEFAZ rejeitou o formato do QR Code",
+  NOT_FOUND: "Cupom não encontrado pela SEFAZ",
+  NO_ITEMS: "A consulta abriu, mas os produtos não foram identificados",
   JS_REQUIRED: "A página da SEFAZ só carrega o cupom no navegador",
+};
+
+const DESCRIPTIONS: Record<string, string> = {
+  NO_ITEMS: "Isso não significa necessariamente CAPTCHA. O portal respondeu, mas esse layout ainda não foi reconhecido automaticamente.",
+  CAPTCHA_REQUIRED: "A consulta chegou ao portal, mas a SEFAZ exige uma validação humana antes de mostrar os dados.",
+  BLOCKED: "O portal recusou a consulta feita pelo servidor. Você ainda pode importar usando a consulta oficial ou uma foto do cupom.",
 };
 
 export function SefazBlockedNotice({ message, code, traceId, onSendPhoto }: SefazBlockedNoticeProps) {
   return (
-    <div className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+    <div className="space-y-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
       <div className="flex items-start gap-2.5">
-        <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+        <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
         <div className="space-y-1">
           <p className="text-sm font-semibold text-foreground">
-            {TITLES[code] ?? "Não foi possível importar pelo link"}
+            {TITLES[code] ?? "Não foi possível importar automaticamente"}
           </p>
           <p className="text-sm text-muted-foreground">{message}</p>
+          {DESCRIPTIONS[code] && <p className="text-xs text-muted-foreground">{DESCRIPTIONS[code]}</p>}
         </div>
       </div>
 
-      <div className="space-y-1.5 pl-7 text-sm text-muted-foreground">
-        <p className="font-medium text-foreground">Como resolver em 3 passos:</p>
-        <ol className="list-decimal space-y-1 pl-4">
-          <li>Abra o app da câmera e fotografe o cupom inteiro, bem iluminado e sem dobras.</li>
-          <li>Toque no botão abaixo para ir para a aba de envio de foto/PDF.</li>
-          <li>Envie a imagem — a IA lê os produtos e preços automaticamente.</li>
-        </ol>
-      </div>
-
-      <Button onClick={onSendPhoto} className="w-full">
+      <Button onClick={onSendPhoto} variant="outline" className="w-full">
         <Camera className="mr-1.5 h-4 w-4" />
-        Enviar foto do cupom
+        Usar foto do cupom como alternativa
       </Button>
 
       {traceId && (
         <p className="text-center font-mono text-[11px] text-muted-foreground">
-          código de diagnóstico: {traceId}
+          código de diagnóstico: {traceId} · {code}
         </p>
       )}
     </div>
