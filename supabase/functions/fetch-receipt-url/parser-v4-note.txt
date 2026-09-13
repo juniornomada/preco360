@@ -1,0 +1,1 @@
+v4 adds layout diagnostics and a Código/Qtde/Vl.Total parser for NFC-e pages such as the São Paulo public consultation layout.
