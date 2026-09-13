@@ -9,7 +9,7 @@ import Index from "./pages/Index";
 import AuthPage from "./pages/AuthPage";
 import ProductDetail from "./pages/ProductDetail";
 import SearchPage from "./pages/SearchPage";
-import UploadPage from "./pages/UploadPage";
+import ReceiptImportPage from "./pages/ReceiptImportPage";
 import ProfilePage from "./pages/ProfilePage";
 import QrLabPage from "./pages/QrLabPage";
 import NotFound from "./pages/NotFound";
@@ -35,10 +35,9 @@ function AppRoutes() {
         <Route path="/" element={<Index />} />
         <Route path="/product/:id" element={<ProductDetail />} />
         <Route path="/search" element={<SearchPage />} />
-        <Route path="/upload" element={<UploadPage />} />
+        <Route path="/upload" element={<ReceiptImportPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/qr-lab" element={<QrLabPage />} />
-
         <Route path="*" element={<NotFound />} />
       </Routes>
       <BottomNav />
