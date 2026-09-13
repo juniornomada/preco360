@@ -16,13 +16,13 @@ const loadJsQr = () => {
   return jsQrPromise;
 };
 
-/** Leitura leve: reduz o frame e tenta apenas o detector nativo e o jsQR. */
+/** NFC-e costuma usar QR denso; preservamos mais resolução e testamos inversão em todos os quadros. */
 async function readQr(source: HTMLVideoElement | HTMLImageElement, thorough = false): Promise<string | null> {
   const sourceWidth = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
   const sourceHeight = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
   if (!sourceWidth || !sourceHeight) return null;
 
-  const maxSide = thorough ? 1280 : 800;
+  const maxSide = thorough ? 1800 : 1200;
   const scale = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight));
   const width = Math.max(1, Math.round(sourceWidth * scale));
   const height = Math.max(1, Math.round(sourceHeight * scale));
@@ -53,7 +53,7 @@ async function readQr(source: HTMLVideoElement | HTMLImageElement, thorough = fa
   const image = context.getImageData(0, 0, width, height);
   const jsQr = await loadJsQr();
   return jsQr(image.data, width, height, {
-    inversionAttempts: thorough ? "attemptBoth" : "dontInvert",
+    inversionAttempts: "attemptBoth",
   })?.data?.trim() ?? null;
 }
 
@@ -99,7 +99,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       const value = await readQr(video, thorough);
       if (value) finish(value);
       else if (thorough) {
-        setMessage("Não consegui ler. Aproxime o QR e evite reflexos.");
+        setMessage("Não consegui ler. Aproxime o QR, preencha o quadrado e evite reflexos.");
         setStatus("scanning");
       }
     } catch {
@@ -119,7 +119,11 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
         audio: false,
       });
       const video = videoRef.current;
@@ -133,11 +137,26 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       await video.play();
 
       const track = stream.getVideoTracks()[0];
-      const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+      const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & {
+        torch?: boolean;
+        focusMode?: string[];
+      };
       setTorchSupported(Boolean(capabilities?.torch));
-      setMessage("Centralize o QR Code dentro do quadrado");
+
+      if (capabilities?.focusMode?.includes("continuous")) {
+        try {
+          await track.applyConstraints({
+            advanced: [{ focusMode: "continuous" } as MediaTrackConstraintSet],
+          });
+        } catch {
+          // Autofoco contínuo não é obrigatório; seguimos com o padrão do aparelho.
+        }
+      }
+
+      setMessage("Centralize o QR e aproxime até ele ocupar boa parte do quadrado");
       setStatus("scanning");
-      timerRef.current = window.setInterval(() => void scanFrame(false), 700);
+      timerRef.current = window.setInterval(() => void scanFrame(false), 450);
+      window.setTimeout(() => void scanFrame(true), 500);
     } catch (error) {
       stop();
       const denied = error instanceof DOMException && error.name === "NotAllowedError";
