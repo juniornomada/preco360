@@ -1,6 +1,6 @@
-# Remix of Preço Certo
+# Preço 360
 
-Crie app full-stack "Preço Tracker" para rastrear preços supermercados BR usando APENAS o banco nativo do Lovable (sem Supabase externo). Design mobile-first, PT-BR.
+Crie app full-stack "Preço 360" para rastrear preços supermercados BR usando APENAS o banco nativo do Lovable (sem Supabase externo). Design mobile-first, PT-BR.
 
 **DB Schema auto (tabelas nativas):**
 - products: id (auto), name (string), category (string), userId (string)
