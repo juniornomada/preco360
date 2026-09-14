@@ -9,6 +9,8 @@ interface QrScannerProps {
 
 type Status = "idle" | "starting" | "scanning" | "reading";
 type JsQr = (data: Uint8ClampedArray, width: number, height: number, options?: unknown) => { data: string } | null;
+type Source = HTMLVideoElement | HTMLImageElement;
+
 let jsQrPromise: Promise<JsQr> | null = null;
 
 const loadJsQr = () => {
@@ -16,23 +18,46 @@ const loadJsQr = () => {
   return jsQrPromise;
 };
 
-/** NFC-e costuma usar QR denso; preservamos mais resolução e testamos inversão em todos os quadros. */
-async function readQr(source: HTMLVideoElement | HTMLImageElement, thorough = false): Promise<string | null> {
-  const sourceWidth = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
-  const sourceHeight = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
+function getSourceSize(source: Source) {
+  return source instanceof HTMLVideoElement
+    ? { width: source.videoWidth, height: source.videoHeight }
+    : { width: source.naturalWidth, height: source.naturalHeight };
+}
+
+function drawRegion(source: Source, maxSide: number, squareRatio?: number) {
+  const { width: sourceWidth, height: sourceHeight } = getSourceSize(source);
   if (!sourceWidth || !sourceHeight) return null;
 
-  const maxSide = thorough ? 1800 : 1200;
-  const scale = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight));
-  const width = Math.max(1, Math.round(sourceWidth * scale));
-  const height = Math.max(1, Math.round(sourceHeight * scale));
+  let sx = 0;
+  let sy = 0;
+  let sw = sourceWidth;
+  let sh = sourceHeight;
+
+  // A prévia usa object-cover dentro de um quadrado. Em vídeo 16:9 isso significa que
+  // o usuário vê apenas a região quadrada central. Escanear essa mesma região deixa o
+  // QR muito maior para o decoder do que analisar o frame 16:9 inteiro.
+  if (squareRatio) {
+    const side = Math.min(sourceWidth, sourceHeight) * squareRatio;
+    sw = side;
+    sh = side;
+    sx = (sourceWidth - side) / 2;
+    sy = (sourceHeight - side) / 2;
+  }
+
+  const scale = Math.min(1, maxSide / Math.max(sw, sh));
+  const width = Math.max(1, Math.round(sw * scale));
+  const height = Math.max(1, Math.round(sh * scale));
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) return null;
-  context.drawImage(source, 0, 0, width, height);
 
+  context.drawImage(source, sx, sy, sw, sh, 0, 0, width, height);
+  return canvas;
+}
+
+async function decodeCanvas(canvas: HTMLCanvasElement): Promise<string | null> {
   if ("BarcodeDetector" in window) {
     try {
       const Detector = (window as typeof window & {
@@ -50,11 +75,41 @@ async function readQr(source: HTMLVideoElement | HTMLImageElement, thorough = fa
     }
   }
 
-  const image = context.getImageData(0, 0, width, height);
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
   const jsQr = await loadJsQr();
-  return jsQr(image.data, width, height, {
+  return jsQr(image.data, canvas.width, canvas.height, {
     inversionAttempts: "attemptBoth",
   })?.data?.trim() ?? null;
+}
+
+/** NFC-e usa QR denso. No vídeo priorizamos a região realmente visível no quadrado. */
+async function readQr(source: Source, thorough = false): Promise<string | null> {
+  const isVideo = source instanceof HTMLVideoElement;
+  const attempts: Array<{ maxSide: number; squareRatio?: number }> = isVideo
+    ? thorough
+      ? [
+          { maxSide: 1800, squareRatio: 0.68 },
+          { maxSide: 1800, squareRatio: 1 },
+          { maxSide: 1800 },
+        ]
+      : [{ maxSide: 1400, squareRatio: 1 }]
+    : thorough
+      ? [
+          { maxSide: 1800 },
+          { maxSide: 1800, squareRatio: 0.8 },
+        ]
+      : [{ maxSide: 1400 }];
+
+  for (const attempt of attempts) {
+    const canvas = drawRegion(source, attempt.maxSide, attempt.squareRatio);
+    if (!canvas) continue;
+    const value = await decodeCanvas(canvas);
+    if (value) return value;
+  }
+
+  return null;
 }
 
 export function QrScanner({ onResult, onClose }: QrScannerProps) {
@@ -99,7 +154,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       const value = await readQr(video, thorough);
       if (value) finish(value);
       else if (thorough) {
-        setMessage("Não consegui ler. Aproxime o QR, preencha o quadrado e evite reflexos.");
+        setMessage("Não consegui ler. Afaste um pouco, mantenha o QR nítido e evite reflexos.");
         setStatus("scanning");
       }
     } catch {
@@ -112,13 +167,21 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     }
   };
 
-  const start = async () => {
-    setMessage("Abrindo câmera…");
-    setStatus("starting");
-    finishedRef.current = false;
+  const requestCamera = async () => {
+    const preferred: MediaStreamConstraints = {
+      video: {
+        facingMode: { exact: "environment" },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+      audio: false,
+    };
+
     try {
-      if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
-      const stream = await navigator.mediaDevices.getUserMedia({
+      return await navigator.mediaDevices.getUserMedia(preferred);
+    } catch (error) {
+      if (!(error instanceof DOMException) || !["OverconstrainedError", "NotFoundError"].includes(error.name)) throw error;
+      return navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: "environment" },
           width: { ideal: 1920 },
@@ -126,6 +189,16 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
         },
         audio: false,
       });
+    }
+  };
+
+  const start = async () => {
+    setMessage("Abrindo câmera…");
+    setStatus("starting");
+    finishedRef.current = false;
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
+      const stream = await requestCamera();
       const video = videoRef.current;
       if (!video) {
         stream.getTracks().forEach((track) => track.stop());
@@ -153,10 +226,10 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
         }
       }
 
-      setMessage("Centralize o QR e aproxime até ele ocupar boa parte do quadrado");
+      setMessage("Centralize o QR e deixe as bordas bem nítidas dentro do quadrado");
       setStatus("scanning");
-      timerRef.current = window.setInterval(() => void scanFrame(false), 450);
-      window.setTimeout(() => void scanFrame(true), 500);
+      timerRef.current = window.setInterval(() => void scanFrame(false), 500);
+      window.setTimeout(() => void scanFrame(true), 700);
     } catch (error) {
       stop();
       const denied = error instanceof DOMException && error.name === "NotAllowedError";
@@ -190,7 +263,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       if (value) finish(value);
       else {
         setStatus(streamRef.current ? "scanning" : "idle");
-        setMessage("QR não encontrado. Tire a foto mais perto e sem reflexos.");
+        setMessage("QR não encontrado. Tire a foto mais perto, reta e sem reflexos.");
       }
     } catch {
       setStatus(streamRef.current ? "scanning" : "idle");
