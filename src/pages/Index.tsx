@@ -41,55 +41,74 @@ export default function Index() {
 
   return (
     <div className="page-container mx-auto w-full max-w-3xl">
-      <header className="mb-5 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <CircleDollarSign className="h-5 w-5" />
+      <header className="mb-4 flex items-center justify-between gap-3 sm:mb-5">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm sm:h-11 sm:w-11">
+            <CircleDollarSign className="h-5 w-5 sm:h-6 sm:w-6" />
           </div>
-          <div>
-            <h1 className="text-xl font-extrabold tracking-tight">Preço 360</h1>
-            <p className="text-xs text-muted-foreground">Seu histórico antes de comprar</p>
+          <div className="min-w-0">
+            <h1 className="truncate text-[clamp(1.2rem,5vw,1.5rem)] font-extrabold leading-tight tracking-tight">Preço 360</h1>
+            <p className="truncate text-[clamp(0.72rem,3vw,0.82rem)] text-muted-foreground">Seu histórico antes de comprar</p>
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setShowAdd(true)}>
+        <Button variant="outline" size="sm" className="h-10 shrink-0 rounded-xl px-3 text-xs sm:text-sm" onClick={() => setShowAdd(true)}>
           <Plus className="mr-1 h-4 w-4" /> Produto
         </Button>
       </header>
 
-      <section className="relative mb-5 overflow-hidden rounded-2xl bg-secondary p-5 text-secondary-foreground shadow-sm sm:p-6">
+      <section className="relative mb-4 overflow-hidden rounded-[1.35rem] bg-secondary p-4 text-secondary-foreground shadow-sm sm:mb-5 sm:p-6">
         <div className="relative z-10 max-w-xl">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-white/60">Decida com histórico</p>
-          <h2 className="text-2xl font-extrabold leading-tight sm:text-3xl">Esse preço está realmente bom?</h2>
-          <p className="mt-2 text-sm leading-relaxed text-white/70">
+          <p className="mb-2 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-white/60 sm:text-xs">Decida com histórico</p>
+          <h2 className="max-w-[16ch] text-[clamp(1.7rem,7.6vw,2.25rem)] font-extrabold leading-[1.08] tracking-[-0.02em]">
+            Esse preço está realmente bom?
+          </h2>
+          <p className="mt-3 max-w-[42rem] text-[clamp(0.84rem,3.5vw,0.96rem)] leading-[1.55] text-white/70">
             Compare o preço da prateleira com o que você já pagou e registre novos valores para melhorar a análise.
           </p>
-          <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-            <Button className="h-11" onClick={() => navigate("/search")}>
+          <div className="mt-4 grid gap-2 sm:mt-5 sm:grid-cols-2">
+            <Button className="h-10 rounded-xl text-sm sm:h-11" onClick={() => navigate("/search")}>
               <BadgeDollarSign className="mr-2 h-4 w-4" /> Cotar preço agora
             </Button>
-            <Button variant="secondary" className="h-11 bg-white/10 text-white hover:bg-white/15" onClick={() => navigate("/upload")}>
+            <Button variant="secondary" className="h-10 rounded-xl bg-white/10 text-sm text-white hover:bg-white/15 sm:h-11" onClick={() => navigate("/upload")}>
               <Camera className="mr-2 h-4 w-4" /> Ler cupom fiscal
             </Button>
           </div>
         </div>
-        <ShoppingBasket className="absolute -bottom-8 -right-6 h-40 w-40 text-white/[0.04]" />
+        <ShoppingBasket className="absolute -bottom-7 -right-5 h-32 w-32 text-white/[0.04] sm:h-40 sm:w-40" />
       </section>
 
-      <section className="mb-6 grid grid-cols-2 gap-3">
-        <Card><CardContent className="p-4"><PackageSearch className="mb-2 h-5 w-5 text-primary" /><p className="text-2xl font-extrabold">{products?.length ?? 0}</p><p className="text-xs text-muted-foreground">produtos acompanhados</p></CardContent></Card>
-        <Card><CardContent className="p-4"><ReceiptText className="mb-2 h-5 w-5 text-amber-600" /><p className="text-2xl font-extrabold">{totalPrices}</p><p className="text-xs text-muted-foreground">preços registrados</p></CardContent></Card>
+      <section className="mb-5 grid grid-cols-2 gap-2.5 sm:mb-6 sm:gap-3">
+        <Card className="rounded-2xl">
+          <CardContent className="p-3.5 sm:p-4">
+            <PackageSearch className="mb-1.5 h-5 w-5 text-primary" />
+            <p className="text-[clamp(1.65rem,7vw,2rem)] font-extrabold leading-none">{products?.length ?? 0}</p>
+            <p className="mt-1 text-[clamp(0.68rem,2.8vw,0.78rem)] leading-tight text-muted-foreground">produtos acompanhados</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-2xl">
+          <CardContent className="p-3.5 sm:p-4">
+            <ReceiptText className="mb-1.5 h-5 w-5 text-amber-600" />
+            <p className="text-[clamp(1.65rem,7vw,2rem)] font-extrabold leading-none">{totalPrices}</p>
+            <p className="mt-1 text-[clamp(0.68rem,2.8vw,0.78rem)] leading-tight text-muted-foreground">preços registrados</p>
+          </CardContent>
+        </Card>
       </section>
 
       <section>
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Acompanhe</p><h2 className="text-lg font-bold">Seus produtos</h2></div>
-          {products && products.length > 0 && <Button variant="ghost" size="sm" onClick={() => navigate("/search")}>Cotar preço</Button>}
+        <div className="mb-2.5 flex items-end justify-between gap-3 sm:mb-3">
+          <div>
+            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground sm:text-xs">Acompanhe</p>
+            <h2 className="text-[clamp(1.1rem,5vw,1.3rem)] font-bold leading-tight">Seus produtos</h2>
+          </div>
+          {products && products.length > 0 && (
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs sm:text-sm" onClick={() => navigate("/search")}>Cotar preço</Button>
+          )}
         </div>
 
         {isLoading && <p className="py-10 text-center text-sm text-muted-foreground">Carregando...</p>}
 
         {!isLoading && products?.length === 0 && (
-          <Card className="border-dashed"><CardContent className="flex flex-col items-center px-5 py-9 text-center">
+          <Card className="rounded-2xl border-dashed"><CardContent className="flex flex-col items-center px-5 py-8 text-center sm:py-9">
             <PackageSearch className="mb-3 h-9 w-9 text-primary" />
             <h3 className="font-bold">Comece pelo primeiro produto</h3>
             <p className="mt-1 max-w-sm text-sm text-muted-foreground">Cadastre os itens que você compra com frequência e forme seu histórico de preços.</p>
@@ -97,12 +116,23 @@ export default function Index() {
           </CardContent></Card>
         )}
 
-        <div className="space-y-2.5">
+        <div className="space-y-2">
           {productRows.map((product) => (
-            <button key={product.id} type="button" onClick={() => navigate(`/product/${product.id}`)} className="flex w-full items-center gap-3 rounded-xl border bg-card p-4 text-left transition hover:border-primary/30 hover:shadow-sm">
-              <div className="min-w-0 flex-1"><p className="truncate font-semibold">{product.name}</p><p className="text-xs text-muted-foreground">{product.category} · {product.priceCount} registro(s)</p></div>
-              <div className="text-right"><p className="text-sm font-extrabold">{product.latest ? formatBRL(product.latest.price) : "Sem preço"}</p><p className="text-[11px] text-muted-foreground">{product.best !== null ? `melhor ${formatBRL(product.best)}` : "sem histórico"}</p></div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            <button
+              key={product.id}
+              type="button"
+              onClick={() => navigate(`/product/${product.id}`)}
+              className="flex w-full items-center gap-2.5 rounded-2xl border bg-card px-3.5 py-3 text-left transition active:scale-[0.995] hover:border-primary/30 hover:shadow-sm sm:gap-3 sm:p-4"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[clamp(0.88rem,3.8vw,1rem)] font-semibold leading-tight">{product.name}</p>
+                <p className="mt-0.5 truncate text-[clamp(0.66rem,2.8vw,0.75rem)] text-muted-foreground">{product.category} · {product.priceCount} registro(s)</p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-[clamp(0.82rem,3.5vw,0.95rem)] font-extrabold">{product.latest ? formatBRL(product.latest.price) : "Sem preço"}</p>
+                <p className="text-[0.64rem] text-muted-foreground sm:text-[11px]">{product.best !== null ? `melhor ${formatBRL(product.best)}` : "sem histórico"}</p>
+              </div>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
             </button>
           ))}
         </div>
