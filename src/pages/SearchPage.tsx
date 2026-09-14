@@ -55,7 +55,7 @@ export default function SearchPage() {
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!products) return [];
-    if (!term) return products.slice(0, 8);
+    if (!term) return products;
     return products.filter((product) => product.name.toLowerCase().includes(term));
   }, [products, search]);
 
