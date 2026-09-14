@@ -28,6 +28,46 @@ const verdictStyle = {
   insufficient: { className: "border-border bg-muted/50", iconClass: "text-muted-foreground", Icon: CheckCircle2 },
 } as const;
 
+const SEARCH_ALIASES: Record<string, string> = {
+  qj: "queijo",
+};
+
+function searchTokens(value: string) {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+  if (!normalized) return [];
+
+  return normalized.split(/\s+/).flatMap((token) => {
+    const alias = SEARCH_ALIASES[token];
+    return alias ? [token, alias] : [token];
+  });
+}
+
+function productMatchesSearch(name: string, query: string) {
+  const queryTokens = searchTokens(query);
+  if (!queryTokens.length) return true;
+
+  const nameTokens = searchTokens(name);
+  return queryTokens.every((queryToken) =>
+    nameTokens.some((nameToken) => {
+      if (nameToken.includes(queryToken)) return true;
+      // Aceita abreviações de cupom como MUSS. → mussarela, BISC. → biscoito etc.
+      return queryToken.length >= 4 && nameToken.length >= 4 && queryToken.startsWith(nameToken);
+    }),
+  );
+}
+
+function formatDateBr(value?: string | null) {
+  if (!value) return "sem histórico";
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
+}
+
 export default function SearchPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -53,10 +93,8 @@ export default function SearchPage() {
   });
 
   const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
     if (!products) return [];
-    if (!term) return products;
-    return products.filter((product) => product.name.toLowerCase().includes(term));
+    return products.filter((product) => productMatchesSearch(product.name, search));
   }, [products, search]);
 
   const selected = useMemo(
@@ -117,7 +155,7 @@ export default function SearchPage() {
       <div className="relative mb-3">
         <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Café, leite, banana, ponkan..."
+          placeholder="Café, leite, banana, mussarela..."
           className="h-11 pl-9"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
@@ -160,7 +198,7 @@ export default function SearchPage() {
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-bold">{latest ? formatBRL(latest.price) : "Sem preço"}</p>
-                  <p className="text-[11px] text-muted-foreground">último registro</p>
+                  <p className="text-[11px] text-muted-foreground">{latest ? formatDateBr(latest.date) : "sem histórico"}</p>
                 </div>
                 <ChevronRight className="h-4 w-4 text-muted-foreground" />
               </button>
