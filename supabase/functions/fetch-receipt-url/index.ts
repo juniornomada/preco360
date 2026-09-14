@@ -83,6 +83,7 @@ function isBadName(name: string) {
   if (/^(qtd|qtde|quantidade)\b/.test(clean)) return true;
   if (/^(vl|v|valor)\b.*\b(unit|unitario|total)\b/.test(clean)) return true;
   if (/^x\s*\d+(?:[.,]\d+)?$/.test(clean)) return true;
+  if (/^(valor\s+(pago|a\s+pagar|recebido|total)|total\s+(pago|a\s+pagar)|forma\s+de\s+pagamento|cartao\b|dinheiro\b|pix\b)/.test(clean)) return true;
   return false;
 }
 
@@ -112,6 +113,21 @@ function labeledMoney(text: string, label: RegExp) {
   return money(match?.[1]);
 }
 
+function unitPrice(text: string) {
+  const labeled = labeledMoney(
+    text,
+    /(?:Vl\.?\s*Unit(?:\.|ário)?|Valor\s*Unit(?:ário)?|V\.\s*Unit)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i,
+  );
+  if (labeled) return labeled;
+
+  // Alguns portais exibem produto pesado como "0,310 KG X 57,90 ... 17,95".
+  // Para o histórico interessa 57,90/kg, não o total de 17,95 da linha.
+  const multiplied = text.match(
+    /\b\d{1,6}(?:[.,]\d{1,4})?\s*(?:KG|G|UN|UND|UNID|L|LT|ML|CX|PCT|PC)\s*(?:X|×)\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i,
+  );
+  return money(multiplied?.[1]);
+}
+
 function parseTitleBlocks(html: string): Item[] {
   const re = /<[^>]+class=["'][^"']*txtTit[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/gi;
   const hits: Array<{ name: string; start: number; end: number }> = [];
@@ -127,8 +143,7 @@ function parseTitleBlocks(html: string): Item[] {
     const chunk = html.slice(hit.end, end);
     const text = strip(chunk).replace(/\s+/g, " ");
 
-    // Para histórico de preços queremos o preço unitário quando ele estiver explícito.
-    let price = labeledMoney(text, /(?:Vl\.?\s*Unit(?:\.|ário)?|Valor\s*Unit(?:ário)?|V\.\s*Unit)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i);
+    let price = unitPrice(text);
 
     if (!price) {
       price = labeledMoney(text, /(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i);
@@ -153,7 +168,7 @@ function parseCodeLines(lines: string[]): Item[] {
     if (!name || isBadName(name)) continue;
 
     const window = lines.slice(i, i + 9).join(" ");
-    let price = labeledMoney(window, /(?:Vl\.?\s*Unit(?:\.|ário)?|Valor\s*Unit(?:ário)?|V\.\s*Unit)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i);
+    let price = unitPrice(window);
     if (!price) {
       price = labeledMoney(window, /(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i);
     }
@@ -178,7 +193,8 @@ function parseTableRows(html: string): Item[] {
     const name = candidates.sort((a, b) => b.length - a.length)[0];
     if (!name || name.length > 180) continue;
 
-    items.push({ name, price: prices.at(-1)! });
+    const text = cells.join(" ");
+    items.push({ name, price: unitPrice(text) ?? prices.at(-1)! });
   }
   return items;
 }
@@ -191,7 +207,7 @@ function parseLines(lines: string[]): Item[] {
 
     const sameLine = line.match(/^(.{3,150}?)\s+(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})$/);
     if (sameLine && /[A-Za-zÀ-ÿ]/.test(sameLine[1]) && !isBadName(sameLine[1])) {
-      const price = money(sameLine[2]);
+      const price = unitPrice(line) ?? money(sameLine[2]);
       if (price) items.push({ name: sameLine[1], price });
       continue;
     }
@@ -200,7 +216,7 @@ function parseLines(lines: string[]): Item[] {
     if (/^(documento auxiliar|nota fiscal|nfc-?e|danfe|consulte|protocolo|serie|numero)/i.test(line)) continue;
 
     const window = lines.slice(i + 1, i + 7).join(" ");
-    let price = labeledMoney(window, /(?:Vl\.?\s*Unit(?:\.|ário)?|Valor\s*Unit(?:ário)?|V\.\s*Unit)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i);
+    let price = unitPrice(window);
     if (!price) {
       price = labeledMoney(window, /(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i);
     }
@@ -299,8 +315,6 @@ Deno.serve(async (req) => {
     let selectedStrategy = "none";
     let items: Item[] = [];
 
-    // Não misture estratégias. O bug anterior juntava produto real com rótulos como
-    // "Qtde", "Vl. Unit." e "Vl. Total" detectados pelos fallbacks.
     if (titleItems.length) {
       selectedStrategy = "title-blocks";
       items = titleItems;
