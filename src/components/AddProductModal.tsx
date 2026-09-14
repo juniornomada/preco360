@@ -10,6 +10,15 @@ import { useToast } from "@/hooks/use-toast";
 
 const CATEGORIES = ["Geral", "Alimentos", "Bebidas", "Limpeza", "Higiene", "Hortifruti", "Carnes", "Laticínios", "Padaria"];
 
+function normalizeProductName(value: string) {
+  return value
+    .trim()
+    .toLocaleLowerCase("pt-BR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
 interface AddProductModalProps {
   open: boolean;
   onClose: () => void;
@@ -32,16 +41,55 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
     setLoading(true);
 
     try {
-      // Create or find product
-      const { data: product, error: pErr } = await supabase
+      const cleanName = name.trim();
+      const normalizedName = normalizeProductName(cleanName);
+
+      const { data: currentProducts, error: lookupError } = await supabase
         .from("products")
-        .insert({ name, category, user_id: user.id })
-        .select()
-        .single();
-      if (pErr) throw pErr;
+        .select("id,name")
+        .eq("user_id", user.id);
+      if (lookupError) throw lookupError;
+
+      const existing = currentProducts?.find(
+        (product) => normalizeProductName(product.name) === normalizedName,
+      );
+
+      let productId = existing?.id;
+      let reusedExisting = Boolean(existing);
+
+      if (!productId) {
+        const { data: product, error: pErr } = await supabase
+          .from("products")
+          .insert({ name: cleanName, category, user_id: user.id })
+          .select("id")
+          .single();
+
+        if (pErr) {
+          // A restrição única no banco evita duplicatas mesmo se duas gravações
+          // acontecerem ao mesmo tempo. Nesse caso, buscamos o produto já criado.
+          if (pErr.code === "23505") {
+            const { data: retryProducts, error: retryError } = await supabase
+              .from("products")
+              .select("id,name")
+              .eq("user_id", user.id);
+            if (retryError) throw retryError;
+
+            const retryMatch = retryProducts?.find(
+              (candidate) => normalizeProductName(candidate.name) === normalizedName,
+            );
+            if (!retryMatch) throw pErr;
+            productId = retryMatch.id;
+            reusedExisting = true;
+          } else {
+            throw pErr;
+          }
+        } else {
+          productId = product.id;
+        }
+      }
 
       const { error: prErr } = await supabase.from("prices").insert({
-        product_id: product.id,
+        product_id: productId!,
         supermarket,
         price: parseFloat(price.replace(",", ".")),
         date,
@@ -49,7 +97,12 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
       });
       if (prErr) throw prErr;
 
-      toast({ title: "Produto adicionado!", description: `${name} salvo com sucesso.` });
+      toast({
+        title: reusedExisting ? "Preço adicionado ao histórico!" : "Produto adicionado!",
+        description: reusedExisting
+          ? `${cleanName} já existia e recebeu um novo preço.`
+          : `${cleanName} salvo com sucesso.`,
+      });
       onAdded();
       onClose();
       setName("");
