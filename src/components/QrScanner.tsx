@@ -33,9 +33,6 @@ function drawRegion(source: Source, maxSide: number, squareRatio?: number) {
   let sw = sourceWidth;
   let sh = sourceHeight;
 
-  // A prévia usa object-cover dentro de um quadrado. Em vídeo 16:9 isso significa que
-  // o usuário vê apenas a região quadrada central. Escanear essa mesma região deixa o
-  // QR muito maior para o decoder do que analisar o frame 16:9 inteiro.
   if (squareRatio) {
     const side = Math.min(sourceWidth, sourceHeight) * squareRatio;
     sw = side;
@@ -84,7 +81,6 @@ async function decodeCanvas(canvas: HTMLCanvasElement): Promise<string | null> {
   })?.data?.trim() ?? null;
 }
 
-/** NFC-e usa QR denso. No vídeo priorizamos a região realmente visível no quadrado. */
 async function readQr(source: Source, thorough = false): Promise<string | null> {
   const isVideo = source instanceof HTMLVideoElement;
   const attempts: Array<{ maxSide: number; squareRatio?: number }> = isVideo
@@ -222,11 +218,11 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
             advanced: [{ focusMode: "continuous" } as MediaTrackConstraintSet],
           });
         } catch {
-          // Autofoco contínuo não é obrigatório; seguimos com o padrão do aparelho.
+          // Autofoco contínuo não é obrigatório.
         }
       }
 
-      setMessage("Centralize o QR e deixe as bordas bem nítidas dentro do quadrado");
+      setMessage("Centralize o QR dentro do quadro");
       setStatus("scanning");
       timerRef.current = window.setInterval(() => void scanFrame(false), 500);
       window.setTimeout(() => void scanFrame(true), 700);
@@ -277,22 +273,25 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
   const active = status === "scanning" || status === "reading";
 
   return (
-    <div className="space-y-3 rounded-lg border bg-card p-3">
+    <div className="space-y-2.5 rounded-lg border bg-card p-3">
       <div className="flex items-center gap-2 text-sm font-medium">
         <ScanLine className="h-4 w-4 text-primary" />
         Ler QR Code do cupom
       </div>
-      <div className="relative aspect-square overflow-hidden rounded-md bg-muted">
+
+      <div className="relative h-[220px] overflow-hidden rounded-md bg-muted sm:h-[280px]">
         <video ref={videoRef} className="h-full w-full object-cover" autoPlay muted playsInline />
+
         {!active && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-5 text-center text-sm text-muted-foreground">
             <Camera className="h-7 w-7" />
             {message}
           </div>
         )}
+
         {active && (
           <>
-            <div className="pointer-events-none absolute inset-[18%] rounded-md border-2 border-primary" />
+            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[64%] aspect-square -translate-x-1/2 -translate-y-1/2 rounded-md border-2 border-primary" />
             <div className="absolute inset-x-3 bottom-3 rounded bg-background/90 px-3 py-2 text-center text-xs">
               {status === "reading" && <Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" />}
               {message}
@@ -300,6 +299,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
           </>
         )}
       </div>
+
       <div className="flex flex-wrap gap-2">
         {active ? (
           <>
@@ -312,7 +312,9 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
                 {torchOn ? "Desligar luz" : "Ligar luz"}
               </Button>
             )}
-            <Button size="sm" variant="outline" onClick={stop}><CameraOff className="mr-1.5 h-4 w-4" />Parar</Button>
+            <Button size="sm" variant="outline" onClick={stop}>
+              <CameraOff className="mr-1.5 h-4 w-4" />Parar
+            </Button>
           </>
         ) : (
           <Button size="sm" onClick={() => void start()} disabled={status === "starting"}>
@@ -320,11 +322,18 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
             Abrir câmera
           </Button>
         )}
+
         <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={status === "reading"}>
           <ImageIcon className="mr-1.5 h-4 w-4" />Usar foto
         </Button>
-        {onClose && <Button size="sm" variant="ghost" onClick={() => { stop(); onClose(); }}>Fechar</Button>}
+
+        {onClose && (
+          <Button size="sm" variant="ghost" onClick={() => { stop(); onClose(); }}>
+            Fechar
+          </Button>
+        )}
       </div>
+
       <input
         ref={fileRef}
         type="file"
