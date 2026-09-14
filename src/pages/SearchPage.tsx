@@ -30,6 +30,12 @@ const verdictStyle = {
 
 const SEARCH_ALIASES: Record<string, string> = {
   qj: "queijo",
+  qjo: "queijo",
+  mus: "mussarela",
+  muss: "mussarela",
+  mussar: "mussarela",
+  mussarela: "mussarela",
+  mozzarella: "mussarela",
 };
 
 function searchTokens(value: string) {
@@ -42,10 +48,7 @@ function searchTokens(value: string) {
 
   if (!normalized) return [];
 
-  return normalized.split(/\s+/).flatMap((token) => {
-    const alias = SEARCH_ALIASES[token];
-    return alias ? [token, alias] : [token];
-  });
+  return normalized.split(/\s+/).map((token) => SEARCH_ALIASES[token] ?? token);
 }
 
 function productMatchesSearch(name: string, query: string) {
@@ -55,9 +58,8 @@ function productMatchesSearch(name: string, query: string) {
   const nameTokens = searchTokens(name);
   return queryTokens.every((queryToken) =>
     nameTokens.some((nameToken) => {
-      if (nameToken.includes(queryToken)) return true;
-      // Aceita abreviações de cupom como MUSS. → mussarela, BISC. → biscoito etc.
-      return queryToken.length >= 4 && nameToken.length >= 4 && queryToken.startsWith(nameToken);
+      if (nameToken.includes(queryToken) || queryToken.includes(nameToken)) return true;
+      return queryToken.length >= 4 && nameToken.length >= 3 && queryToken.startsWith(nameToken);
     }),
   );
 }
