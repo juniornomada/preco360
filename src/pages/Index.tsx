@@ -29,9 +29,9 @@ export default function Index() {
     [products],
   );
 
-  const recentProducts = useMemo(() => {
+  const productRows = useMemo(() => {
     if (!products) return [];
-    return products.slice(0, 6).map((product) => {
+    return products.map((product) => {
       const prices = [...(product.prices ?? [])].sort((a, b) => b.date.localeCompare(a.date));
       const latest = prices[0];
       const best = prices.length ? Math.min(...prices.map((item) => item.price)) : null;
@@ -98,7 +98,7 @@ export default function Index() {
         )}
 
         <div className="space-y-2.5">
-          {recentProducts.map((product) => (
+          {productRows.map((product) => (
             <button key={product.id} type="button" onClick={() => navigate(`/product/${product.id}`)} className="flex w-full items-center gap-3 rounded-xl border bg-card p-4 text-left transition hover:border-primary/30 hover:shadow-sm">
               <div className="min-w-0 flex-1"><p className="truncate font-semibold">{product.name}</p><p className="text-xs text-muted-foreground">{product.category} · {product.priceCount} registro(s)</p></div>
               <div className="text-right"><p className="text-sm font-extrabold">{product.latest ? formatBRL(product.latest.price) : "Sem preço"}</p><p className="text-[11px] text-muted-foreground">{product.best !== null ? `melhor ${formatBRL(product.best)}` : "sem histórico"}</p></div>
