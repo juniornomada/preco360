@@ -1,12 +1,14 @@
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
+import { useTheme } from "next-themes";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { LogOut, Package, DollarSign, Store } from "lucide-react";
+import { DollarSign, Laptop, LogOut, Moon, Package, Store, Sun } from "lucide-react";
 
 export default function ProfilePage() {
   const { user, signOut } = useAuth();
+  const { theme, setTheme } = useTheme();
 
   const { data: stats } = useQuery({
     queryKey: ["stats", user?.id],
@@ -69,6 +71,44 @@ export default function ProfilePage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="mb-6">
+        <CardContent className="p-4">
+          <div className="mb-3">
+            <p className="font-medium">Aparência</p>
+            <p className="text-xs text-muted-foreground">Escolha como o Preço 360 deve aparecer.</p>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <Button
+              type="button"
+              variant={theme === "light" ? "default" : "outline"}
+              className="gap-2"
+              onClick={() => setTheme("light")}
+            >
+              <Sun className="h-4 w-4" />
+              Claro
+            </Button>
+            <Button
+              type="button"
+              variant={theme === "dark" ? "default" : "outline"}
+              className="gap-2"
+              onClick={() => setTheme("dark")}
+            >
+              <Moon className="h-4 w-4" />
+              Escuro
+            </Button>
+            <Button
+              type="button"
+              variant={theme === "system" || !theme ? "default" : "outline"}
+              className="gap-2"
+              onClick={() => setTheme("system")}
+            >
+              <Laptop className="h-4 w-4" />
+              Sistema
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <Button variant="destructive" className="w-full" onClick={signOut}>
         <LogOut className="h-4 w-4" />
