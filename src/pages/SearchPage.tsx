@@ -104,6 +104,11 @@ export default function SearchPage() {
     [products, selectedId],
   );
 
+  const selectedLatest = useMemo(() => {
+    if (!selected?.prices?.length) return null;
+    return [...selected.prices].sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
+  }, [selected]);
+
   const numericPrice = Number(currentPrice.replace(",", "."));
   const analysis = selected && numericPrice > 0
     ? analyzePrice(numericPrice, selected.prices ?? [])
@@ -114,6 +119,7 @@ export default function SearchPage() {
   const selectProduct = (id: string) => {
     setSelectedId(id);
     setCurrentPrice("");
+    setSupermarket("");
   };
 
   const savePrice = async () => {
@@ -224,24 +230,37 @@ export default function SearchPage() {
               <div className="mb-4">
                 <p className="text-xs font-medium text-muted-foreground">Produto</p>
                 <div className="mt-1 flex items-center justify-between gap-3">
-                  <div>
+                  <div className="min-w-0">
                     <h2 className="text-xl font-bold">{selected.name}</h2>
                     <p className="text-xs text-muted-foreground">{selected.category}</p>
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => navigate(`/product/${selected.id}`)}>Ver histórico</Button>
+                  <Button variant="outline" size="sm" className="shrink-0" onClick={() => navigate(`/product/${selected.id}`)}>Ver histórico</Button>
                 </div>
               </div>
 
+              {selectedLatest && (
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2.5">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Último preço registrado</p>
+                    <p className="mt-0.5 text-lg font-extrabold">{formatBRL(selectedLatest.price)}</p>
+                  </div>
+                  <div className="min-w-0 text-right text-xs text-muted-foreground">
+                    <p className="truncate font-medium text-foreground/80">{selectedLatest.supermarket}</p>
+                    <p>{formatDateBr(selectedLatest.date)}</p>
+                  </div>
+                </div>
+              )}
+
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Preço encontrado</label>
+                  <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Preço encontrado agora</label>
                   <div className="relative">
                     <span className="absolute left-3 top-2.5 text-sm font-semibold text-muted-foreground">R$</span>
-                    <Input inputMode="decimal" placeholder="0,00" className="h-11 pl-10 text-lg font-bold" value={currentPrice} onChange={(event) => setCurrentPrice(event.target.value)} />
+                    <Input inputMode="decimal" placeholder="Ex.: 38,90" className="h-11 pl-10 text-lg font-bold" value={currentPrice} onChange={(event) => setCurrentPrice(event.target.value)} />
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Supermercado</label>
+                  <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Supermercado atual</label>
                   <div className="relative">
                     <Store className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                     <Input placeholder="Ex.: Confiança" className="h-11 pl-9" value={supermarket} onChange={(event) => setSupermarket(event.target.value)} />
