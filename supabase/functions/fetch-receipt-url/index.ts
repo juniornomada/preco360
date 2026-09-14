@@ -15,6 +15,7 @@ type Diagnostics = {
   codeItems?: number;
   tableItems?: number;
   lineItems?: number;
+  selectedStrategy?: string;
   marker?: string | null;
   classHints?: string[];
   finalHost?: string;
@@ -62,10 +63,27 @@ function money(raw?: string | null) {
   return Number.isFinite(n) && n > 0 ? n.toFixed(2) : null;
 }
 
-const badName = /^(total|subtotal|troco|desconto|valor|qtd|qtde|quantidade|pagamento|tribut|icms|pis|cofins|chave|protocolo|consumidor|cpf|cnpj|data|emiss[aã]o|c[oó]digo|descri[cç][aã]o|vl\.?\s*unit|vl\.?\s*total)$/i;
-
 function normalizeName(name: string) {
   return name.replace(/\s+/g, " ").replace(/^[-–—\s]+|[-–—\s]+$/g, "").trim();
+}
+
+function isBadName(name: string) {
+  const clean = normalizeName(name)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[.:;,_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!clean) return true;
+  if (/^(un|und|unid|kg|g|mg|l|lt|ml|cx|pct|pc)$/.test(clean)) return true;
+  if (/^(total|subtotal|troco|desconto|valor|qtd|qtde|quantidade|pagamento|tributos?|icms|pis|cofins|chave|protocolo|consumidor|cpf|cnpj|data|emissao|codigo|descricao)$/.test(clean)) return true;
+  if (/^(vl|v|valor)\s*(unit|unitario|total)$/.test(clean)) return true;
+  if (/^(qtd|qtde|quantidade)\b/.test(clean)) return true;
+  if (/^(vl|v|valor)\b.*\b(unit|unitario|total)\b/.test(clean)) return true;
+  if (/^x\s*\d+(?:[.,]\d+)?$/.test(clean)) return true;
+  return false;
 }
 
 function dedupe(items: Item[]) {
@@ -74,7 +92,7 @@ function dedupe(items: Item[]) {
   for (const raw of items) {
     const name = normalizeName(raw.name);
     const price = money(raw.price);
-    if (!name || name.length < 2 || badName.test(name) || !price) continue;
+    if (!name || name.length < 2 || isBadName(name) || !price) continue;
     const key = `${name.toLowerCase()}|${price}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -89,13 +107,18 @@ function monetaryValues(text: string) {
     .filter((v): v is string => Boolean(v));
 }
 
+function labeledMoney(text: string, label: RegExp) {
+  const match = text.match(label);
+  return money(match?.[1]);
+}
+
 function parseTitleBlocks(html: string): Item[] {
   const re = /<[^>]+class=["'][^"']*txtTit[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/gi;
   const hits: Array<{ name: string; start: number; end: number }> = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {
     const name = normalizeName(strip(m[1]));
-    if (name) hits.push({ name, start: m.index, end: re.lastIndex });
+    if (name && !isBadName(name)) hits.push({ name, start: m.index, end: re.lastIndex });
   }
 
   const items: Item[] = [];
@@ -103,11 +126,19 @@ function parseTitleBlocks(html: string): Item[] {
     const end = hits[i + 1]?.start ?? Math.min(html.length, hit.end + 5000);
     const chunk = html.slice(hit.end, end);
     const text = strip(chunk).replace(/\s+/g, " ");
-    let price = money(text.match(/(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i)?.[1]);
+
+    // Para histórico de preços queremos o preço unitário quando ele estiver explícito.
+    let price = labeledMoney(text, /(?:Vl\.?\s*Unit(?:\.|ário)?|Valor\s*Unit(?:ário)?|V\.\s*Unit)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i);
+
+    if (!price) {
+      price = labeledMoney(text, /(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i);
+    }
+
     if (!price) {
       const values = monetaryValues(text);
       price = values.at(-1) ?? null;
     }
+
     if (price) items.push({ name: hit.name, price });
   });
   return items;
@@ -119,15 +150,12 @@ function parseCodeLines(lines: string[]): Item[] {
     const line = lines[i];
     if (!/\(\s*C[oó]digo\s*:/i.test(line)) continue;
     const name = normalizeName(line.replace(/\(\s*C[oó]digo\s*:[\s\S]*$/i, ""));
-    if (!name || badName.test(name)) continue;
-    const window = lines.slice(i, i + 7).join(" ");
-    let price = money(window.match(/(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i)?.[1]);
+    if (!name || isBadName(name)) continue;
+
+    const window = lines.slice(i, i + 9).join(" ");
+    let price = labeledMoney(window, /(?:Vl\.?\s*Unit(?:\.|ário)?|Valor\s*Unit(?:ário)?|V\.\s*Unit)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i);
     if (!price) {
-      const totalIndex = lines.slice(i, i + 7).findIndex((part) => /Vl\.?\s*Total|Valor\s*Total/i.test(part));
-      if (totalIndex >= 0) {
-        const after = lines.slice(i + totalIndex, i + totalIndex + 3).join(" ");
-        price = monetaryValues(after).at(-1) ?? null;
-      }
+      price = labeledMoney(window, /(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i);
     }
     if (price) items.push({ name, price });
   }
@@ -142,11 +170,14 @@ function parseTableRows(html: string): Item[] {
       .map((m) => normalizeName(strip(m[1])))
       .filter(Boolean);
     if (cells.length < 2) continue;
+
     const prices = monetaryValues(cells.join(" | "));
     if (!prices.length) continue;
-    const candidates = cells.filter((cell) => /[A-Za-zÀ-ÿ]/.test(cell) && !badName.test(cell) && !/^(UN|KG|LT|L|CX|PCT|PC|UND?)$/i.test(cell));
+
+    const candidates = cells.filter((cell) => /[A-Za-zÀ-ÿ]/.test(cell) && !isBadName(cell));
     const name = candidates.sort((a, b) => b.length - a.length)[0];
     if (!name || name.length > 180) continue;
+
     items.push({ name, price: prices.at(-1)! });
   }
   return items;
@@ -155,25 +186,25 @@ function parseTableRows(html: string): Item[] {
 function parseLines(lines: string[]): Item[] {
   const items: Item[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.length < 3 || badName.test(line)) continue;
+    const line = normalizeName(lines[i]);
+    if (line.length < 3 || line.length > 160 || isBadName(line)) continue;
+
     const sameLine = line.match(/^(.{3,150}?)\s+(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})$/);
-    if (sameLine && /[A-Za-zÀ-ÿ]/.test(sameLine[1])) {
+    if (sameLine && /[A-Za-zÀ-ÿ]/.test(sameLine[1]) && !isBadName(sameLine[1])) {
       const price = money(sameLine[2]);
       if (price) items.push({ name: sameLine[1], price });
       continue;
     }
+
     if (!/[A-Za-zÀ-ÿ]/.test(line) || monetaryValues(line).length) continue;
-    for (let j = 1; j <= 5 && i + j < lines.length; j++) {
-      const next = lines[i + j];
-      const marked = next.match(/(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i)?.[1];
-      const standalone = next.match(/^(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})$/)?.[1];
-      const price = money(marked ?? standalone);
-      if (price) {
-        items.push({ name: line, price });
-        break;
-      }
+    if (/^(documento auxiliar|nota fiscal|nfc-?e|danfe|consulte|protocolo|serie|numero)/i.test(line)) continue;
+
+    const window = lines.slice(i + 1, i + 7).join(" ");
+    let price = labeledMoney(window, /(?:Vl\.?\s*Unit(?:\.|ário)?|Valor\s*Unit(?:ário)?|V\.\s*Unit)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i);
+    if (!price) {
+      price = labeledMoney(window, /(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i);
     }
+    if (price) items.push({ name: line, price });
   }
   return items;
 }
@@ -259,11 +290,30 @@ Deno.serve(async (req) => {
       throw new ImportError("Informe a URL do QR Code ou o conteúdo da consulta.", "MISSING_URL");
     }
 
-    const titleItems = html ? parseTitleBlocks(html) : [];
-    const codeItems = parseCodeLines(lines);
-    const tableItems = html ? parseTableRows(html) : [];
-    const lineItems = parseLines(lines);
+    const titleItems = dedupe(html ? parseTitleBlocks(html) : []);
+    const codeItems = dedupe(parseCodeLines(lines));
+    const tableItems = dedupe(html ? parseTableRows(html) : []);
+    const lineItems = dedupe(parseLines(lines));
     const marker = html ? markerCode(html) : null;
+
+    let selectedStrategy = "none";
+    let items: Item[] = [];
+
+    // Não misture estratégias. O bug anterior juntava produto real com rótulos como
+    // "Qtde", "Vl. Unit." e "Vl. Total" detectados pelos fallbacks.
+    if (titleItems.length) {
+      selectedStrategy = "title-blocks";
+      items = titleItems;
+    } else if (codeItems.length) {
+      selectedStrategy = "code-lines";
+      items = codeItems;
+    } else if (tableItems.length) {
+      selectedStrategy = "table-rows";
+      items = tableItems;
+    } else if (lineItems.length) {
+      selectedStrategy = "text-lines";
+      items = lineItems;
+    }
 
     if (finalUrl) {
       try {
@@ -283,11 +333,10 @@ Deno.serve(async (req) => {
       codeItems: codeItems.length,
       tableItems: tableItems.length,
       lineItems: lineItems.length,
+      selectedStrategy,
       marker,
       classHints: html ? classHints(html) : [],
     };
-
-    const items = dedupe([...titleItems, ...codeItems, ...tableItems, ...lineItems]);
 
     if (!items.length) {
       if (marker === "CAPTCHA_REQUIRED") throw new ImportError("A SEFAZ exige CAPTCHA nessa consulta.", marker, finalUrl);
