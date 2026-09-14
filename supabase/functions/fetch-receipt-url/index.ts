@@ -7,14 +7,12 @@ const corsHeaders = {
 };
 
 type Item = { name: string; price: string };
-
 type Diagnostics = {
   htmlLength?: number;
   lineCount?: number;
+  renderedItems?: number;
   rowItems?: number;
   titleItems?: number;
-  codeItems?: number;
-  lineItems?: number;
   selectedStrategy?: string;
   marker?: string | null;
   finalHost?: string;
@@ -33,24 +31,32 @@ const reply = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
   });
 
-function decodeEntities(s: string) {
-  return s
+function decodeEntities(value: string) {
+  return value
     .replace(/&#(x?[0-9a-f]+);/gi, (_m, raw) =>
       String.fromCodePoint(raw.toLowerCase().startsWith("x") ? parseInt(raw.slice(1), 16) : parseInt(raw, 10)),
     )
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'");
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
 }
 
 function normalizeMarkup(raw: string) {
-  return decodeEntities(raw)
-    .replace(/\\u([0-9a-f]{4})/gi, (_m, hex) => String.fromCharCode(parseInt(hex, 16)))
-    .replace(/\\x([0-9a-f]{2})/gi, (_m, hex) => String.fromCharCode(parseInt(hex, 16)))
-    .replace(/\\\//g, "/")
-    .replace(/\\"/g, '"')
-    .replace(/\\'/g, "'");
+  let value = raw;
+  for (let i = 0; i < 3; i++) {
+    const next = decodeEntities(value)
+      .replace(/\\u([0-9a-f]{4})/gi, (_m, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/\\x([0-9a-f]{2})/gi, (_m, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/\\\//g, "/")
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'");
+    if (next === value) break;
+    value = next;
+  }
+  return value;
 }
 
 function strip(html: string) {
@@ -58,7 +64,7 @@ function strip(html: string) {
     html
       .replace(/<(style|noscript)[^>]*>[\s\S]*?<\/\1>/gi, " ")
       .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/(?:tr|td|th|div|p|li|section|h[1-6]|span)>/gi, "\n")
+      .replace(/<\/(?:tr|td|th|div|p|li|section|h[1-6]|span|strong)>/gi, "\n")
       .replace(/<[^>]+>/g, " "),
   )
     .replace(/[ \t]+/g, " ")
@@ -66,8 +72,8 @@ function strip(html: string) {
     .trim();
 }
 
-const linesOf = (html: string) =>
-  strip(html)
+const linesOf = (markup: string) =>
+  strip(markup)
     .split(/\r?\n/)
     .map((s) => s.replace(/\s+/g, " ").trim())
     .filter(Boolean);
@@ -100,7 +106,6 @@ function isBadName(name: string) {
   if (/^(total|subtotal|troco|desconto|valor|qtd|qtde|quantidade|pagamento|tributos?|icms|pis|cofins|chave|protocolo|consumidor|cpf|cnpj|data|emissao|codigo|descricao)$/.test(clean)) return true;
   if (/^(vl|v|valor)\s*(unit|unitario|total)$/.test(clean)) return true;
   if (/^(qtd|qtde|quantidade)\b/.test(clean)) return true;
-  if (/^(vl|v|valor)\b.*\b(unit|unitario|total)\b/.test(clean)) return true;
   if (/^(valor\s+(pago|a\s+pagar|recebido|total)|total\s+(pago|a\s+pagar)|forma\s+de\s+pagamento|cartao\b|dinheiro\b|pix\b)/.test(clean)) return true;
   return false;
 }
@@ -120,17 +125,9 @@ function dedupe(items: Item[]) {
   return out.slice(0, 300);
 }
 
-function classBlock(html: string, className: string) {
-  const re = new RegExp(
-    `<[^>]+class=["'][^"']*\\b${className}\\b[^"']*["'][^>]*>([\\s\\S]*?)<\\/[^>]+>`,
-    "i",
-  );
-  return html.match(re)?.[1] ?? null;
-}
-
 function unitPriceFromText(text: string) {
   const labeled = text.match(
-    /(?:Vl\.?\s*Unit(?:\.|ário)?|Valor\s*Unit(?:ário)?|V\.\s*Unit)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i,
+    /(?:Vl\.?\s*Unit\.?|Valor\s*Unit(?:ário)?|V\.\s*Unit)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i,
   )?.[1];
   if (labeled) return money(labeled);
 
@@ -140,23 +137,76 @@ function unitPriceFromText(text: string) {
   return money(multiplied);
 }
 
+function totalPriceFromText(text: string) {
+  return money(
+    text.match(/(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i)?.[1],
+  );
+}
+
+// Parser principal para o layout exibido pela SEFAZ/SP: produto em uma linha,
+// (Código: ...) logo abaixo, seguido de Qtde., UN, Vl. Unit. e Vl. Total.
+function parseRenderedItems(lines: string[]): Item[] {
+  const items: Item[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const codeMatch = lines[i].match(/^(.*?)\(\s*C[oó]digo\s*:\s*[^)]+\)/i);
+    if (!codeMatch) continue;
+
+    let name = normalizeName(codeMatch[1] || "");
+    if (!name) {
+      for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+        const candidate = normalizeName(lines[j]);
+        if (!candidate || isBadName(candidate)) continue;
+        if (/^(qtde|qtd|un|vl\.?\s*unit|vl\.?\s*total)/i.test(candidate)) continue;
+        name = candidate;
+        break;
+      }
+    }
+
+    if (!name || isBadName(name)) continue;
+
+    let end = Math.min(lines.length, i + 16);
+    for (let j = i + 1; j < end; j++) {
+      if (/\(\s*C[oó]digo\s*:/i.test(lines[j])) {
+        end = j;
+        break;
+      }
+    }
+
+    const block = lines.slice(i, end).join(" ");
+    const unit = unitPriceFromText(block);
+    const total = totalPriceFromText(block);
+    const price = unit ?? total;
+    if (price) items.push({ name, price });
+  }
+
+  return dedupe(items);
+}
+
+function spanByClass(html: string, className: string) {
+  const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(
+    `<span\\b[^>]*class=["'][^"']*\\b${escaped}\\b[^"']*["'][^>]*>([\\s\\S]*?)<\\/span>`,
+    "i",
+  );
+  return html.match(re)?.[1] ?? null;
+}
+
 function parseNfceRows(markup: string): Item[] {
   const items: Item[] = [];
   for (const rowMatch of markup.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
     const row = rowMatch[1];
-    const titleHtml = classBlock(row, "txtTit");
+    const titleHtml = spanByClass(row, "txtTit");
     if (!titleHtml) continue;
 
     const name = normalizeName(strip(titleHtml));
     if (!name || isBadName(name) || /^vl\.?\s*total$/i.test(name)) continue;
 
-    const unitHtml = classBlock(row, "RvlUnit");
-    const totalHtml = classBlock(row, "valor");
-
-    const unitPrice = money(unitHtml ? strip(unitHtml) : null);
-    const totalPrice = money(totalHtml ? strip(totalHtml) : null);
-    const fallback = unitPriceFromText(strip(row));
-    const price = unitPrice ?? fallback ?? totalPrice;
+    const rowText = strip(row).replace(/\s+/g, " ");
+    const unitHtml = spanByClass(row, "RvlUnit");
+    const unit = unitPriceFromText(rowText) ?? money(unitHtml ? strip(unitHtml) : null);
+    const total = totalPriceFromText(rowText);
+    const price = unit ?? total;
 
     if (price) items.push({ name, price });
   }
@@ -166,76 +216,30 @@ function parseNfceRows(markup: string): Item[] {
 function parseTitleBlocks(markup: string): Item[] {
   const re = /<[^>]+class=["'][^"']*txtTit[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/gi;
   const hits: Array<{ name: string; start: number; end: number }> = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(markup))) {
-    const name = normalizeName(strip(m[1]));
-    if (name && !isBadName(name) && !/^vl\.?\s*total$/i.test(name)) {
-      hits.push({ name, start: m.index, end: re.lastIndex });
-    }
+  let match: RegExpExecArray | null;
+
+  while ((match = re.exec(markup))) {
+    const name = normalizeName(strip(match[1]));
+    if (name && !isBadName(name)) hits.push({ name, start: match.index, end: re.lastIndex });
   }
 
   const items: Item[] = [];
-  hits.forEach((hit, i) => {
-    const end = hits[i + 1]?.start ?? Math.min(markup.length, hit.end + 4000);
-    const text = strip(markup.slice(hit.end, end)).replace(/\s+/g, " ");
-    const unit = unitPriceFromText(text);
-    const total = money(
-      text.match(/(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i)?.[1],
-    );
-    if (unit ?? total) items.push({ name: hit.name, price: (unit ?? total)! });
+  hits.forEach((hit, index) => {
+    const end = hits[index + 1]?.start ?? Math.min(markup.length, hit.end + 5000);
+    const block = strip(markup.slice(hit.end, end)).replace(/\s+/g, " ");
+    const price = unitPriceFromText(block) ?? totalPriceFromText(block);
+    if (price) items.push({ name: hit.name, price });
   });
-  return dedupe(items);
-}
 
-function parseCodeLines(lines: string[]): Item[] {
-  const items: Item[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (!/\(\s*C[oó]digo\s*:/i.test(lines[i])) continue;
-    const name = normalizeName(lines[i].replace(/\(\s*C[oó]digo\s*:[\s\S]*$/i, ""));
-    if (!name || isBadName(name)) continue;
-
-    const window = lines.slice(i, i + 10).join(" ");
-    const unit = unitPriceFromText(window);
-    const total = money(
-      window.match(/(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i)?.[1],
-    );
-    if (unit ?? total) items.push({ name, price: (unit ?? total)! });
-  }
-  return dedupe(items);
-}
-
-function parseSimpleLines(lines: string[]): Item[] {
-  const items: Item[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = normalizeName(lines[i]);
-    if (!/[A-Za-zÀ-ÿ]/.test(line) || isBadName(line) || line.length > 160) continue;
-    if (/^(documento auxiliar|nota fiscal|nfc-?e|danfe|consulte|protocolo|serie|numero)/i.test(line)) continue;
-
-    const same = line.match(/^(.{3,150}?)\s+(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})$/);
-    if (same && !isBadName(same[1])) {
-      const price = unitPriceFromText(line) ?? money(same[2]);
-      if (price) items.push({ name: same[1], price });
-      continue;
-    }
-
-    const window = lines.slice(i + 1, i + 7).join(" ");
-    const price = unitPriceFromText(window);
-    if (price) items.push({ name: line, price });
-  }
   return dedupe(items);
 }
 
 function supermarket(lines: string[]) {
-  for (let i = 0; i < Math.min(40, lines.length); i++) {
+  for (let i = 0; i < Math.min(50, lines.length); i++) {
     if (!/\bCNPJ\b/i.test(lines[i])) continue;
     for (let j = i - 1; j >= Math.max(0, i - 6); j--) {
       const candidate = lines[j];
-      if (
-        candidate &&
-        /[A-Za-zÀ-ÿ]/.test(candidate) &&
-        candidate.length >= 3 &&
-        !/documento auxiliar|nota fiscal/i.test(candidate)
-      ) {
+      if (candidate && /[A-Za-zÀ-ÿ]/.test(candidate) && candidate.length >= 3 && !/documento auxiliar|nota fiscal/i.test(candidate)) {
         return candidate;
       }
     }
@@ -259,12 +263,12 @@ function markerCode(html: string) {
 }
 
 async function fetchFiscal(raw: string) {
-  const u = new URL(raw);
-  if (!/^https?:$/.test(u.protocol) || !(u.hostname === "gov.br" || u.hostname.endsWith(".gov.br"))) {
+  const url = new URL(raw);
+  if (!/^https?:$/.test(url.protocol) || !(url.hostname === "gov.br" || url.hostname.endsWith(".gov.br"))) {
     throw new ImportError("Endereço fiscal inválido.", "INVALID_URL");
   }
 
-  const response = await fetch(u.toString(), {
+  const response = await fetch(url.toString(), {
     redirect: "follow",
     headers: {
       "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36",
@@ -273,7 +277,7 @@ async function fetchFiscal(raw: string) {
     },
   });
 
-  const finalUrl = response.url || u.toString();
+  const finalUrl = response.url || url.toString();
   if (response.status === 403 || response.status === 429) {
     throw new ImportError("A SEFAZ bloqueou a consulta automática.", "BLOCKED", finalUrl);
   }
@@ -307,25 +311,22 @@ Deno.serve(async (req) => {
     const lines = linesOf(markup);
     const marker = markerCode(markup);
 
+    const renderedItems = parseRenderedItems(lines);
     const rowItems = parseNfceRows(markup);
-    const titleItems = rowItems.length ? [] : parseTitleBlocks(markup);
-    const codeItems = rowItems.length || titleItems.length ? [] : parseCodeLines(lines);
-    const lineItems = rowItems.length || titleItems.length || codeItems.length ? [] : parseSimpleLines(lines);
+    const titleItems = parseTitleBlocks(markup);
 
     let selectedStrategy = "none";
     let items: Item[] = [];
-    if (rowItems.length) {
+
+    if (renderedItems.length) {
+      selectedStrategy = "sefaz-rendered-blocks";
+      items = renderedItems;
+    } else if (rowItems.length) {
       selectedStrategy = "nfce-rows";
       items = rowItems;
     } else if (titleItems.length) {
       selectedStrategy = "title-blocks";
       items = titleItems;
-    } else if (codeItems.length) {
-      selectedStrategy = "code-lines";
-      items = codeItems;
-    } else if (lineItems.length) {
-      selectedStrategy = "text-lines";
-      items = lineItems;
     }
 
     if (finalUrl) {
@@ -342,10 +343,9 @@ Deno.serve(async (req) => {
       ...diagnostics,
       htmlLength: raw.length,
       lineCount: lines.length,
+      renderedItems: renderedItems.length,
       rowItems: rowItems.length,
       titleItems: titleItems.length,
-      codeItems: codeItems.length,
-      lineItems: lineItems.length,
       selectedStrategy,
       marker,
     };
