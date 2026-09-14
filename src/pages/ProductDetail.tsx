@@ -8,7 +8,7 @@ import PriceChart from "@/components/PriceChart";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, MapPin, Calendar, DollarSign, Pencil, Check, X } from "lucide-react";
+import { ArrowLeft, MapPin, Calendar, DollarSign, Pencil, Check, X, Trash2 } from "lucide-react";
 
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
@@ -19,6 +19,7 @@ export default function ProductDetail() {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const { data: product } = useQuery({
     queryKey: ["product", id],
@@ -64,6 +65,42 @@ export default function ProductDetail() {
     }
   };
 
+  const deleteProduct = async () => {
+    if (!user || !id || !product || deleting) return;
+
+    const historyCount = product.prices?.length ?? 0;
+    const confirmed = window.confirm(
+      `Excluir \"${product.name}\"?\n\n${historyCount > 0 ? `Isso também excluirá ${historyCount} registro(s) de preço do histórico. ` : ""}Essa ação não pode ser desfeita.`,
+    );
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      const { error } = await supabase
+        .from("products")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", user.id);
+      if (error) throw error;
+
+      await queryClient.invalidateQueries({ queryKey: ["products"] });
+      await queryClient.invalidateQueries({ queryKey: ["prices"] });
+      queryClient.removeQueries({ queryKey: ["product", id] });
+
+      toast({
+        title: "Produto excluído",
+        description: historyCount > 0
+          ? `${product.name} e ${historyCount} registro(s) de preço foram removidos.`
+          : `${product.name} foi removido.`,
+      });
+      navigate("/", { replace: true });
+    } catch (err: any) {
+      toast({ title: "Erro ao excluir", description: err.message, variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const prices = product?.prices ?? [];
   const sorted = [...prices].sort((a, b) => b.date.localeCompare(a.date));
   const best = prices.reduce(
@@ -99,12 +136,23 @@ export default function ProductDetail() {
             </>
           ) : (
             <>
-              <div>
-                <h1 className="text-lg font-bold">{product?.name ?? "Carregando..."}</h1>
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate text-lg font-bold">{product?.name ?? "Carregando..."}</h1>
                 <p className="text-xs text-muted-foreground">{product?.category}</p>
               </div>
               <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={startEdit}>
                 <Pencil className="h-4 w-4 text-muted-foreground" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => void deleteProduct()}
+                disabled={!product || deleting}
+                aria-label="Excluir produto"
+                title="Excluir produto"
+              >
+                <Trash2 className="h-4 w-4" />
               </Button>
             </>
           )}
