@@ -1,1 +1,1 @@
-export { readFlyerFileSmart } from "@/lib/flyerOcrV3";
+export { readFlyerFileSmart } from "@/lib/flyerOcrV4";
