@@ -1,9 +1,10 @@
-import { Home, BadgeDollarSign, ScanLine, User } from "lucide-react";
+import { Home, BadgeDollarSign, ScanLine, Tags, User } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 
 const navItems = [
   { icon: Home, label: "Início", path: "/" },
   { icon: BadgeDollarSign, label: "Cotar", path: "/search" },
+  { icon: Tags, label: "Ofertas", path: "/offers" },
   { icon: ScanLine, label: "Cupom", path: "/upload" },
   { icon: User, label: "Perfil", path: "/profile" },
 ];
