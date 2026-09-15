@@ -14,6 +14,9 @@ type SmartFlyerRead = {
   candidates: FlyerCandidate[];
 };
 
+type BBox = { x0: number; y0: number; x1: number; y1: number };
+type SpatialLine = { text: string; confidence: number; bbox: BBox };
+
 const PRICE_RE = /(?:R\$\s*)?(\d{1,3}(?:[.\s]\d{3})*)\s*[,.:]\s*(\d{2})\b/g;
 
 function cleanLine(value: string) {
@@ -70,44 +73,22 @@ function linePrices(line: string) {
   return matches;
 }
 
-function hasPrice(line: string) {
-  return linePrices(line).length > 0;
-}
+function loosePrice(value: string) {
+  const direct = linePrices(value)[0]?.price;
+  if (direct && Number.isFinite(direct)) return direct;
 
-function buildName(lines: string[], lineIndex: number, priceStart: number) {
-  const fragments: string[] = [];
-  const sameLine = cleanName(lines[lineIndex].slice(0, priceStart));
-  if (plausibleProductName(sameLine)) fragments.unshift(sameLine);
-
-  for (let j = lineIndex - 1; j >= Math.max(0, lineIndex - 4); j--) {
-    const raw = lines[j];
-    if (!raw.trim()) break;
-    if (hasPrice(raw)) break;
-    const candidate = cleanName(raw);
-    if (!candidate) continue;
-    if (isMarketingLine(candidate)) continue;
-    if (candidate.length <= 2) continue;
-    fragments.unshift(candidate);
-    if (fragments.join(" ").length > 100) break;
+  const clean = value.replace(/[Oo]/g, "0").replace(/[^0-9]/g, "");
+  if (clean.length >= 3 && clean.length <= 5) {
+    const amount = Number(`${clean.slice(0, -2)}.${clean.slice(-2)}`);
+    return Number.isFinite(amount) ? amount : null;
   }
-
-  let name = cleanName(fragments.join(" "));
-  if (name.length > 120) {
-    const parts = name.split(/\s+/);
-    while (parts.join(" ").length > 120 && parts.length > 2) parts.shift();
-    name = parts.join(" ");
-  }
-  return plausibleProductName(name) ? name : sameLine;
+  return null;
 }
 
 function plausibleUnitPrice(item: FlyerCandidate) {
   if (!Number.isFinite(item.price) || item.price < 0.2 || item.price > 500) return false;
   const pkg = item.packageInfo;
   if (!pkg) return true;
-
-  // Preços por kg/L são especialmente sensíveis a um dígito perdido no OCR.
-  // Ex.: 9,85 pode virar 0,55. Nesses casos é melhor descartar e reler do que
-  // gravar um preço claramente corrompido no histórico.
   const nearOneBaseUnit = pkg.baseQuantity >= 0.95 && pkg.baseQuantity <= 1.05;
   if (nearOneBaseUnit && pkg.baseUnit === "kg" && item.price < 1) return false;
   if (nearOneBaseUnit && pkg.baseUnit === "l" && item.price < 0.5) return false;
@@ -117,19 +98,19 @@ function plausibleUnitPrice(item: FlyerCandidate) {
 function dedupeCandidates(items: FlyerCandidate[]) {
   const result: FlyerCandidate[] = [];
   for (const item of items) {
-    if (!plausibleUnitPrice(item)) continue;
-    if (!plausibleProductName(item.rawName)) continue;
+    if (!plausibleUnitPrice(item) || !plausibleProductName(item.rawName)) continue;
 
     const normalized = normalizeSearchText(item.rawName);
     const words = new Set(normalized.split(/\s+/).filter((word) => word.length >= 3));
     const duplicateIndex = result.findIndex((existing) => {
-      if (Math.abs(existing.price - item.price) > 0.011) return false;
       const other = normalizeSearchText(existing.rawName);
-      if (other === normalized || other.includes(normalized) || normalized.includes(other)) return true;
       const otherWords = new Set(other.split(/\s+/).filter((word) => word.length >= 3));
       const intersection = [...words].filter((word) => otherWords.has(word)).length;
       const union = new Set([...words, ...otherWords]).size;
-      return union > 0 && intersection / union >= 0.7;
+      const sameName = other === normalized || other.includes(normalized) || normalized.includes(other)
+        || (union > 0 && intersection / union >= 0.72);
+      if (!sameName) return false;
+      return Math.abs(existing.price - item.price) < 0.03;
     });
 
     if (duplicateIndex >= 0) {
@@ -151,7 +132,11 @@ function parseChunk(text: string, sourcePage: number): FlyerCandidate[] {
     for (const match of linePrices(line)) {
       const price = match.price;
       if (!Number.isFinite(price) || price < 0.2 || price > 500) continue;
-      const rawName = buildName(lines, i, match.index);
+      let rawName = cleanName(line.slice(0, match.index));
+      if (!plausibleProductName(rawName)) {
+        const previous = [lines[i - 2], lines[i - 1]].filter(Boolean).map(cleanName).filter(plausibleProductName);
+        rawName = cleanName(previous.join(" "));
+      }
       if (!plausibleProductName(rawName)) continue;
       const context = [lines[i - 2], lines[i - 1], line, lines[i + 1]].filter(Boolean).join(" ");
       const packageInfo = inferPackage(rawName) ?? inferPackage(context);
@@ -167,26 +152,156 @@ function parseChunk(text: string, sourcePage: number): FlyerCandidate[] {
       });
     }
   }
-
   return dedupeCandidates(found);
 }
 
-function cropCanvas(source: HTMLCanvasElement, x: number, width: number) {
-  const padding = 18;
+function flattenLines(blocks: any[] | null | undefined): SpatialLine[] {
+  const lines: SpatialLine[] = [];
+  for (const block of blocks ?? []) {
+    for (const paragraph of block.paragraphs ?? []) {
+      for (const line of paragraph.lines ?? []) {
+        const text = cleanLine(line.text ?? "");
+        const bbox = line.bbox;
+        if (!text || !bbox) continue;
+        lines.push({ text, confidence: Number(line.confidence ?? 0), bbox });
+      }
+    }
+  }
+  return lines.sort((a, b) => a.bbox.y0 - b.bbox.y0 || a.bbox.x0 - b.bbox.x0);
+}
+
+function median(values: number[]) {
+  if (!values.length) return 24;
+  const ordered = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(ordered.length / 2);
+  return ordered.length % 2 ? ordered[middle] : (ordered[middle - 1] + ordered[middle]) / 2;
+}
+
+function lineHeight(line: SpatialLine) {
+  return Math.max(1, line.bbox.y1 - line.bbox.y0);
+}
+
+function centerX(line: SpatialLine) {
+  return (line.bbox.x0 + line.bbox.x1) / 2;
+}
+
+function looksLikePriceLine(line: SpatialLine, typicalHeight: number) {
+  const text = line.text.replace(/R\$/gi, "").trim();
+  const letters = (normalizeSearchText(text).match(/[a-z]/g) ?? []).length;
+  const digits = (text.match(/\d/g) ?? []).length;
+  if (!digits || letters > 1) return false;
+  if (linePrices(text).length) return true;
+  return digits >= 2 && lineHeight(line) >= typicalHeight * 1.35;
+}
+
+function cropRect(source: HTMLCanvasElement, bbox: BBox, padX: number, padY: number) {
+  const x0 = Math.max(0, Math.floor(bbox.x0 - padX));
+  const y0 = Math.max(0, Math.floor(bbox.y0 - padY));
+  const x1 = Math.min(source.width, Math.ceil(bbox.x1 + padX));
+  const y1 = Math.min(source.height, Math.ceil(bbox.y1 + padY));
   const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(width + padding * 2));
-  canvas.height = source.height + padding * 2;
+  canvas.width = Math.max(1, x1 - x0);
+  canvas.height = Math.max(1, y1 - y0);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("Não foi possível preparar uma região do tabloide.");
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(source, x, 0, width, source.height, padding, padding, width, source.height);
+  ctx.drawImage(source, x0, y0, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
   return canvas;
+}
+
+async function rereadPrice(worker: any, source: HTMLCanvasElement, line: SpatialLine) {
+  const height = lineHeight(line);
+  const crop = cropRect(source, line.bbox, Math.max(45, height * 1.3), Math.max(18, height * 0.45));
+  await worker.setParameters({
+    tessedit_pageseg_mode: "7",
+    tessedit_char_whitelist: "0123456789,.",
+    preserve_interword_spaces: "1",
+  });
+  const result = await worker.recognize(crop);
+  await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "11" });
+  return loosePrice(result.data?.text ?? "");
+}
+
+function nameForPrice(lines: SpatialLine[], priceLine: SpatialLine, typicalHeight: number, pageWidth: number) {
+  const maxCenterDistance = Math.max(pageWidth * 0.12, lineHeight(priceLine) * 2.5);
+  const verticalLimit = Math.max(typicalHeight * 7.5, lineHeight(priceLine) * 2.5);
+  const candidates = lines
+    .filter((line) => {
+      if (line === priceLine) return false;
+      if (line.bbox.y1 > priceLine.bbox.y0 + typicalHeight * 0.45) return false;
+      const gap = priceLine.bbox.y0 - line.bbox.y1;
+      if (gap < 0 || gap > verticalLimit) return false;
+      if (Math.abs(centerX(line) - centerX(priceLine)) > maxCenterDistance) return false;
+      if (looksLikePriceLine(line, typicalHeight)) return false;
+      return plausibleProductName(cleanName(line.text));
+    })
+    .sort((a, b) => b.bbox.y1 - a.bbox.y1);
+
+  if (!candidates.length) return "";
+  const chosen: SpatialLine[] = [candidates[0]];
+  for (let i = 1; i < Math.min(3, candidates.length); i++) {
+    const previous = chosen[chosen.length - 1];
+    const current = candidates[i];
+    const gap = previous.bbox.y0 - current.bbox.y1;
+    if (gap > typicalHeight * 1.8) break;
+    chosen.push(current);
+  }
+  return cleanName(chosen.reverse().map((line) => line.text).join(" "));
+}
+
+async function parseSpatial(
+  worker: any,
+  canvas: HTMLCanvasElement,
+  blocks: any[] | null | undefined,
+  sourcePage: number,
+  onProgress: Progress,
+  total: number,
+) {
+  const lines = flattenLines(blocks);
+  if (!lines.length) return [] as FlyerCandidate[];
+  const typicalHeight = median(lines.map(lineHeight).filter((height) => height >= 8));
+  const priceLines = lines.filter((line) => looksLikePriceLine(line, typicalHeight));
+  const found: FlyerCandidate[] = [];
+
+  for (let index = 0; index < priceLines.length; index++) {
+    const priceLine = priceLines[index];
+    let price = loosePrice(priceLine.text);
+    const suspicious = !price || price < 1.25 || price > 300 || priceLine.confidence < 55 || !/[,.]/.test(priceLine.text);
+    if (suspicious) {
+      onProgress(sourcePage, total, `Página ${sourcePage}/${total} · conferindo preço ${index + 1}/${priceLines.length}`);
+      const reread = await rereadPrice(worker, canvas, priceLine);
+      if (reread) price = reread;
+    }
+    if (!price || price < 0.2 || price > 500) continue;
+
+    const rawName = nameForPrice(lines, priceLine, typicalHeight, canvas.width);
+    if (!plausibleProductName(rawName)) continue;
+
+    const nearby = lines
+      .filter((line) => Math.abs(centerX(line) - centerX(priceLine)) < canvas.width * 0.13)
+      .filter((line) => Math.abs(line.bbox.y0 - priceLine.bbox.y0) < typicalHeight * 9)
+      .map((line) => line.text)
+      .join(" ");
+    const packageInfo = inferPackage(rawName) ?? inferPackage(nearby);
+    const normalized = normalizedUnitPrice(price, packageInfo);
+    const candidate: FlyerCandidate = {
+      rawName,
+      price,
+      packageInfo,
+      normalizedPrice: normalized.normalizedPrice,
+      baseUnit: normalized.baseUnit,
+      clubPrice: /clube\s*(de)?\s*vantagens?|pre[cç]o\s*clube/i.test(nearby),
+      sourcePage,
+    };
+    if (plausibleUnitPrice(candidate)) found.push(candidate);
+  }
+  return dedupeCandidates(found);
 }
 
 async function fileToCanvas(file: File) {
   const bitmap = await createImageBitmap(file);
-  const targetWidth = Math.min(2400, Math.max(1600, bitmap.width));
+  const targetWidth = Math.min(2600, Math.max(1800, bitmap.width));
   const scale = targetWidth / bitmap.width;
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(bitmap.width * scale);
@@ -200,79 +315,50 @@ async function fileToCanvas(file: File) {
   return canvas;
 }
 
-async function recognize(worker: any, canvas: HTMLCanvasElement, mode: "sparse" | "block") {
+async function recognizeSpatial(worker: any, canvas: HTMLCanvasElement) {
   await worker.setParameters({
-    tessedit_pageseg_mode: mode === "sparse" ? "11" : "6",
+    tessedit_pageseg_mode: "11",
+    tessedit_char_whitelist: "",
     preserve_interword_spaces: "1",
   });
-  const result = await worker.recognize(canvas);
-  return result.data?.text ?? "";
+  const result = await worker.recognize(canvas, {}, { text: true, blocks: true });
+  return { text: result.data?.text ?? "", blocks: result.data?.blocks ?? [] };
 }
 
-async function readColumns(
-  worker: any,
-  canvas: HTMLCanvasElement,
-  columns: number,
-  page: number,
-  total: number,
-  onProgress: Progress,
-) {
+async function fallbackColumns(worker: any, canvas: HTMLCanvasElement, page: number, total: number, onProgress: Progress) {
+  const all: FlyerCandidate[] = [];
   const texts: string[] = [];
-  const candidates: FlyerCandidate[] = [];
-  const baseWidth = canvas.width / columns;
-  const overlap = Math.min(50, baseWidth * 0.08);
-
+  const columns = 4;
+  const width = canvas.width / columns;
   for (let col = 0; col < columns; col++) {
-    const left = Math.max(0, Math.floor(col * baseWidth - overlap));
-    const right = Math.min(canvas.width, Math.ceil((col + 1) * baseWidth + overlap));
-    onProgress(page, total, `Página ${page}/${total} · faixa ${col + 1}/${columns}`);
-    const region = cropCanvas(canvas, left, right - left);
-
-    // Tabloides têm fontes grandes, preços isolados e blocos de tamanhos diferentes.
-    // O modo sparse costuma ler esse desenho melhor que tratar a coluna como um texto corrido.
-    let text = await recognize(worker, region, "sparse");
-    let parsed = parseChunk(text, page);
-
-    // Se a leitura esparsa quase não encontrou ofertas, tenta o modo em bloco como fallback.
-    if (parsed.length < 2) {
-      const blockText = await recognize(worker, region, "block");
-      const blockParsed = parseChunk(blockText, page);
-      if (blockParsed.length > parsed.length) {
-        text = blockText;
-        parsed = blockParsed;
-      }
-    }
-
+    const left = Math.max(0, Math.floor(col * width - 35));
+    const right = Math.min(canvas.width, Math.ceil((col + 1) * width + 35));
+    const crop = cropRect(canvas, { x0: left, y0: 0, x1: right, y1: canvas.height }, 0, 0);
+    onProgress(page, total, `Página ${page}/${total} · leitura alternativa ${col + 1}/${columns}`);
+    await worker.setParameters({ tessedit_pageseg_mode: "11", tessedit_char_whitelist: "" });
+    const result = await worker.recognize(crop);
+    const text = result.data?.text ?? "";
     texts.push(text);
-    candidates.push(...parsed);
+    all.push(...parseChunk(text, page));
   }
-
-  return { text: texts.join("\n\n"), candidates: dedupeCandidates(candidates) };
+  return { text: texts.join("\n"), candidates: dedupeCandidates(all) };
 }
 
 async function analyzeCanvas(worker: any, canvas: HTMLCanvasElement, page: number, total: number, onProgress: Progress) {
-  let metaText = "";
-  if (page === 1) {
-    onProgress(page, total, `Página ${page}/${total} · identificando mercado e validade`);
-    metaText = await recognize(worker, canvas, "sparse");
+  onProgress(page, total, `Página ${page}/${total} · lendo posições de produtos e preços`);
+  const spatial = await recognizeSpatial(worker, canvas);
+  const candidates = await parseSpatial(worker, canvas, spatial.blocks, page, onProgress, total);
+
+  if (candidates.length >= 6) {
+    return { text: spatial.text, metaText: spatial.text, candidates };
   }
 
-  const five = await readColumns(worker, canvas, 5, page, total, onProgress);
-  let best = five;
-
-  // Uma divisão errada de colunas pode cortar o preço ao meio. Quando a página parece
-  // incompleta, tentamos layouts alternativos e ficamos com o que extrai mais itens válidos.
-  if (best.candidates.length < 10) {
-    const four = await readColumns(worker, canvas, 4, page, total, onProgress);
-    if (four.candidates.length > best.candidates.length) best = four;
-  }
-
-  if (best.candidates.length < 8) {
-    const three = await readColumns(worker, canvas, 3, page, total, onProgress);
-    if (three.candidates.length > best.candidates.length) best = three;
-  }
-
-  return { text: best.text, metaText: metaText || best.text, candidates: best.candidates };
+  const fallback = await fallbackColumns(worker, canvas, page, total, onProgress);
+  return {
+    text: spatial.text || fallback.text,
+    metaText: spatial.text || fallback.text,
+    candidates: fallback.candidates.length > candidates.length ? fallback.candidates : candidates,
+  };
 }
 
 export async function readFlyerFileSmart(file: File, onProgress: Progress): Promise<SmartFlyerRead> {
@@ -283,7 +369,12 @@ export async function readFlyerFileSmart(file: File, onProgress: Progress): Prom
     if (file.type.startsWith("image/")) {
       const canvas = await fileToCanvas(file);
       const analyzed = await analyzeCanvas(worker, canvas, 1, 1, onProgress);
-      return { textByPage: [analyzed.text], metaText: analyzed.metaText, pageCount: 1, candidates: analyzed.candidates };
+      return {
+        textByPage: [analyzed.text],
+        metaText: analyzed.metaText,
+        pageCount: 1,
+        candidates: analyzed.candidates,
+      };
     }
 
     if (file.type !== "application/pdf") throw new Error("Envie um PDF ou uma imagem do tabloide.");
@@ -298,22 +389,7 @@ export async function readFlyerFileSmart(file: File, onProgress: Progress): Prom
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
       const page = await pdf.getPage(pageNumber);
       onProgress(pageNumber, pdf.numPages, `Preparando página ${pageNumber}/${pdf.numPages}…`);
-
-      const textContent = await page.getTextContent();
-      const embedded = textContent.items
-        .map((item: any) => ("str" in item ? item.str : ""))
-        .join("\n")
-        .trim();
-      const embeddedCandidates = parseChunk(embedded, pageNumber);
-
-      if (embeddedCandidates.length >= 8) {
-        textByPage.push(embedded);
-        allCandidates.push(...embeddedCandidates);
-        if (pageNumber === 1) metaText = embedded;
-        continue;
-      }
-
-      const viewport = page.getViewport({ scale: 2.25 });
+      const viewport = page.getViewport({ scale: 2.6 });
       const canvas = document.createElement("canvas");
       canvas.width = Math.round(viewport.width);
       canvas.height = Math.round(viewport.height);
