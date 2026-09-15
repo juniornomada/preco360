@@ -19,6 +19,7 @@ import {
   type FlyerCandidate,
   type ProductForMatch,
 } from "@/lib/flyerAnalysis";
+import { readFlyerFileSmart } from "@/lib/flyerOcr";
 
 const db = supabase as any;
 type MatchType = "exact" | "equivalent" | "suggested" | "manual" | "unmatched";
@@ -148,18 +149,25 @@ export default function FlyerPage() {
     if (!file) return;
     setProcessing(true); setItems([]);
     try {
-      const result = await readFlyerFile(file, (current, total, label) => setProgress({ current, total, label }));
-      const allText = result.textByPage.join("\n");
+      const result = await readFlyerFileSmart(file, (current, total, label) => setProgress({ current, total, label }));
+      const allText = result.metaText || result.textByPage.join("\n");
       const meta = extractFlyerMeta(allText);
       if (meta.retailer && !retailer) setRetailer(meta.retailer);
       if (meta.validFrom && !validFrom) setValidFrom(meta.validFrom);
       if (meta.validTo && !validTo) setValidTo(meta.validTo);
       setPageCount(result.pageCount);
-      const parsed = result.textByPage.flatMap((text, index) => parseFlyerText(text, index + 1));
+      const parsed = result.candidates;
       const matched = parsed.map(matchOne);
       setItems(matched); setView("radar");
-      toast({ title: parsed.length ? `${parsed.length} ofertas encontradas` : "Leitura concluída",
-        description: parsed.length ? `${matched.filter((i) => i.productId).length} já foram relacionadas ao seu histórico.` : "Adicione ofertas manualmente se necessário." });
+      const expectedMinimum = Math.max(4, result.pageCount * 5);
+      const partial = parsed.length < expectedMinimum;
+      toast({
+        title: parsed.length ? `${parsed.length} ofertas encontradas` : "Leitura concluída",
+        description: parsed.length
+          ? `${matched.filter((i) => i.productId).length} relacionadas ao seu histórico.${partial ? " A leitura parece parcial; revise antes de salvar." : ""}`
+          : "Não encontrei ofertas confiáveis. Tente uma imagem mais nítida ou adicione manualmente.",
+        variant: !parsed.length ? "destructive" : undefined,
+      });
     } catch (error: any) {
       toast({ title: "Não consegui ler o tabloide", description: error?.message ?? "Tente outra imagem ou PDF.", variant: "destructive" });
     } finally { setProcessing(false); setProgress({ current: 0, total: 0, label: "" }); }
@@ -232,7 +240,7 @@ export default function FlyerPage() {
     <header className="mb-4 flex items-start justify-between gap-3">
       <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Radar 360</p>
         <h1 className="mt-1 text-[clamp(1.65rem,7vw,2rem)] font-extrabold tracking-tight">Ofertas que realmente valem</h1>
-        <p className="mt-1 max-w-xl text-sm text-muted-foreground">Importe o tabloide. O Preço 360 normaliza kg/L, relaciona abreviações e compara com compras e promoções anteriores.</p></div>
+        <p className="mt-1 max-w-xl text-sm text-muted-foreground">Importe o tabloide. O Preço 360 normaliza kg/L, relaciona abreviações e compara preço pago com preço ofertado.</p></div>
       <div className="rounded-2xl bg-primary/10 p-3 text-primary"><Radar className="h-6 w-6" /></div>
     </header>
 
@@ -245,13 +253,13 @@ export default function FlyerPage() {
       <Card className="border-primary/20"><CardContent className="p-5">
         <button type="button" onClick={() => fileRef.current?.click()} className="flex w-full flex-col items-center rounded-2xl border-2 border-dashed border-primary/30 bg-primary/5 px-5 py-8 text-center">
           <div className="mb-3 rounded-2xl bg-primary/15 p-3 text-primary">{file?.type === "application/pdf" ? <FileText className="h-7 w-7" /> : <FileImage className="h-7 w-7" />}</div>
-          <p className="font-bold">{file ? file.name : "Escolher PDF ou foto do tabloide"}</p><p className="mt-1 text-xs text-muted-foreground">O arquivo original fica guardado como evidência do preço anunciado.</p>
+          <p className="font-bold">{file ? file.name : "Escolher PDF ou foto do tabloide"}</p><p className="mt-1 text-xs text-muted-foreground">O arquivo original fica guardado como evidência do preço ofertado.</p>
         </button>
         <input ref={fileRef} className="hidden" type="file" accept="application/pdf,image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         <div className="mt-4 grid gap-3 sm:grid-cols-3"><div><label className="mb-1 block text-xs font-semibold text-muted-foreground">Mercado</label><Input value={retailer} onChange={(e) => setRetailer(e.target.value)} placeholder="Ex.: Confiança" /></div>
           <div><label className="mb-1 block text-xs font-semibold text-muted-foreground">Válido de</label><Input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} /></div>
           <div><label className="mb-1 block text-xs font-semibold text-muted-foreground">Até</label><Input type="date" value={validTo} onChange={(e) => setValidTo(e.target.value)} /></div></div>
-        {processing && <div className="mt-4 rounded-xl bg-muted p-3"><div className="flex items-center gap-2 text-sm font-semibold"><Loader2 className="h-4 w-4 animate-spin text-primary" />{progress.label || "Analisando…"}</div><div className="mt-2 h-2 rounded-full bg-background"><div className="h-full rounded-full bg-primary" style={{ width: `${progress.total ? Math.max(8, progress.current / progress.total * 100) : 15}%` }} /></div></div>}
+        {processing && <div className="mt-4 rounded-xl bg-muted p-3"><div className="flex items-center gap-2 text-sm font-semibold"><Loader2 className="h-4 w-4 animate-spin text-primary" />{progress.label || "Analisando…"}</div><div className="mt-2 h-2 rounded-full bg-background"><div className="h-full rounded-full bg-primary" style={{ width: `${progress.total ? Math.max(8, progress.current / progress.total * 100) : 15}%` }} /></div></div></div>}
         <Button className="mt-4 h-11 w-full" disabled={!file || processing} onClick={() => void processFile()}>{processing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}{processing ? "Lendo ofertas…" : "Analisar tabloide"}</Button>
       </CardContent></Card>
       <div className="grid grid-cols-3 gap-2 text-center text-[11px] text-muted-foreground">
@@ -262,7 +270,7 @@ export default function FlyerPage() {
     </div>}
 
     {view === "radar" && <div className="space-y-4">
-      {!items.length ? <Card className="border-dashed"><CardContent className="p-7 text-center"><Radar className="mx-auto h-9 w-9 text-primary" /><h2 className="mt-3 text-lg font-bold">Seu radar de mercado começa aqui</h2><p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Importe um tabloide para descobrir ofertas abaixo do seu histórico e guardar preços mesmo quando você não comprar.</p><Button className="mt-4" onClick={() => setView("import")}><Upload className="mr-2 h-4 w-4" />Importar tabloide</Button></CardContent></Card> : <>
+      {!items.length ? <Card className="border-dashed"><CardContent className="p-7 text-center"><Radar className="mx-auto h-9 w-9 text-primary" /><h2 className="mt-3 text-lg font-bold">Seu radar de mercado começa aqui</h2><p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Importe um tabloide para descobrir ofertas abaixo do seu histórico e guardar preços ofertados mesmo quando você não comprar.</p><Button className="mt-4" onClick={() => setView("import")}><Upload className="mr-2 h-4 w-4" />Importar tabloide</Button></CardContent></Card> : <>
         <div className="grid grid-cols-4 gap-2">
           <div className="rounded-xl border bg-card p-3"><p className="text-[10px] font-semibold uppercase text-muted-foreground">Preço raro</p><p className="mt-1 text-xl font-extrabold text-emerald-600">{summary.exceptional}</p></div>
           <div className="rounded-xl border bg-card p-3"><p className="text-[10px] font-semibold uppercase text-muted-foreground">Vale a pena</p><p className="mt-1 text-xl font-extrabold text-primary">{summary.good}</p></div>
@@ -273,12 +281,12 @@ export default function FlyerPage() {
           {analyzed.filter((i) => ["exceptional", "good"].includes(i.verdict.key)).slice(0, 10).map((i) => <Card key={i.localId} className={cardTone[i.verdict.key]}><CardContent className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-bold">{i.rawName}</p><p className="mt-0.5 text-xs text-muted-foreground">{i.product?.name ? `↳ ${i.product.name}` : "Sem correspondência confirmada"}</p></div><div className="shrink-0 text-right"><p className="font-extrabold">{brl(i.price)}</p><p className="text-[11px] text-muted-foreground">{formatNormalizedPrice(i.normalizedPrice, i.baseUnit)}</p></div></div><div className="mt-3 flex items-center justify-between"><span className="rounded-full bg-background/80 px-2.5 py-1 text-xs font-bold text-primary">{i.verdict.label}</span><span className="text-xs text-muted-foreground">confiança {i.verdict.confidence}</span></div><p className="mt-2 text-xs text-foreground/75">{i.verdict.message}</p></CardContent></Card>)}
         </div></div>}
         <details className="group rounded-xl border bg-card" open={(summary.exceptional + summary.good) === 0}><summary className="flex cursor-pointer list-none items-center justify-between p-4 font-semibold">Revisar {items.length} ofertas <ChevronDown className="h-4 w-4 transition group-open:rotate-180" /></summary><div className="space-y-3 border-t p-3"><Button size="sm" variant="outline" onClick={addManual}><Plus className="mr-1.5 h-4 w-4" />Adicionar oferta</Button>
-          {analyzed.map((i) => <div key={i.localId} className={`rounded-xl border p-3 ${cardTone[i.verdict.key]}`}><div className="grid gap-2 sm:grid-cols-[1fr_120px]"><Input value={i.rawName} placeholder="Nome do produto" onChange={(e) => updateName(i.localId, e.target.value)} /><div className="flex gap-2"><Input inputMode="decimal" value={i.price ? String(i.price).replace(".", ",") : ""} placeholder="Preço" onChange={(e) => updatePrice(i.localId, e.target.value)} /><button onClick={() => setItems((rows) => rows.filter((r) => r.localId !== i.localId))} className="rounded-lg border px-2 text-muted-foreground"><Trash2 className="h-4 w-4" /></button></div></div><div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]"><select className="h-10 min-w-0 rounded-md border bg-background px-3 text-sm" value={i.productId ?? ""} onChange={(e) => chooseProduct(i.localId, e.target.value)}><option value="">Sem correspondência</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><div className="flex items-center gap-2 text-xs text-muted-foreground"><span>{formatNormalizedPrice(i.normalizedPrice || i.price, i.baseUnit)}</span><span>·</span><span>{i.matchType === "manual" ? "confirmado" : `${Math.round(i.matchConfidence * 100)}% match`}</span></div></div></div>)}
+          {analyzed.map((i) => <div key={i.localId} className={`rounded-xl border p-3 ${cardTone[i.verdict.key]}`}><div className="grid gap-2 sm:grid-cols-[1fr_120px]"><Input value={i.rawName} placeholder="Nome do produto" onChange={(e) => updateName(i.localId, e.target.value)} /><div className="flex gap-2"><Input inputMode="decimal" value={i.price ? String(i.price).replace(".", ",") : ""} placeholder="Preço ofertado" onChange={(e) => updatePrice(i.localId, e.target.value)} /><button onClick={() => setItems((rows) => rows.filter((r) => r.localId !== i.localId))} className="rounded-lg border px-2 text-muted-foreground"><Trash2 className="h-4 w-4" /></button></div></div><div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]"><select className="h-10 min-w-0 rounded-md border bg-background px-3 text-sm" value={i.productId ?? ""} onChange={(e) => chooseProduct(i.localId, e.target.value)}><option value="">Sem correspondência</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><div className="flex items-center gap-2 text-xs text-muted-foreground"><span>{formatNormalizedPrice(i.normalizedPrice || i.price, i.baseUnit)}</span><span>·</span><span>{i.matchType === "manual" ? "confirmado" : `${Math.round(i.matchConfidence * 100)}% match`}</span></div></div></div>)}
         </div></details>
-        <div className="rounded-xl border bg-card p-4"><div className="grid gap-3 sm:grid-cols-3"><div><label className="mb-1 flex items-center gap-1 text-xs font-semibold text-muted-foreground"><Store className="h-3.5 w-3.5" />Mercado</label><Input value={retailer} onChange={(e) => setRetailer(e.target.value)} /></div><div><label className="mb-1 flex items-center gap-1 text-xs font-semibold text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" />Início</label><Input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} /></div><div><label className="mb-1 flex items-center gap-1 text-xs font-semibold text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" />Fim</label><Input type="date" value={validTo} onChange={(e) => setValidTo(e.target.value)} /></div></div><Button className="mt-3 h-11 w-full" disabled={saving || !file} onClick={() => void saveFlyer()}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}{saving ? "Salvando histórico…" : "Salvar no histórico de mercado"}</Button></div>
+        <div className="rounded-xl border bg-card p-4"><div className="grid gap-3 sm:grid-cols-3"><div><label className="mb-1 flex items-center gap-1 text-xs font-semibold text-muted-foreground"><Store className="h-3.5 w-3.5" />Mercado</label><Input value={retailer} onChange={(e) => setRetailer(e.target.value)} /></div><div><label className="mb-1 flex items-center gap-1 text-xs font-semibold text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" />Início</label><Input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} /></div><div><label className="mb-1 flex items-center gap-1 text-xs font-semibold text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" />Fim</label><Input type="date" value={validTo} onChange={(e) => setValidTo(e.target.value)} /></div></div><Button className="mt-3 h-11 w-full" disabled={saving || !file} onClick={() => void saveFlyer()}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}{saving ? "Salvando histórico…" : "Salvar preços ofertados"}</Button></div>
       </>}
     </div>}
 
-    {view === "history" && <div className="space-y-3">{!flyerHistory.length ? <Card className="border-dashed"><CardContent className="p-7 text-center"><History className="mx-auto h-8 w-8 text-primary" /><p className="mt-3 font-bold">Nenhum tabloide salvo ainda</p><p className="mt-1 text-sm text-muted-foreground">Os preços anunciados ficam aqui mesmo quando você não compra o produto.</p></CardContent></Card> : flyerHistory.map((flyer) => <Card key={flyer.id}><CardContent className="flex items-center gap-3 p-4"><div className="rounded-xl bg-primary/10 p-2.5 text-primary"><FileText className="h-5 w-5" /></div><div className="min-w-0 flex-1"><p className="truncate font-bold">{flyer.retailer}</p><p className="text-xs text-muted-foreground">{dateBr(flyer.valid_from)} → {dateBr(flyer.valid_to)} · {flyer.flyer_items?.[0]?.count ?? 0} ofertas</p></div><div className="text-right text-[11px] text-muted-foreground"><p className="max-w-[110px] truncate">{flyer.source_file_name || "Tabloide"}</p><p>{dateBr(flyer.created_at)}</p></div></CardContent></Card>)}</div>}
+    {view === "history" && <div className="space-y-3">{!flyerHistory.length ? <Card className="border-dashed"><CardContent className="p-7 text-center"><History className="mx-auto h-8 w-8 text-primary" /><p className="mt-3 font-bold">Nenhum tabloide salvo ainda</p><p className="mt-1 text-sm text-muted-foreground">Os preços ofertados ficam aqui mesmo quando você não compra o produto.</p></CardContent></Card> : flyerHistory.map((flyer) => <Card key={flyer.id}><CardContent className="flex items-center gap-3 p-4"><div className="rounded-xl bg-primary/10 p-2.5 text-primary"><FileText className="h-5 w-5" /></div><div className="min-w-0 flex-1"><p className="truncate font-bold">{flyer.retailer}</p><p className="text-xs text-muted-foreground">{dateBr(flyer.valid_from)} → {dateBr(flyer.valid_to)} · {flyer.flyer_items?.[0]?.count ?? 0} ofertas</p></div><div className="text-right text-[11px] text-muted-foreground"><p className="max-w-[110px] truncate">{flyer.source_file_name || "Tabloide"}</p><p>{dateBr(flyer.created_at)}</p></div></CardContent></Card>)}</div>}
   </div>;
 }
