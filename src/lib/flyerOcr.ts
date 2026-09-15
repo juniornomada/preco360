@@ -100,10 +100,24 @@ function buildName(lines: string[], lineIndex: number, priceStart: number) {
   return plausibleProductName(name) ? name : sameLine;
 }
 
+function plausibleUnitPrice(item: FlyerCandidate) {
+  if (!Number.isFinite(item.price) || item.price < 0.2 || item.price > 500) return false;
+  const pkg = item.packageInfo;
+  if (!pkg) return true;
+
+  // Preços por kg/L são especialmente sensíveis a um dígito perdido no OCR.
+  // Ex.: 9,85 pode virar 0,55. Nesses casos é melhor descartar e reler do que
+  // gravar um preço claramente corrompido no histórico.
+  const nearOneBaseUnit = pkg.baseQuantity >= 0.95 && pkg.baseQuantity <= 1.05;
+  if (nearOneBaseUnit && pkg.baseUnit === "kg" && item.price < 1) return false;
+  if (nearOneBaseUnit && pkg.baseUnit === "l" && item.price < 0.5) return false;
+  return true;
+}
+
 function dedupeCandidates(items: FlyerCandidate[]) {
   const result: FlyerCandidate[] = [];
   for (const item of items) {
-    if (!Number.isFinite(item.price) || item.price < 0.2 || item.price > 500) continue;
+    if (!plausibleUnitPrice(item)) continue;
     if (!plausibleProductName(item.rawName)) continue;
 
     const normalized = normalizeSearchText(item.rawName);
@@ -212,9 +226,25 @@ async function readColumns(
     const left = Math.max(0, Math.floor(col * baseWidth - overlap));
     const right = Math.min(canvas.width, Math.ceil((col + 1) * baseWidth + overlap));
     onProgress(page, total, `Página ${page}/${total} · faixa ${col + 1}/${columns}`);
-    const text = await recognize(worker, cropCanvas(canvas, left, right - left), "block");
+    const region = cropCanvas(canvas, left, right - left);
+
+    // Tabloides têm fontes grandes, preços isolados e blocos de tamanhos diferentes.
+    // O modo sparse costuma ler esse desenho melhor que tratar a coluna como um texto corrido.
+    let text = await recognize(worker, region, "sparse");
+    let parsed = parseChunk(text, page);
+
+    // Se a leitura esparsa quase não encontrou ofertas, tenta o modo em bloco como fallback.
+    if (parsed.length < 2) {
+      const blockText = await recognize(worker, region, "block");
+      const blockParsed = parseChunk(blockText, page);
+      if (blockParsed.length > parsed.length) {
+        text = blockText;
+        parsed = blockParsed;
+      }
+    }
+
     texts.push(text);
-    candidates.push(...parseChunk(text, page));
+    candidates.push(...parsed);
   }
 
   return { text: texts.join("\n\n"), candidates: dedupeCandidates(candidates) };
@@ -230,7 +260,14 @@ async function analyzeCanvas(worker: any, canvas: HTMLCanvasElement, page: numbe
   const five = await readColumns(worker, canvas, 5, page, total, onProgress);
   let best = five;
 
-  if (five.candidates.length < 10) {
+  // Uma divisão errada de colunas pode cortar o preço ao meio. Quando a página parece
+  // incompleta, tentamos layouts alternativos e ficamos com o que extrai mais itens válidos.
+  if (best.candidates.length < 10) {
+    const four = await readColumns(worker, canvas, 4, page, total, onProgress);
+    if (four.candidates.length > best.candidates.length) best = four;
+  }
+
+  if (best.candidates.length < 8) {
     const three = await readColumns(worker, canvas, 3, page, total, onProgress);
     if (three.candidates.length > best.candidates.length) best = three;
   }
