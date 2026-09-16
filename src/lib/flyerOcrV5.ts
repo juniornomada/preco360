@@ -4,21 +4,22 @@ import { readFlyerFileSmart as readFlyerV4 } from "@/lib/flyerOcrV4";
 // V5 deliberately prefers precision over recall: if a product name looks uncertain,
 // we drop it instead of showing/saving a misleading offer.
 const PRODUCT_TERMS = new Set([
-  "abacate", "abacaxi", "acucar", "agua", "alcatra", "amaciante", "arroz", "atum", "aveia", "azeite",
-  "banana", "batata", "bife", "biscoito", "bolacha", "bolo", "bombom", "cafe", "carne", "cerveja",
+  "abacate", "abacaxi", "abobora", "acucar", "agua", "alcatra", "amaciante", "arroz", "atum", "aveia", "azeite",
+  "banana", "batata", "berinjela", "beterraba", "bife", "biscoito", "bolacha", "bolo", "bombom", "cafe", "carne", "cenoura", "cerveja",
   "chocolate", "cogumelo", "contrafile", "costela", "creme", "detergente", "farinha", "feijao", "file",
-  "frango", "iogurte", "lagarto", "lasanha", "leite", "linguica", "lombo", "maca", "macarrao", "manga",
-  "maracuja", "margarina", "molho", "mortadela", "mussarela", "oleo", "ovos", "pao", "papel", "peito",
-  "pernil", "presunto", "queijo", "refrigerante", "sabao", "sabonete", "shampoo", "shimeji", "suco",
-  "tomate", "uva", "vinho", "vodka", "whisky", "picanha", "patinho", "acém", "acem", "coxao",
+  "frango", "goiaba", "iogurte", "kiwi", "lagarto", "laranja", "lasanha", "leite", "limao", "linguica", "lombo", "maca", "macarrao", "mamao", "manga",
+  "maracuja", "margarina", "melancia", "melao", "molho", "mortadela", "mussarela", "oleo", "ovos", "pao", "papel", "peito",
+  "pera", "pernil", "presunto", "queijo", "repolho", "refrigerante", "sabao", "sabonete", "shampoo", "shimeji", "suco",
+  "tomate", "uva", "vinho", "vodka", "whisky", "picanha", "patinho", "acem", "coxao",
   "paleta", "musculo", "tilapia", "sardinha", "salmao", "camarao", "manteiga", "requeijao", "maionese",
-  "ketchup", "granola", "cereal", "achocolatado", "leite", "creme", "sorvete", "pizza", "hamburguer",
+  "ketchup", "granola", "cereal", "achocolatado", "sorvete", "pizza", "hamburguer",
   "nuggets", "empanado", "salsicha", "toscana", "bacon", "fralda", "desodorante", "escova", "pasta",
-  "absorvente", "papel", "toalha", "guardanapo", "esponja", "limpador", "desinfetante", "agua sanitaria",
+  "absorvente", "toalha", "guardanapo", "esponja", "limpador", "desinfetante", "sanitaria",
 ]);
 
 const SAFE_SHORT = new Set(["kg", "g", "ml", "l", "lt", "un", "und", "pct", "cx"]);
-const MARKETING = /\b(oferta|ofertas|clube|vantagens|leve|pague|desconto|economize|validade|valido|validas|cada|apenas)\b/;
+// "cada" is intentionally not rejected: produce flyers commonly say "preço a cada 100g".
+const MARKETING = /\b(oferta|ofertas|clube|vantagens|leve|pague|desconto|economize|validade|valido|validas|apenas)\b/;
 const PACKAGE_RE = /\b\d+(?:[.,]\d+)?\s*(?:g|kg|ml|l|lt|un|und|unid|unidades)\b/i;
 
 function alphaWords(value: string) {
