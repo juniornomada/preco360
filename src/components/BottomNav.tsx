@@ -16,7 +16,9 @@ export default function BottomNav() {
   return (
     <nav className="bottom-nav">
       {navItems.map((item) => {
-        const isActive = location.pathname === item.path;
+        const isActive = item.path === "/offers"
+          ? location.pathname.startsWith("/offers")
+          : location.pathname === item.path;
         return (
           <button
             key={item.path}
