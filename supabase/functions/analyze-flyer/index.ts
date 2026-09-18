@@ -64,6 +64,19 @@ REGRAS OBRIGATÓRIAS
   ]
 }
 23. Não use markdown, não envolva o JSON em crases e não escreva texto antes ou depois do objeto.
+24. A IDENTIDADE COMERCIAL COMPLETA é prioridade. Para produto embalado, leia também a MARCA/LOGO impressa na embalagem, mesmo quando a legenda pequena do encarte trouxer só a categoria. Não devolva um nome genérico se a marca estiver visualmente legível.
+25. product_name deve preservar categoria + marca + linha/modelo/variante comercial quando legíveis. brand deve repetir a marca isoladamente quando ela puder ser identificada.
+26. Antes de finalizar cada página, revise TODOS os itens embalados com brand=null. Reabra mentalmente o quadrinho e procure a marca no pacote, garrafa, lata, sachê ou caixa. Se a marca estiver visível, preencha-a. Se realmente não estiver legível, mantenha null sem inventar.
+27. Considere INCOMPLETOS nomes como "Arroz 5kg", "Azeite Extra Virgem 500ml", "Leite Pense Zero 1L", "Pão de Forma 400g", "Café em Pó 500g" quando a embalagem exibir uma marca legível. Nesses casos, releia o produto antes de responder.
+28. Exemplos do nível de detalhe esperado quando isso estiver VISÍVEL no encarte:
+   - "Achocolatado em Pó Fator Crescer 550g" deve virar "Achocolatado em Pó Nescau Fator Crescer 550g" se Nescau estiver visível.
+   - "Azeite Extra Virgem 500ml" deve virar "Azeite Extra Virgem Saccioli 500ml" se Saccioli estiver visível.
+   - "Leite Pense Zero 1L" deve virar "Leite Batavo Pense Zero 1L" se Batavo estiver visível.
+   - "Pão de Forma 400g" deve incluir "Uni" quando essa marca estiver visível.
+   - "Pão de Forma 500g" deve incluir "Confiança" quando essa marca estiver visível.
+   Estes exemplos ensinam a REGRA; não use essas marcas em outros itens sem evidência visual.
+29. Quando uma mesma oferta contém o MESMO tipo de produto e embalagem com marcas/linhas alternativas unidas por "ou" (ex.: "Arroz Riviera ou Patéko 5kg"), mantenha UMA oferta e preserve as alternativas no product_name. Quando forem produtos realmente diferentes (ex.: Abóbora e Repolho), continue criando registros separados.
+30. Faça uma checagem final de completude por oferta nesta ordem: categoria do produto → marca → linha/modelo → sabor/tipo → embalagem → preço → Clube/exceções/limites. Só então finalize o JSON.
 `;
 
 const schema = {
