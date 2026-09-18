@@ -280,6 +280,7 @@ export default function FlyerPage() {
     const normalized = normalizedUnitPrice(price, packageInfo);
     const candidate: FlyerCandidate = {
       rawName,
+      brand: item.brand ?? null,
       price,
       packageInfo,
       normalizedPrice: normalized.normalizedPrice,
