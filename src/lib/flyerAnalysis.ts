@@ -9,6 +9,7 @@ export type PackageInfo = {
 
 export type FlyerCandidate = {
   rawName: string;
+  brand?: string | null;
   price: number;
   packageInfo: PackageInfo | null;
   normalizedPrice: number;
@@ -58,7 +59,10 @@ const stop = new Set([
   "de", "da", "do", "das", "dos", "e", "ou", "com", "sem", "tipo", "tipos",
   "pacote", "bandeja", "unidade", "unidades", "cada", "leve", "pague", "oferta",
   "promocao", "promocional", "kg", "g", "gr", "ml", "l", "lt", "un", "und", "unid",
+  "granel", "embalagem", "lata", "garrafa", "caixa", "refil", "sabor", "sabores",
 ]);
+
+const packageTokenRe = /^\d+(?:[.,]\d+)?(?:kg|g|gr|ml|l|lt|un|und|unid)$/i;
 
 export function normalizeSearchText(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
@@ -67,7 +71,40 @@ export function normalizeSearchText(value: string) {
 
 function tokens(value: string) {
   return normalizeSearchText(value).split(/\s+/).map((token) => aliases[token] ?? token)
-    .filter((token) => token && !stop.has(token) && !/^\d+$/.test(token));
+    .filter((token) =>
+      token &&
+      !stop.has(token) &&
+      !/^\d+$/.test(token) &&
+      !packageTokenRe.test(token)
+    );
+}
+
+function overlapCount(a: string[], b: string[]) {
+  const B = new Set(b);
+  return [...new Set(a)].filter((token) => B.has(token)).length;
+}
+
+function brandCompatible(candidate: FlyerCandidate, productTokens: string[]) {
+  const brandTokens = candidate.brand ? tokens(candidate.brand) : [];
+  if (!brandTokens.length) return true;
+  return brandTokens.every((token) => productTokens.includes(token));
+}
+
+function identityCompatible(candidateTokens: string[], productTokens: string[]) {
+  if (!candidateTokens.length || !productTokens.length) return false;
+  const overlap = overlapCount(candidateTokens, productTokens);
+  if (!overlap) return false;
+
+  // A package size or a generic word must never be enough to relate different products.
+  // For multi-word identities, require at least two meaningful shared tokens. Single-word
+  // commodities such as "cenoura" remain matchable by exact category name.
+  if (candidateTokens.length > 1 && productTokens.length > 1 && overlap < 2) return false;
+
+  // If the leading product category differs, only allow it when there is otherwise
+  // strong identity evidence (e.g. an abbreviated receipt with several matching terms).
+  if (candidateTokens[0] !== productTokens[0] && overlap < 3) return false;
+
+  return true;
 }
 
 function numberPt(value: string) {
@@ -205,18 +242,33 @@ export function matchFlyerItem(candidate: FlyerCandidate, products: ProductForMa
 
   const candidateTokens = tokens(candidate.rawName);
   let best: { id: string; score: number } | null = null;
+
   for (const product of products) {
-    const sim = similarity(candidateTokens, tokens(`${product.name} ${product.brand ?? ""}`));
-    const pkg = product.package_size && product.unit ? inferPackage(`${product.package_size}${product.unit}`) : inferPackage(product.name);
+    const productTokens = tokens(`${product.name} ${product.brand ?? ""}`);
+    if (!identityCompatible(candidateTokens, productTokens)) continue;
+    if (!brandCompatible(candidate, productTokens)) continue;
+
+    const pkg = product.package_size && product.unit
+      ? inferPackage(`${product.package_size}${product.unit}`)
+      : inferPackage(product.name);
+
+    // Never compare mass, volume and unit histories with each other.
+    if (candidate.packageInfo && pkg && candidate.packageInfo.baseUnit !== pkg.baseUnit) continue;
+
+    const sim = similarity(candidateTokens, productTokens);
     let score = sim.jaccard * 0.62 + sim.containment * 0.28 + packageBonus(candidate.packageInfo, pkg);
     if (normalizeSearchText(product.name).includes(normalized) || normalized.includes(normalizeSearchText(product.name))) score += 0.08;
     score = Math.max(0, Math.min(1, score));
     if (!best || score > best.score) best = { id: product.id, score };
   }
-  if (!best || best.score < 0.42) return { productId: null, confidence: best?.score ?? 0, type: "unmatched" as const };
+
+  // "Suggested" fuzzy matches are useful for manual review, but are not safe enough
+  // to drive a price verdict automatically. Only equivalent/exact matches get productId.
+  if (!best || best.score < 0.62) {
+    return { productId: null, confidence: best?.score ?? 0, type: "unmatched" as const };
+  }
   if (best.score >= 0.8) return { productId: best.id, confidence: best.score, type: "exact" as const };
-  if (best.score >= 0.62) return { productId: best.id, confidence: best.score, type: "equivalent" as const };
-  return { productId: best.id, confidence: best.score, type: "suggested" as const };
+  return { productId: best.id, confidence: best.score, type: "equivalent" as const };
 }
 
 function median(values: number[]) {
