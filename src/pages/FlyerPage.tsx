@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -17,6 +18,7 @@ import {
   Loader2,
   Plus,
   Radar,
+  ShoppingBasket,
   Save,
   ShoppingBasket,
   Sparkles,
@@ -606,7 +608,7 @@ export default function FlyerPage() {
         </div>
       </header>
 
-      <div className="mb-4 grid grid-cols-3 gap-2 rounded-xl bg-muted p-1">
+      <div className="mb-3 grid grid-cols-3 gap-2 rounded-xl bg-muted p-1">
         {([
           ["radar", "Radar", Sparkles],
           ["import", "Importar", Upload],
@@ -624,6 +626,24 @@ export default function FlyerPage() {
           </button>
         ))}
       </div>
+
+      <Button
+        type="button"
+        variant="outline"
+        className="mb-4 h-11 w-full justify-between border-primary/25 bg-primary/5"
+        onClick={() => navigate("/offers/basket")}
+      >
+        <span className="flex items-center gap-2">
+          <ShoppingBasket className="h-4 w-4 text-primary" />
+          <span className="text-left">
+            <span className="block text-sm font-bold">Cesta 360 · Comparar supermercados</span>
+            <span className="block text-[11px] font-normal text-muted-foreground">
+              Monte sua lista e veja onde a compra toda vale mais a pena
+            </span>
+          </span>
+        </span>
+        <span className="text-primary">›</span>
+      </Button>
 
       <Button
         type="button"
