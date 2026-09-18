@@ -124,10 +124,15 @@ function overlapScore(a: string[], b: string[]) {
 
 function shouldUseCategoryFallback(item: OfferRow) {
   const text = normalize(item.raw_name);
-  const pkg = packageBase(item.package_quantity, item.package_unit);
-  const fresh =
-    /\b(cenoura|beterraba|abobora|repolho|berinjela|cebola|chuchu|maca|manga|maracuja|tangerina|uva|banana|tomate|bovino|carne|lagarto|acem|frango)\b/.test(text);
-  return fresh && pkg?.unit === "kg" && Math.abs((pkg?.value ?? 0) - 1) < 0.001;
+
+  const nonFood =
+    /\b(vaso|papel higienico|shampoo|condicionador|creme dental|escova dental|detergente|lava louca|desinfetante|sabao|amaciante|filme pvc|papel aluminio|saco para alimento|fralda|absorvente|limpeza)\b/.test(text);
+  if (nonFood) return true;
+
+  const looseFresh =
+    /\b(cenoura|beterraba|abobora|repolho|berinjela|cebola|chuchu|maca|manga|maracuja|tangerina|uva|banana|tomate|bovino|bovina|carne|lagarto|acem|coxao|ponta de peito|costela|frango)\b/.test(text) &&
+    /\bkg\b/.test(text);
+  return looseFresh;
 }
 
 function scoreHit(item: OfferRow, hit: any) {
