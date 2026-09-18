@@ -36,6 +36,7 @@ type VisionResponse = {
 };
 
 type RichCandidate = FlyerCandidate & {
+  brand?: string | null;
   clubAdvertisedPrice?: number | null;
   includedTypes?: string[];
   excludedTypes?: string[];
@@ -71,19 +72,33 @@ function displayPackage(offer: VisionOffer) {
 }
 
 function displayName(offer: VisionOffer) {
-  const pieces: string[] = [];
-  const identity = offer.product_name.trim();
+  let identity = offer.product_name.trim();
+  const brand = offer.brand?.trim() ?? "";
+
+  // Gemini sometimes separates the brand from product_name. The Radar name shown to
+  // the user must preserve the complete commercial identity.
+  if (
+    brand &&
+    !normalizeIdentity(identity).includes(normalizeIdentity(brand))
+  ) {
+    identity = `${identity} ${brand}`;
+  }
+
   const pkg = displayPackage(offer);
-  pieces.push(pkg && !identity.toLowerCase().includes(pkg.toLowerCase()) ? `${identity} ${pkg}` : identity);
+  if (pkg && !normalizeIdentity(identity).includes(normalizeIdentity(pkg))) {
+    identity = `${identity} ${pkg}`;
+  }
 
-  if (offer.included_types?.length) pieces.push(`tipos: ${offer.included_types.join(", ")}`);
-  if (offer.excluded_types?.length) pieces.push(`exceto: ${offer.excluded_types.join(", ")}`);
-  if (Number(offer.club_price) > 0) pieces.push(`Clube ${money(Number(offer.club_price))}`);
-  if (offer.purchase_limit?.trim()) pieces.push(`limite: ${offer.purchase_limit.trim()}`);
-  if (offer.store_restrictions?.length) pieces.push(`lojas: ${offer.store_restrictions.join(", ")}`);
-  for (const note of offer.notes ?? []) if (note?.trim()) pieces.push(note.trim());
+  return identity.replace(/\s+/g, " ").trim();
+}
 
-  return pieces.filter(Boolean).join(" · ");
+function normalizeIdentity(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function toCandidate(offer: VisionOffer, sourcePageOverride?: number): RichCandidate | null {
@@ -99,6 +114,7 @@ function toCandidate(offer: VisionOffer, sourcePageOverride?: number): RichCandi
   const normalized = normalizedUnitPrice(price, pkg);
   return {
     rawName: displayName(offer),
+    brand: offer.brand?.trim() || null,
     price,
     packageInfo: pkg,
     normalizedPrice: normalized.normalizedPrice,
@@ -153,7 +169,7 @@ async function invokeVision(file: File, pageNo: number, totalPages: number) {
 
 async function canvasToJpeg(canvas: HTMLCanvasElement, name: string) {
   const blob = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob(resolve, "image/jpeg", 0.92),
+    canvas.toBlob(resolve, "image/jpeg", 0.95),
   );
   if (!blob) throw new Error("Não foi possível preparar a página para análise visual.");
   return new File([blob], name, { type: "image/jpeg" });
@@ -208,7 +224,7 @@ async function analyzePdfByPage(file: File, onProgress: Progress) {
 
     const page = await pdf.getPage(pageNo);
     const baseViewport = page.getViewport({ scale: 1 });
-    const targetWidth = Math.min(2400, Math.max(1700, baseViewport.width * 3));
+    const targetWidth = Math.min(2800, Math.max(2100, baseViewport.width * 3.8));
     const scale = targetWidth / baseViewport.width;
     const viewport = page.getViewport({ scale });
 
