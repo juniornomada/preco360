@@ -146,9 +146,15 @@ async function visionErrorDetails(error: any) {
   return error?.message || "Falha na análise visual";
 }
 
-async function invokeVision(file: File, pageNo: number, totalPages: number) {
+async function invokeVision(
+  file: File,
+  pageNo: number,
+  totalPages: number,
+  preferredModel?: string,
+) {
   const form = new FormData();
   form.append("file", file, file.name || `tabloide-pagina-${pageNo}`);
+  if (preferredModel) form.append("preferred_model", preferredModel);
 
   const { data, error } = await supabase.functions.invoke<VisionResponse>("analyze-flyer", { body: form });
   if (error) {
@@ -253,11 +259,11 @@ async function analyzePdfByPage(file: File, onProgress: Progress) {
 
     let data: VisionResponse;
     try {
-      data = await invokeVision(pageFile, pageNo, totalPages);
+      data = await invokeVision(pageFile, pageNo, totalPages, model);
     } catch (firstError) {
       // One automatic retry avoids making the user repeat the whole import for a transient API failure.
       await new Promise((resolve) => setTimeout(resolve, 1200));
-      data = await invokeVision(pageFile, pageNo, totalPages).catch(() => {
+      data = await invokeVision(pageFile, pageNo, totalPages, model).catch(() => {
         throw firstError;
       });
     }
@@ -265,7 +271,7 @@ async function analyzePdfByPage(file: File, onProgress: Progress) {
     retailer ||= data.retailer ?? null;
     validFrom ||= data.valid_from ?? null;
     validTo ||= data.valid_to ?? null;
-    model ||= data.model;
+    if (data.model) model = data.model;
 
     const pageCandidates = (data.offers ?? [])
       .map((offer) => toCandidate(offer, pageNo))
