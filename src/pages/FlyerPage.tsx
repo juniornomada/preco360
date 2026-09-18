@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -36,7 +36,11 @@ import {
   type FlyerCandidate,
   type ProductForMatch,
 } from "@/lib/flyerAnalysis";
-import { readFlyerFileSmart } from "@/lib/flyerOcr";
+import {
+  countFlyerPages,
+  visionResponseToFlyerResult,
+  type VisionResponse,
+} from "@/lib/flyerOcr";
 
 const db = supabase as any;
 type MatchType = "exact" | "equivalent" | "suggested" | "manual" | "unmatched";
@@ -47,6 +51,33 @@ type ReviewItem = FlyerCandidate & {
   matchType: MatchType;
 };
 type View = "radar" | "import" | "history";
+type FlyerImportJob = {
+  id: string;
+  status: "queued" | "processing" | "refining" | "completed" | "failed";
+  progress_current: number;
+  progress_total: number;
+  progress_label: string;
+  source_file_path: string;
+  source_file_name: string;
+  mime_type: string | null;
+  file_hash: string | null;
+  page_count: number | null;
+  retailer: string | null;
+  valid_from: string | null;
+  valid_to: string | null;
+  result: VisionResponse | null;
+  missing_pages: number[];
+  warning_message: string | null;
+  error_message: string | null;
+};
+type ProcessedSource = {
+  path: string;
+  fileHash: string | null;
+  fileName: string;
+  mimeType: string | null;
+  pageCount: number | null;
+};
+const IMPORT_JOB_KEY = "preco360-active-flyer-import-job";
 
 const rank = { exceptional: 0, good: 1, normal: 2, high: 3, unknown: 4 } as const;
 const cardTone = {
@@ -124,6 +155,9 @@ export default function FlyerPage() {
   const [saving, setSaving] = useState(false);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ current: 0, total: 0, label: "" });
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [processedSource, setProcessedSource] = useState<ProcessedSource | null>(null);
+  const appliedJobRef = useRef<string | null>(null);
 
   const { data: products = [] } = useQuery<ProductForMatch[]>({
     queryKey: ["flyer-products", user?.id],
@@ -194,6 +228,36 @@ export default function FlyerPage() {
     enabled: !!selectedHistoryId,
   });
 
+  const { data: activeJob } = useQuery<FlyerImportJob | null>({
+    queryKey: ["flyer-import-job", user?.id, activeJobId],
+    queryFn: async () => {
+      if (!activeJobId) return null;
+      const { data, error } = await db
+        .from("flyer_import_jobs")
+        .select("id,status,progress_current,progress_total,progress_label,source_file_path,source_file_name,mime_type,file_hash,page_count,retailer,valid_from,valid_to,result,missing_pages,warning_message,error_message")
+        .eq("id", activeJobId)
+        .maybeSingle();
+      if (error) throw error;
+      return data ?? null;
+    },
+    enabled: !!user && !!activeJobId,
+    refetchInterval: (query) => {
+      const status = (query.state.data as FlyerImportJob | null | undefined)?.status;
+      return status && ["queued", "processing", "refining"].includes(status) ? 1500 : false;
+    },
+    refetchOnWindowFocus: true,
+  });
+
+  useEffect(() => {
+    if (!user) return;
+    const saved = localStorage.getItem(IMPORT_JOB_KEY);
+    if (saved) {
+      setActiveJobId(saved);
+      setProcessing(true);
+      setProgress({ current: 1, total: 1, label: "Retomando importação no servidor…" });
+    }
+  }, [user?.id]);
+
   const productMap = useMemo(
     () => new Map(products.map((product) => [product.id, product])),
     [products],
@@ -243,10 +307,118 @@ export default function FlyerPage() {
     };
   };
 
+  useEffect(() => {
+    if (!activeJob) return;
+
+    setProgress({
+      current: Math.max(0, Number(activeJob.progress_current) || 0),
+      total: Math.max(1, Number(activeJob.progress_total) || Number(activeJob.page_count) || 1),
+      label: activeJob.progress_label || "Processando no servidor…",
+    });
+
+    if (["queued", "processing", "refining"].includes(activeJob.status)) {
+      setProcessing(true);
+      return;
+    }
+
+    if (activeJob.status === "failed") {
+      setProcessing(false);
+      localStorage.removeItem(IMPORT_JOB_KEY);
+      if (appliedJobRef.current !== activeJob.id) {
+        appliedJobRef.current = activeJob.id;
+        toast({
+          title: "Não consegui importar o tabloide",
+          description: activeJob.error_message || "O processamento no servidor falhou.",
+          variant: "destructive",
+        });
+      }
+      return;
+    }
+
+    if (
+      activeJob.status !== "completed" ||
+      !activeJob.result ||
+      appliedJobRef.current === activeJob.id
+    ) {
+      return;
+    }
+
+    try {
+      const result = visionResponseToFlyerResult(
+        activeJob.result,
+        activeJob.page_count || 1,
+      );
+      const meta = extractFlyerMeta(result.metaText || result.textByPage.join("\n"));
+      const detectedRetailer = result.retailer || activeJob.retailer || meta.retailer;
+      const detectedValidFrom = result.validFrom || activeJob.valid_from || meta.validFrom;
+      const detectedValidTo = result.validTo || activeJob.valid_to || meta.validTo;
+
+      if (detectedRetailer && !retailer) setRetailer(detectedRetailer);
+      if (detectedValidFrom && !validFrom) setValidFrom(detectedValidFrom);
+      if (detectedValidTo && !validTo) setValidTo(detectedValidTo);
+      setPageCount(result.pageCount);
+      setProcessedSource({
+        path: activeJob.source_file_path,
+        fileHash: activeJob.file_hash,
+        fileName: activeJob.source_file_name,
+        mimeType: activeJob.mime_type,
+        pageCount: result.pageCount,
+      });
+
+      const effectiveRetailer = detectedRetailer || retailer;
+      const matched = result.candidates.map((candidate) => {
+        try {
+          return matchOne(candidate, effectiveRetailer);
+        } catch {
+          return {
+            ...candidate,
+            localId: crypto.randomUUID(),
+            productId: null,
+            matchConfidence: 0,
+            matchType: "unmatched" as const,
+          };
+        }
+      });
+
+      appliedJobRef.current = activeJob.id;
+      setItems(matched);
+      setProcessing(false);
+      setView("radar");
+      localStorage.removeItem(IMPORT_JOB_KEY);
+
+      toast({
+        title: `${result.candidates.length} ofertas importadas`,
+        description:
+          `${matched.filter((item) => item.productId).length} relacionadas ao seu histórico.` +
+          (activeJob.warning_message ? ` ${activeJob.warning_message}` : ""),
+      });
+    } catch (error: any) {
+      appliedJobRef.current = activeJob.id;
+      setProcessing(false);
+      localStorage.removeItem(IMPORT_JOB_KEY);
+      toast({
+        title: "Não consegui montar a leitura do tabloide",
+        description: error?.message ?? "A análise terminou, mas o resultado não pôde ser carregado.",
+        variant: "destructive",
+      });
+    }
+  }, [
+    activeJob,
+    aliases,
+    products,
+    retailer,
+    validFrom,
+    validTo,
+  ]);
+
   const handleFileSelect = async (selected: File | null) => {
     setFile(selected);
     setItems([]);
     setPageCount(null);
+    setProcessedSource(null);
+    setActiveJobId(null);
+    appliedJobRef.current = null;
+    localStorage.removeItem(IMPORT_JOB_KEY);
 
     if (!selected) return;
 
@@ -282,69 +454,68 @@ export default function FlyerPage() {
   };
 
   const processFile = async () => {
-    if (!file) return;
+    if (!file || !user) return;
     setProcessing(true);
     setItems([]);
+    setProcessedSource(null);
+    appliedJobRef.current = null;
 
     try {
-      const result = await readFlyerFileSmart(file, (current, total, label) =>
-        setProgress({ current, total, label }),
-      );
+      setProgress({ current: 1, total: 3, label: "Preparando arquivo…" });
+      const [fileHash, detectedPages] = await Promise.all([
+        sha256(file),
+        countFlyerPages(file),
+      ]);
+      setPageCount(detectedPages);
 
-      const meta = extractFlyerMeta(result.metaText || result.textByPage.join("\n"));
-      const direct = result as typeof result & {
-        retailer?: string | null;
-        validFrom?: string | null;
-        validTo?: string | null;
-      };
-      const detectedRetailer = direct.retailer || meta.retailer;
-      const detectedValidFrom = direct.validFrom || meta.validFrom;
-      const detectedValidTo = direct.validTo || meta.validTo;
+      const jobId = crypto.randomUUID();
+      const path = `${user.id}/imports/${jobId}-${safeName(file.name || "tabloide")}`;
 
-      if (detectedRetailer && !retailer) setRetailer(detectedRetailer);
-      if (detectedValidFrom && !validFrom) setValidFrom(detectedValidFrom);
-      if (detectedValidTo && !validTo) setValidTo(detectedValidTo);
-      setPageCount(result.pageCount);
+      setProgress({ current: 2, total: 3, label: "Enviando o tabloide para o servidor…" });
+      const { error: uploadError } = await supabase.storage
+        .from("flyers")
+        .upload(path, file, { contentType: file.type || undefined, upsert: false });
+      if (uploadError) throw uploadError;
 
-      // One unusual product must never discard the complete AI extraction.
-      const effectiveRetailer = detectedRetailer || retailer;
-      const matched = result.candidates.map((candidate) => {
-        try {
-          return matchOne(candidate, effectiveRetailer);
-        } catch {
-          return {
-            ...candidate,
-            localId: crypto.randomUUID(),
-            productId: null,
-            matchConfidence: 0,
-            matchType: "unmatched" as const,
-          };
-        }
+      const { error: jobError } = await db.from("flyer_import_jobs").insert({
+        id: jobId,
+        user_id: user.id,
+        source_file_path: path,
+        source_file_name: file.name || "tabloide",
+        mime_type: file.type || null,
+        file_hash: fileHash,
+        page_count: detectedPages,
+        retailer: retailer.trim() || null,
+        valid_from: validFrom || null,
+        valid_to: validTo || null,
+        status: "queued",
+        progress_current: 0,
+        progress_total: detectedPages,
+        progress_label: "Arquivo recebido. Aguardando processamento…",
       });
+      if (jobError) throw jobError;
 
-      setItems(matched);
-      setView("radar");
+      setProgress({ current: 3, total: 3, label: "Importação iniciada no servidor…" });
+      const { error: invokeError } = await supabase.functions.invoke("process-flyer-job", {
+        body: { job_id: jobId, mode: "start" },
+      });
+      if (invokeError) throw invokeError;
 
-      const expectedMinimum = Math.max(4, result.pageCount * 5);
-      const partial = result.candidates.length < expectedMinimum;
-      toast({
-        title: result.candidates.length
-          ? `${result.candidates.length} ofertas encontradas`
-          : "Leitura sem ofertas confiáveis",
-        description: result.candidates.length
-          ? `${matched.filter((item) => item.productId).length} relacionadas ao seu histórico.${partial ? " A leitura parece parcial; revise antes de salvar." : ""}`
-          : "Tente novamente com o PDF original ou uma imagem mais nítida.",
-        variant: result.candidates.length ? undefined : "destructive",
+      setActiveJobId(jobId);
+      localStorage.setItem(IMPORT_JOB_KEY, jobId);
+      setProgress({
+        current: 1,
+        total: detectedPages,
+        label: "Arquivo enviado. A IA continua no servidor; você pode trocar de tela.",
       });
     } catch (error: any) {
-      toast({
-        title: "Não consegui ler o tabloide",
-        description: error?.message ?? "Tente outra imagem ou PDF.",
-        variant: "destructive",
-      });
-    } finally {
       setProcessing(false);
       setProgress({ current: 0, total: 0, label: "" });
+      toast({
+        title: "Não consegui iniciar a importação",
+        description: error?.message ?? "Tente novamente.",
+        variant: "destructive",
+      });
     }
   };
 
