@@ -21,10 +21,13 @@ export type FlyerCandidate = {
 export type ProductForMatch = {
   id: string;
   name: string;
+  category?: string | null;
   brand?: string | null;
   package_size?: number | null;
   unit?: string | null;
   stockable?: boolean | null;
+  image_url?: string | null;
+  image_source?: string | null;
   prices?: Array<{ price: number | string; date?: string | null; supermarket?: string | null }> | null;
 };
 
