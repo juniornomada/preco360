@@ -225,10 +225,13 @@ async function pdfPageCount(file: File) {
 }
 
 async function analyzePdfFast(file: File, onProgress: Progress) {
-  const totalPages = await pdfPageCount(file);
-  onProgress(1, totalPages, `Analisando ${totalPages} páginas em uma única leitura rápida…`);
+  // Count pages and start Gemini at the same time. The local PDF parse is useful for
+  // completeness checks, but it should not delay the network request.
+  const pageCountPromise = pdfPageCount(file);
+  onProgress(1, 1, "Analisando o PDF em uma única leitura rápida…");
+  const dataPromise = invokeVision(file, 1, 1);
 
-  const data = await invokeVision(file, 1, totalPages);
+  const [totalPages, data] = await Promise.all([pageCountPromise, dataPromise]);
   const candidates = (data.offers ?? [])
     .map((offer) => toCandidate(offer))
     .filter((item): item is RichCandidate => !!item)
@@ -239,10 +242,24 @@ async function analyzePdfFast(file: File, onProgress: Progress) {
   }
 
   const coveredPages = new Set(candidates.map((item) => item.sourcePage));
-  if (totalPages > 1 && coveredPages.size < totalPages) {
-    throw new Error(
-      `A leitura rápida cobriu ${coveredPages.size}/${totalPages} páginas; usando modo detalhado.`,
+  const missingPages = Array.from({ length: totalPages }, (_, index) => index + 1)
+    .filter((pageNo) => !coveredPages.has(pageNo));
+
+  // Reuse the successful fast extraction and refine only pages that were not covered.
+  // Previously one missed page caused the whole PDF to be re-read page by page.
+  if (missingPages.length) {
+    onProgress(
+      1,
+      missingPages.length,
+      `Leitura rápida cobriu ${coveredPages.size}/${totalPages} páginas; refinando apenas ${missingPages.length} página(s)…`,
     );
+    return analyzePdfByPage(file, onProgress, missingPages, {
+      candidates,
+      retailer: data.retailer ?? null,
+      validFrom: data.valid_from ?? null,
+      validTo: data.valid_to ?? null,
+      model: data.model,
+    });
   }
 
   const textByPage = Array.from({ length: totalPages }, (_, index) =>
@@ -276,26 +293,61 @@ async function analyzePdfFast(file: File, onProgress: Progress) {
   };
 }
 
-async function analyzePdfByPage(file: File, onProgress: Progress) {
+async function analyzePdfByPage(
+  file: File,
+  onProgress: Progress,
+  pageNumbers?: number[],
+  seed?: {
+    candidates: RichCandidate[];
+    retailer: string | null;
+    validFrom: string | null;
+    validTo: string | null;
+    model?: string;
+  },
+) {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc =
     `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
 
   const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
   const totalPages = pdf.numPages;
-  const all: RichCandidate[] = [];
-  const textByPage: string[] = [];
-  let retailer: string | null = null;
-  let validFrom: string | null = null;
-  let validTo: string | null = null;
-  let model: string | undefined;
+  const targetPages = pageNumbers?.length
+    ? [...new Set(pageNumbers)]
+        .filter((pageNo) => Number.isInteger(pageNo) && pageNo >= 1 && pageNo <= totalPages)
+        .sort((a, b) => a - b)
+    : Array.from({ length: totalPages }, (_, index) => index + 1);
 
-  for (let pageNo = 1; pageNo <= totalPages; pageNo++) {
-    if (pageNo > 1) {
-      onProgress(pageNo, totalPages, `Aguardando cota gratuita antes da página ${pageNo}/${totalPages}…`);
+  const all: RichCandidate[] = [...(seed?.candidates ?? [])];
+  const textByPage: string[] = Array.from({ length: totalPages }, (_, index) =>
+    all
+      .filter((item) => item.sourcePage === index + 1)
+      .map((item) => `${item.rawName} ${item.price.toFixed(2)}`)
+      .join("\n"),
+  );
+  let retailer: string | null = seed?.retailer ?? null;
+  let validFrom: string | null = seed?.validFrom ?? null;
+  let validTo: string | null = seed?.validTo ?? null;
+  let model: string | undefined = seed?.model;
+
+  for (let targetIndex = 0; targetIndex < targetPages.length; targetIndex++) {
+    const pageNo = targetPages[targetIndex];
+
+    if (targetIndex > 0) {
+      onProgress(
+        targetIndex + 1,
+        targetPages.length,
+        `Aguardando cota gratuita antes da página ${pageNo}/${totalPages}…`,
+      );
       await new Promise((resolve) => setTimeout(resolve, 2200));
     }
-    onProgress(pageNo, totalPages, `Preparando página ${pageNo}/${totalPages}…`);
+
+    onProgress(
+      targetIndex + 1,
+      targetPages.length,
+      pageNumbers?.length
+        ? `Refinando página ${pageNo}/${totalPages}…`
+        : `Preparando página ${pageNo}/${totalPages}…`,
+    );
 
     const page = await pdf.getPage(pageNo);
     const baseViewport = page.getViewport({ scale: 1 });
@@ -320,7 +372,11 @@ async function analyzePdfByPage(file: File, onProgress: Progress) {
     canvas.width = 1;
     canvas.height = 1;
 
-    onProgress(pageNo, totalPages, `Lendo página ${pageNo}/${totalPages} com IA…`);
+    onProgress(
+      targetIndex + 1,
+      targetPages.length,
+      `Lendo página ${pageNo}/${totalPages} com IA…`,
+    );
 
     let data: VisionResponse;
     try {
@@ -342,14 +398,18 @@ async function analyzePdfByPage(file: File, onProgress: Progress) {
       .map((offer) => toCandidate(offer, pageNo))
       .filter((item): item is RichCandidate => !!item);
 
+    // Replace only this page's fast-path results, keeping all other already-valid pages.
+    for (let i = all.length - 1; i >= 0; i--) {
+      if (all[i].sourcePage === pageNo) all.splice(i, 1);
+    }
     all.push(...pageCandidates);
-    textByPage.push(
-      pageCandidates.map((item) => `${item.rawName} ${item.price.toFixed(2)}`).join("\n"),
-    );
+    textByPage[pageNo - 1] = pageCandidates
+      .map((item) => `${item.rawName} ${item.price.toFixed(2)}`)
+      .join("\n");
 
     onProgress(
-      pageNo,
-      totalPages,
+      targetIndex + 1,
+      targetPages.length,
       `Página ${pageNo}/${totalPages}: ${pageCandidates.length} ofertas encontradas`,
     );
   }
@@ -367,7 +427,7 @@ async function analyzePdfByPage(file: File, onProgress: Progress) {
     textByPage,
     metaText,
     pageCount: totalPages,
-    candidates: all,
+    candidates: all.sort((a, b) => a.sourcePage - b.sourcePage),
     retailer,
     validFrom,
     validTo,
