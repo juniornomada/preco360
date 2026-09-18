@@ -4,7 +4,7 @@ import { readFlyerFileSmart as readFlyerLocal } from "@/lib/flyerOcrV6";
 
 type Progress = (page: number, total: number, label: string) => void;
 
-type VisionOffer = {
+export type VisionOffer = {
   product_name: string;
   brand: string | null;
   package_quantity: number | null;
@@ -22,7 +22,7 @@ type VisionOffer = {
   confidence: number;
 };
 
-type VisionResponse = {
+export type VisionResponse = {
   ok?: boolean;
   engine?: string;
   model?: string;
@@ -227,6 +227,52 @@ async function pdfPageCount(file: File) {
     `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
   const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
   return pdf.numPages;
+}
+
+export async function countFlyerPages(file: File) {
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+    return pdfPageCount(file);
+  }
+  return 1;
+}
+
+export function visionResponseToFlyerResult(data: VisionResponse, fallbackPageCount = 1) {
+  const totalPages = Math.max(
+    1,
+    Math.trunc(Number(data.page_count) || fallbackPageCount || 1),
+  );
+  const candidates = (data.offers ?? [])
+    .map((offer) => toCandidate(offer))
+    .filter((item): item is RichCandidate => !!item)
+    .filter((item) => item.sourcePage >= 1 && item.sourcePage <= totalPages);
+
+  if (!candidates.length) {
+    throw new Error("A análise terminou, mas não retornou nenhuma oferta confiável.");
+  }
+
+  const textByPage = Array.from({ length: totalPages }, (_, index) =>
+    candidates
+      .filter((item) => item.sourcePage === index + 1)
+      .map((item) => `${item.rawName} ${item.price.toFixed(2)}`)
+      .join("\n"),
+  );
+
+  const metaText = [
+    data.retailer ?? "",
+    data.valid_from && data.valid_to ? `${data.valid_from} a ${data.valid_to}` : "",
+  ].filter(Boolean).join("\n");
+
+  return {
+    textByPage,
+    metaText,
+    pageCount: totalPages,
+    candidates,
+    retailer: data.retailer ?? null,
+    validFrom: data.valid_from ?? null,
+    validTo: data.valid_to ?? null,
+    engine: data.engine ?? "gemini-vision",
+    model: data.model,
+  };
 }
 
 async function analyzePdfFast(file: File, onProgress: Progress) {
