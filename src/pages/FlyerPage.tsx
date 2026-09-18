@@ -93,6 +93,7 @@ export default function FlyerPage() {
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [processing, setProcessing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ current: 0, total: 0, label: "" });
 
   const { data: products = [] } = useQuery<ProductForMatch[]>({
@@ -147,6 +148,21 @@ export default function FlyerPage() {
       return data ?? [];
     },
     enabled: !!user,
+  });
+
+  const { data: selectedHistoryItems = [], isLoading: historyItemsLoading } = useQuery<any[]>({
+    queryKey: ["flyer-history-items", selectedHistoryId],
+    queryFn: async () => {
+      const { data, error } = await db
+        .from("flyer_items")
+        .select("id,raw_name,advertised_price,normalized_price,base_unit,club_advertised_price,excluded_types,included_types,purchase_limit,store_restrictions,offer_notes,source_page")
+        .eq("flyer_id", selectedHistoryId)
+        .order("source_page", { ascending: true })
+        .order("raw_name", { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!selectedHistoryId,
   });
 
   const productMap = useMemo(
@@ -745,23 +761,86 @@ export default function FlyerPage() {
               </CardContent>
             </Card>
           ) : (
-            flyerHistory.map((flyer) => (
-              <Card key={flyer.id}>
-                <CardContent className="flex items-center gap-3 p-4">
-                  <div className="rounded-xl bg-primary/10 p-2.5 text-primary"><FileText className="h-5 w-5" /></div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-bold">{flyer.retailer}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {dateBr(flyer.valid_from)} → {dateBr(flyer.valid_to)} · {flyer.flyer_items?.[0]?.count ?? 0} ofertas
-                    </p>
-                  </div>
-                  <div className="text-right text-[11px] text-muted-foreground">
-                    <p className="max-w-[110px] truncate">{flyer.source_file_name || "Ofertas"}</p>
-                    <p>{dateBr(flyer.created_at)}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
+            flyerHistory.map((flyer) => {
+              const open = selectedHistoryId === flyer.id;
+              return (
+                <Card key={flyer.id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 p-4 text-left"
+                    onClick={() => setSelectedHistoryId(open ? null : flyer.id)}
+                  >
+                    <div className="rounded-xl bg-primary/10 p-2.5 text-primary"><FileText className="h-5 w-5" /></div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-bold">{flyer.retailer}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {dateBr(flyer.valid_from)} → {dateBr(flyer.valid_to)} · {flyer.flyer_items?.[0]?.count ?? 0} ofertas
+                      </p>
+                    </div>
+                    <div className="text-right text-[11px] text-muted-foreground">
+                      <p className="max-w-[110px] truncate">{flyer.source_file_name || "Ofertas"}</p>
+                      <p>{dateBr(flyer.created_at)}</p>
+                    </div>
+                    <ChevronDown className={`h-4 w-4 shrink-0 transition ${open ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {open && (
+                    <div className="border-t p-3">
+                      {historyItemsLoading ? (
+                        <div className="flex justify-center py-6">
+                          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {selectedHistoryItems.map((item) => (
+                            <div key={item.id} className="rounded-lg border bg-background p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="font-semibold">{item.raw_name}</p>
+                                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                    Página {item.source_page ?? "—"}
+                                    {item.normalized_price
+                                      ? ` · ${formatNormalizedPrice(Number(item.normalized_price), item.base_unit || "un")}`
+                                      : ""}
+                                  </p>
+                                </div>
+                                <div className="shrink-0 text-right">
+                                  <p className="font-extrabold">{brl(Number(item.advertised_price))}</p>
+                                  {item.club_advertised_price ? (
+                                    <p className="text-[11px] font-semibold text-primary">
+                                      Clube {brl(Number(item.club_advertised_price))}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              {Array.isArray(item.excluded_types) && item.excluded_types.length > 0 ? (
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                  Exceto: {item.excluded_types.join(", ")}
+                                </p>
+                              ) : null}
+                              {Array.isArray(item.included_types) && item.included_types.length > 0 ? (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Tipos: {item.included_types.join(", ")}
+                                </p>
+                              ) : null}
+                              {item.purchase_limit ? (
+                                <p className="mt-1 text-xs text-muted-foreground">Limite: {item.purchase_limit}</p>
+                              ) : null}
+                              {Array.isArray(item.store_restrictions) && item.store_restrictions.length > 0 ? (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Lojas: {item.store_restrictions.join(", ")}
+                                </p>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              );
+            })
           )}
         </div>
       )}
