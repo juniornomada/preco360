@@ -19,6 +19,13 @@ export type VisionOffer = {
   purchase_limit: string | null;
   notes: string[];
   source_page: number;
+  image_box?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null;
+  image_box_confidence?: number | null;
   confidence: number;
 };
 
@@ -48,6 +55,13 @@ type RichCandidate = FlyerCandidate & {
   extractionConfidence?: number;
   priceBasisQuantity?: number;
   priceBasisUnit?: string;
+  imageBox?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null;
+  imageBoxConfidence?: number | null;
 };
 
 const money = (value: number) => `R$ ${value.toFixed(2).replace(".", ",")}`;
@@ -237,6 +251,21 @@ function toCandidate(offer: VisionOffer, sourcePageOverride?: number): RichCandi
     extractionConfidence: confidence,
     priceBasisQuantity: Number(offer.price_basis_quantity) || 1,
     priceBasisUnit: offer.price_basis_unit || "un",
+    imageBox:
+      offer.image_box &&
+      Number(offer.image_box.width) > 0 &&
+      Number(offer.image_box.height) > 0
+        ? {
+            x: Math.max(0, Math.min(1000, Number(offer.image_box.x) || 0)),
+            y: Math.max(0, Math.min(1000, Number(offer.image_box.y) || 0)),
+            width: Math.max(0, Math.min(1000, Number(offer.image_box.width) || 0)),
+            height: Math.max(0, Math.min(1000, Number(offer.image_box.height) || 0)),
+          }
+        : null,
+    imageBoxConfidence: Math.max(
+      0,
+      Math.min(1, Number(offer.image_box_confidence) || 0),
+    ),
   };
 }
 
