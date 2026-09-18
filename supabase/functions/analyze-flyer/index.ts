@@ -105,6 +105,23 @@ function geminiText(payload: any) {
   return "";
 }
 
+function parseJsonResponse(text: string) {
+  const trimmed = text.trim();
+  const unfenced = trimmed
+    .replace(/^\`\`\`(?:json)?\s*/i, "")
+    .replace(/\s*\`\`\`$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(unfenced);
+  } catch {
+    const start = unfenced.indexOf("{");
+    const end = unfenced.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(unfenced.slice(start, end + 1));
+    throw new Error(`Gemini retornou JSON inválido: ${unfenced.slice(0, 400)}`);
+  }
+}
+
 function geminiError(status: number, payload: any) {
   const message =
     payload?.error?.message ||
@@ -169,12 +186,6 @@ Deno.serve(async (req: Request) => {
       ],
       generationConfig: {
         maxOutputTokens: 65536,
-        responseFormat: {
-          text: {
-            mimeType: "application/json",
-            schema,
-          },
-        },
       },
     };
 
@@ -204,12 +215,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    let parsed: any;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      throw new Error(`Gemini retornou JSON inválido: ${text.slice(0, 400)}`);
-    }
+    const parsed: any = parseJsonResponse(text);
 
     const offers = Array.isArray(parsed?.offers)
       ? parsed.offers.filter(
