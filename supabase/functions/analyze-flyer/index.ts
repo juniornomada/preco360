@@ -7,9 +7,10 @@ const corsHeaders = {
 };
 
 const EXTRACTION_PROMPT = `
-Você é o extrator visual do Radar 360. Leia o encarte como uma pessoa olhando a página, não como texto corrido de OCR.
+Você é o extrator visual do Radar 360. Leia o encarte como uma pessoa olhando cada página, não como texto corrido de OCR.
 
-Objetivo: devolver somente ofertas que você consegue identificar com segurança a partir do arquivo visual.
+OBJETIVO
+Faça uma varredura completa do documento e devolva todas as ofertas que conseguir identificar com segurança, em JSON estruturado.
 
 REGRAS OBRIGATÓRIAS
 1. Nunca invente nome, preço, peso, sabor, loja ou condição. Se não conseguir ler nome + preço com segurança, ignore a oferta.
@@ -26,10 +27,15 @@ REGRAS OBRIGATÓRIAS
 9. Mecânicas como "leve 12 pague 10", "leve 550g pague 500g", "vaso não incluso" e similares vão em notes.
 10. product_name deve conter somente a identidade legível do produto, incluindo marca quando ela fizer parte natural do nome, mas sem preço, Clube, exceções ou restrições.
 11. source_page é a página física do PDF, começando em 1.
-12. confidence vai de 0 a 1. Não devolva registros abaixo de 0.72.
+12. confidence vai de 0 a 1. Só devolva registros com confiança >= 0.72.
 13. Datas devem ser YYYY-MM-DD quando legíveis. Não deduza datas ausentes.
 14. Preserve acentos e grafia do encarte quando legíveis.
-15. Faça uma varredura completa de todas as páginas e de todas as células/quadros de oferta, inclusive barras laterais e rodapés promocionais.
+15. Examine TODAS as páginas e TODAS as regiões: grade central, colunas laterais, rodapés e faixas promocionais.
+16. Não pare após encontrar algumas dezenas de ofertas. Continue até o fim do documento.
+17. Antes de finalizar, faça uma segunda varredura mental por página para encontrar células esquecidas.
+18. Em produtos vendidos por peso, não confunda o preço com peso/volume. "1,35L" é embalagem de 1,35 litro, não preço de R$ 1,35.
+19. Se um preço atende dois produtos separados por "ou", gere dois registros. Se "ou" apenas descreve variações do mesmo produto, mantenha um registro e coloque as variações em included_types.
+20. Retorne JSON compacto, sem explicações fora do esquema.
 `;
 
 const schema = {
@@ -66,7 +72,7 @@ const schema = {
           store_restrictions: { type: "array", items: { type: "string" } },
           purchase_limit: { type: ["string", "null"] },
           notes: { type: "array", items: { type: "string" } },
-          source_page: { type: "integer" },
+          source_page: { type: "integer", minimum: 1 },
           confidence: { type: "number", minimum: 0, maximum: 1 }
         }
       }
@@ -81,116 +87,149 @@ function json(status: number, body: unknown) {
   });
 }
 
-async function openAI(path: string, apiKey: string, init: RequestInit) {
-  const response = await fetch(`https://api.openai.com/v1${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      ...(init.headers ?? {}),
-    },
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`OpenAI ${response.status}: ${text.slice(0, 1200)}`);
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
-  return response;
+  return btoa(binary);
 }
 
-function responseText(payload: any) {
-  if (typeof payload?.output_text === "string" && payload.output_text.trim()) return payload.output_text;
-  for (const item of payload?.output ?? []) {
-    for (const content of item?.content ?? []) {
-      if (content?.type === "output_text" && typeof content.text === "string") return content.text;
+function geminiText(payload: any) {
+  for (const candidate of payload?.candidates ?? []) {
+    for (const part of candidate?.content?.parts ?? []) {
+      if (typeof part?.text === "string" && part.text.trim()) return part.text.trim();
     }
   }
   return "";
+}
+
+function geminiError(status: number, payload: any) {
+  const message =
+    payload?.error?.message ||
+    payload?.message ||
+    (typeof payload === "string" ? payload : "") ||
+    "Falha ao analisar o tabloide.";
+  const code = payload?.error?.status || payload?.error?.code || status;
+  return `Gemini ${status}: ${code} · ${String(message).slice(0, 1200)}`;
 }
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "METHOD_NOT_ALLOWED" });
 
-  const apiKey = Deno.env.get("OPENAI_API_KEY");
+  const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) {
     return json(503, {
       error: "VISION_NOT_CONFIGURED",
-      message: "OPENAI_API_KEY não está configurada no projeto Supabase.",
+      message: "GEMINI_API_KEY não está configurada no projeto Supabase.",
     });
   }
 
-  let openAIFileId: string | null = null;
   try {
     const form = await req.formData();
     const file = form.get("file");
     if (!(file instanceof File)) return json(400, { error: "FILE_REQUIRED" });
     if (file.size <= 0) return json(400, { error: "EMPTY_FILE" });
-    if (file.size > 20 * 1024 * 1024) return json(413, { error: "FILE_TOO_LARGE", max_mb: 20 });
+    if (file.size > 18 * 1024 * 1024) {
+      return json(413, {
+        error: "FILE_TOO_LARGE",
+        max_mb: 18,
+        message: "O modo gratuito aceita no Radar 360 arquivos de até 18 MB por análise.",
+      });
+    }
 
-    const allowed = file.type === "application/pdf" || file.type.startsWith("image/");
-    if (!allowed) return json(415, { error: "UNSUPPORTED_FILE", mime: file.type });
+    const mimeType = file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "");
+    const allowed = mimeType === "application/pdf" || mimeType.startsWith("image/");
+    if (!allowed) return json(415, { error: "UNSUPPORTED_FILE", mime: mimeType });
 
-    const upload = new FormData();
-    upload.append("purpose", "user_data");
-    upload.append("file", file, file.name || "tabloide");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const base64 = bytesToBase64(bytes);
+    const model = Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash";
 
-    const uploadedResponse = await openAI("/files", apiKey, { method: "POST", body: upload });
-    const uploaded = await uploadedResponse.json();
-    openAIFileId = uploaded.id;
-
-    const visualInput = file.type.startsWith("image/")
-      ? { type: "input_image", file_id: openAIFileId, detail: "high" }
-      : { type: "input_file", file_id: openAIFileId };
-
-    const model = Deno.env.get("OPENAI_VISION_MODEL") || "gpt-5.6-sol";
     const body = {
-      model,
-      reasoning: { effort: "medium" },
-      max_output_tokens: 50000,
-      input: [
-        {
-          role: "developer",
-          content: [{ type: "input_text", text: EXTRACTION_PROMPT }],
-        },
+      contents: [
         {
           role: "user",
-          content: [
+          parts: [
             {
-              type: "input_text",
-              text: "Extraia todas as ofertas deste tabloide seguindo rigorosamente as regras. Priorize precisão; se um item estiver ilegível, omita-o.",
+              text:
+                EXTRACTION_PROMPT +
+                "\n\nExtraia todas as ofertas deste tabloide agora. Faça a leitura página por página e só finalize depois de revisar todas as páginas.",
             },
-            visualInput,
+            {
+              inlineData: {
+                mimeType,
+                data: base64,
+              },
+            },
           ],
         },
       ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "radar_360_flyer",
-          description: "Ofertas estruturadas extraídas visualmente de um tabloide de supermercado.",
-          strict: true,
-          schema,
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 65536,
+        responseFormat: {
+          text: {
+            mimeType: "application/json",
+            schema,
+          },
         },
       },
     };
 
-    const response = await openAI("/responses", apiKey, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json();
-    const text = responseText(payload);
-    if (!text) throw new Error("A análise visual não retornou conteúdo estruturado.");
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify(body),
+      },
+    );
 
-    const parsed = JSON.parse(text);
-    const offers = Array.isArray(parsed.offers)
-      ? parsed.offers.filter((offer: any) => Number(offer?.confidence ?? 0) >= 0.72 && Number(offer?.price) > 0)
+    const payload = await response.json().catch(async () => ({ message: await response.text() }));
+    if (!response.ok) {
+      throw new Error(geminiError(response.status, payload));
+    }
+
+    const text = geminiText(payload);
+    if (!text) {
+      const finishReason = payload?.candidates?.[0]?.finishReason;
+      const blockReason = payload?.promptFeedback?.blockReason;
+      throw new Error(
+        `Gemini não retornou conteúdo estruturado${finishReason ? ` (finish: ${finishReason})` : ""}${blockReason ? ` (block: ${blockReason})` : ""}.`,
+      );
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`Gemini retornou JSON inválido: ${text.slice(0, 400)}`);
+    }
+
+    const offers = Array.isArray(parsed?.offers)
+      ? parsed.offers.filter(
+          (offer: any) =>
+            Number(offer?.confidence ?? 0) >= 0.72 &&
+            Number.isFinite(Number(offer?.price)) &&
+            Number(offer.price) > 0 &&
+            typeof offer?.product_name === "string" &&
+            offer.product_name.trim(),
+        )
       : [];
+
+    if (!offers.length) {
+      throw new Error("Gemini terminou a leitura, mas não retornou nenhuma oferta confiável.");
+    }
 
     return json(200, {
       ok: true,
-      engine: "openai-vision",
+      engine: "gemini-vision",
       model,
       retailer: parsed.retailer ?? null,
       valid_from: parsed.valid_from ?? null,
@@ -202,15 +241,7 @@ Deno.serve(async (req: Request) => {
     console.error("analyze-flyer", error);
     return json(500, {
       error: "VISION_ANALYSIS_FAILED",
-      message: error instanceof Error ? error.message : "Falha na análise visual.",
+      message: error instanceof Error ? error.message : "Falha na análise visual com Gemini.",
     });
-  } finally {
-    if (openAIFileId && apiKey) {
-      try {
-        await openAI(`/files/${openAIFileId}`, apiKey, { method: "DELETE" });
-      } catch (error) {
-        console.warn("Could not delete temporary OpenAI file", error);
-      }
-    }
   }
 });
