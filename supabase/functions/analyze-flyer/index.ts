@@ -186,6 +186,27 @@ function geminiError(status: number, payload: any) {
   return `Gemini ${status}: ${code} · ${String(message).slice(0, 1200)}`;
 }
 
+function validOffers(parsed: any) {
+  return Array.isArray(parsed?.offers)
+    ? parsed.offers.filter(
+        (offer: any) =>
+          Number(offer?.confidence ?? 0) >= 0.72 &&
+          Number.isFinite(Number(offer?.price)) &&
+          Number(offer.price) > 0 &&
+          typeof offer?.product_name === "string" &&
+          offer.product_name.trim(),
+      )
+    : [];
+}
+
+function offerKey(offer: any) {
+  return [
+    Math.max(1, Math.trunc(Number(offer?.source_page) || 1)),
+    String(offer?.product_name || "").trim().toLowerCase().replace(/\s+/g, " "),
+    Number(offer?.price || 0).toFixed(2),
+  ].join("|");
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "METHOD_NOT_ALLOWED" });
@@ -330,20 +351,126 @@ Deno.serve(async (req: Request) => {
     }
 
     const parsed: any = parseJsonResponse(text);
-
-    const offers = Array.isArray(parsed?.offers)
-      ? parsed.offers.filter(
-          (offer: any) =>
-            Number(offer?.confidence ?? 0) >= 0.72 &&
-            Number.isFinite(Number(offer?.price)) &&
-            Number(offer.price) > 0 &&
-            typeof offer?.product_name === "string" &&
-            offer.product_name.trim(),
-        )
-      : [];
+    let offers = validOffers(parsed);
 
     if (!offers.length) {
       throw new Error("Gemini terminou a leitura, mas não retornou nenhuma oferta confiável.");
+    }
+
+    // The browser used to render missing PDF pages one by one. Mobile browsers suspend
+    // canvas/timers in background tabs, so refinement must happen inside this Edge Function.
+    // The client may provide the PDF's exact page count; otherwise use Gemini's count.
+    const knownPageCount = Math.trunc(Number(form.get("known_page_count") || 0));
+    const parsedPageCount = Math.trunc(Number(parsed.page_count || 0));
+    const pageCount =
+      knownPageCount > 0 && knownPageCount <= 80
+        ? knownPageCount
+        : parsedPageCount > 0 && parsedPageCount <= 80
+          ? parsedPageCount
+          : null;
+
+    let refinedPages: number[] = [];
+
+    if (mimeType === "application/pdf" && pageCount && pageCount > 1) {
+      const coveredPages = new Set(
+        offers
+          .map((offer: any) => Math.trunc(Number(offer.source_page) || 0))
+          .filter((pageNo: number) => pageNo >= 1 && pageNo <= pageCount),
+      );
+      const missingPages = Array.from({ length: pageCount }, (_, index) => index + 1)
+        .filter((pageNo) => !coveredPages.has(pageNo));
+
+      if (missingPages.length) {
+        const refinementPrompt =
+          EXTRACTION_PROMPT +
+          `\n\nREFINAMENTO DE COMPLETUDE\nA primeira leitura não retornou ofertas nas páginas físicas: ${missingPages.join(", ")}.\nAnalise SOMENTE essas páginas do PDF e extraia todas as ofertas legíveis nelas.\nMantenha source_page com o número físico original da página.\nNão repita ofertas de páginas diferentes das solicitadas.\nSe uma página solicitada realmente não contiver ofertas, simplesmente não invente registros para ela.`;
+
+        const refinementBody = {
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: refinementPrompt },
+                {
+                  inlineData: {
+                    mimeType,
+                    data: base64,
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            maxOutputTokens: 65536,
+          },
+        };
+
+        const refinementModels = Array.from(
+          new Set([model, preferredModel, ...FREE_GEMINI_MODELS]),
+        );
+
+        let refinementPayload: any = null;
+
+        for (const candidateModel of refinementModels) {
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(candidateModel)}:generateContent`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-goog-api-key": apiKey,
+              },
+              body: JSON.stringify(refinementBody),
+            },
+          );
+
+          const candidatePayload = await response
+            .json()
+            .catch(async () => ({ message: await response.text() }));
+
+          if (response.ok) {
+            refinementPayload = candidatePayload;
+            model = candidateModel;
+            break;
+          }
+
+          const fallbackEligible =
+            response.status === 429 ||
+            response.status === 404 ||
+            response.status === 403 ||
+            response.status >= 500;
+
+          if (!fallbackEligible) break;
+        }
+
+        if (refinementPayload) {
+          const refinementText = geminiText(refinementPayload);
+          if (refinementText) {
+            try {
+              const refinementParsed: any = parseJsonResponse(refinementText);
+              const allowedPages = new Set(missingPages);
+              const refinementOffers = validOffers(refinementParsed).filter((offer: any) =>
+                allowedPages.has(Math.trunc(Number(offer.source_page) || 0)),
+              );
+
+              const merged = new Map<string, any>();
+              for (const offer of [...offers, ...refinementOffers]) {
+                merged.set(offerKey(offer), offer);
+              }
+              offers = [...merged.values()];
+              refinedPages = [
+                ...new Set(
+                  refinementOffers.map((offer: any) =>
+                    Math.trunc(Number(offer.source_page) || 0),
+                  ),
+                ),
+              ].sort((a, b) => a - b);
+            } catch (error) {
+              console.warn("analyze-flyer refinement parse failed", error);
+            }
+          }
+        }
+      }
     }
 
     return json(200, {
@@ -353,7 +480,8 @@ Deno.serve(async (req: Request) => {
       retailer: parsed.retailer ?? null,
       valid_from: parsed.valid_from ?? null,
       valid_to: parsed.valid_to ?? null,
-      page_count: parsed.page_count ?? null,
+      page_count: pageCount ?? parsed.page_count ?? null,
+      refined_pages: refinedPages,
       offers,
     });
   } catch (error) {
