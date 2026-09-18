@@ -765,24 +765,30 @@ export default function FlyerPage() {
               const open = selectedHistoryId === flyer.id;
               return (
                 <Card key={flyer.id}>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-3 p-4 text-left"
-                    onClick={() => setSelectedHistoryId(open ? null : flyer.id)}
-                  >
-                    <div className="rounded-xl bg-primary/10 p-2.5 text-primary"><FileText className="h-5 w-5" /></div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-bold">{flyer.retailer}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {dateBr(flyer.valid_from)} → {dateBr(flyer.valid_to)} · {flyer.flyer_items?.[0]?.count ?? 0} ofertas
-                      </p>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-xl bg-primary/10 p-2.5 text-primary"><FileText className="h-5 w-5" /></div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-bold">{flyer.retailer}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {dateBr(flyer.valid_from)} → {dateBr(flyer.valid_to)} · {flyer.flyer_items?.[0]?.count ?? 0} ofertas
+                        </p>
+                        <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                          {flyer.source_file_name || "Ofertas"} · {dateBr(flyer.created_at)}
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-right text-[11px] text-muted-foreground">
-                      <p className="max-w-[110px] truncate">{flyer.source_file_name || "Ofertas"}</p>
-                      <p>{dateBr(flyer.created_at)}</p>
-                    </div>
-                    <ChevronDown className={`h-4 w-4 shrink-0 transition ${open ? "rotate-180" : ""}`} />
-                  </button>
+
+                    <Button
+                      type="button"
+                      variant={open ? "secondary" : "default"}
+                      className="mt-3 h-10 w-full"
+                      onClick={() => setSelectedHistoryId(open ? null : flyer.id)}
+                    >
+                      {open ? "Ocultar ofertas" : `Ver ${flyer.flyer_items?.[0]?.count ?? 0} ofertas importadas`}
+                      <ChevronDown className={`ml-2 h-4 w-4 transition ${open ? "rotate-180" : ""}`} />
+                    </Button>
+                  </CardContent>
 
                   {open && (
                     <div className="border-t p-3">
