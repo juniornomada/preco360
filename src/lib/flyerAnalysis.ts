@@ -84,25 +84,46 @@ function overlapCount(a: string[], b: string[]) {
   return [...new Set(a)].filter((token) => B.has(token)).length;
 }
 
-function brandCompatible(candidate: FlyerCandidate, productTokens: string[]) {
-  const brandTokens = candidate.brand ? tokens(candidate.brand) : [];
-  if (!brandTokens.length) return true;
-  return brandTokens.every((token) => productTokens.includes(token));
+function brandTokens(candidate: FlyerCandidate) {
+  return candidate.brand ? tokens(candidate.brand) : [];
 }
 
-function identityCompatible(candidateTokens: string[], productTokens: string[]) {
+function brandCompatible(candidate: FlyerCandidate, productTokens: string[]) {
+  const brand = brandTokens(candidate);
+  if (!brand.length) return true;
+  return brand.every((token) => productTokens.includes(token));
+}
+
+function withoutTokens(source: string[], remove: string[]) {
+  if (!remove.length) return source;
+  const blocked = new Set(remove);
+  return source.filter((token) => !blocked.has(token));
+}
+
+function identityCompatible(candidate: FlyerCandidate, candidateTokens: string[], productTokens: string[]) {
   if (!candidateTokens.length || !productTokens.length) return false;
-  const overlap = overlapCount(candidateTokens, productTokens);
-  if (!overlap) return false;
 
-  // A package size or a generic word must never be enough to relate different products.
-  // For multi-word identities, require at least two meaningful shared tokens. Single-word
-  // commodities such as "cenoura" remain matchable by exact category name.
-  if (candidateTokens.length > 1 && productTokens.length > 1 && overlap < 2) return false;
+  const brand = brandTokens(candidate);
+  const candidateIdentity = withoutTokens(candidateTokens, brand);
+  const productIdentity = withoutTokens(productTokens, brand);
 
-  // If the leading product category differs, only allow it when there is otherwise
-  // strong identity evidence (e.g. an abbreviated receipt with several matching terms).
-  if (candidateTokens[0] !== productTokens[0] && overlap < 3) return false;
+  if (!candidateIdentity.length || !productIdentity.length) return false;
+  const identityOverlap = overlapCount(candidateIdentity, productIdentity);
+  if (!identityOverlap) return false;
+
+  // Brand and package size are supporting evidence, never the product identity itself.
+  // Example: "Batata Uni ..." must NOT match "Batata Palha Uni" just because both
+  // contain "batata" + "Uni". When one side has a subtype/variant, require a shared
+  // subtype token in addition to the category.
+  if (
+    (candidateIdentity.length > 1 || productIdentity.length > 1) &&
+    identityOverlap < 2
+  ) {
+    return false;
+  }
+
+  // If the leading category differs, demand very strong semantic overlap.
+  if (candidateIdentity[0] !== productIdentity[0] && identityOverlap < 3) return false;
 
   return true;
 }
@@ -246,7 +267,7 @@ export function matchFlyerItem(candidate: FlyerCandidate, products: ProductForMa
 
   for (const product of products) {
     const productTokens = tokens(`${product.name} ${product.brand ?? ""}`);
-    if (!identityCompatible(candidateTokens, productTokens)) continue;
+    if (!identityCompatible(candidate, candidateTokens, productTokens)) continue;
     if (!brandCompatible(candidate, productTokens)) continue;
 
     const pkg = product.package_size && product.unit
