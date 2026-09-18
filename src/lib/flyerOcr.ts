@@ -31,6 +31,7 @@ export type VisionResponse = {
   valid_to?: string | null;
   page_count?: number | null;
   refined_pages?: number[];
+  deduplicated_count?: number;
   offers?: VisionOffer[];
   error?: string;
   message?: string;
@@ -100,6 +101,111 @@ function normalizeIdentity(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function offerIdentityKey(offer: VisionOffer) {
+  const quantity = Number(offer.package_quantity);
+  const quantityKey = Number.isFinite(quantity) && quantity > 0 ? String(quantity) : "";
+  return [
+    normalizeIdentity(offer.product_name || ""),
+    quantityKey,
+    normalizeIdentity(offer.package_unit || ""),
+  ].join("|");
+}
+
+function positiveMoney(value: unknown) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function sameMoney(a: unknown, b: unknown) {
+  const left = positiveMoney(a);
+  const right = positiveMoney(b);
+  if (left === null || right === null) return left === right;
+  return Math.abs(left - right) < 0.005;
+}
+
+function mergeableVisionDuplicate(a: VisionOffer, b: VisionOffer) {
+  if (offerIdentityKey(a) !== offerIdentityKey(b)) return false;
+
+  const aPrice = positiveMoney(a.price);
+  const bPrice = positiveMoney(b.price);
+  const aClub = positiveMoney(a.club_price);
+  const bClub = positiveMoney(b.club_price);
+  if (aPrice === null || bPrice === null) return false;
+
+  if (sameMoney(aPrice, bPrice)) {
+    if (aClub !== null && bClub !== null && !sameMoney(aClub, bClub)) return false;
+    return true;
+  }
+
+  if (aClub !== null && sameMoney(aClub, bPrice)) return true;
+  if (bClub !== null && sameMoney(bClub, aPrice)) return true;
+  return false;
+}
+
+function unionOfferStrings(a: string[] | undefined, b: string[] | undefined) {
+  const map = new Map<string, string>();
+  for (const item of [...(a ?? []), ...(b ?? [])]) {
+    const value = String(item ?? "").trim();
+    const key = normalizeIdentity(value);
+    if (key && !map.has(key)) map.set(key, value);
+  }
+  return [...map.values()];
+}
+
+function visionRichness(offer: VisionOffer) {
+  let score = 0;
+  if (positiveMoney(offer.club_price) !== null) score += 12;
+  if (offer.brand) score += 3;
+  if (positiveMoney(offer.package_quantity) !== null && offer.package_unit) score += 3;
+  if (offer.purchase_limit) score += 3;
+  score += (offer.included_types ?? []).length;
+  score += (offer.excluded_types ?? []).length * 2;
+  score += (offer.store_restrictions ?? []).length * 2;
+  score += (offer.notes ?? []).length * 2;
+  score += Math.max(0, Math.min(1, Number(offer.confidence) || 0));
+  return score;
+}
+
+function mergeVisionDuplicate(a: VisionOffer, b: VisionOffer): VisionOffer {
+  const scoreA = visionRichness(a);
+  const scoreB = visionRichness(b);
+  const pageA = Math.max(1, Math.trunc(Number(a.source_page) || 1));
+  const pageB = Math.max(1, Math.trunc(Number(b.source_page) || 1));
+  const preferred =
+    scoreB > scoreA || (scoreA === scoreB && pageB >= pageA)
+      ? b
+      : a;
+  const other = preferred === a ? b : a;
+
+  return {
+    ...other,
+    ...preferred,
+    brand: preferred.brand || other.brand || null,
+    package_quantity: preferred.package_quantity ?? other.package_quantity ?? null,
+    package_unit: preferred.package_unit || other.package_unit || null,
+    club_price: positiveMoney(preferred.club_price) ?? positiveMoney(other.club_price),
+    included_types: unionOfferStrings(preferred.included_types, other.included_types),
+    excluded_types: unionOfferStrings(preferred.excluded_types, other.excluded_types),
+    store_restrictions: unionOfferStrings(preferred.store_restrictions, other.store_restrictions),
+    purchase_limit: preferred.purchase_limit || other.purchase_limit || null,
+    notes: unionOfferStrings(preferred.notes, other.notes),
+    confidence: Math.max(Number(preferred.confidence) || 0, Number(other.confidence) || 0),
+  };
+}
+
+function dedupeVisionOffers(offers: VisionOffer[]) {
+  const deduped: VisionOffer[] = [];
+  for (const offer of offers) {
+    const index = deduped.findIndex((existing) => mergeableVisionDuplicate(existing, offer));
+    if (index < 0) {
+      deduped.push(offer);
+    } else {
+      deduped[index] = mergeVisionDuplicate(deduped[index], offer);
+    }
+  }
+  return deduped.sort((a, b) => Number(a.source_page || 1) - Number(b.source_page || 1));
 }
 
 function toCandidate(offer: VisionOffer, sourcePageOverride?: number): RichCandidate | null {
@@ -189,7 +295,7 @@ async function canvasToJpeg(canvas: HTMLCanvasElement, name: string) {
 async function analyzeSingleImage(file: File, onProgress: Progress) {
   onProgress(1, 1, "Analisando visualmente o tabloide com IA…");
   const data = await invokeVision(file, 1, 1);
-  const candidates = data.offers!
+  const candidates = dedupeVisionOffers(data.offers ?? [])
     .map((offer) => toCandidate(offer, 1))
     .filter((item): item is RichCandidate => !!item);
 
@@ -241,7 +347,7 @@ export function visionResponseToFlyerResult(data: VisionResponse, fallbackPageCo
     1,
     Math.trunc(Number(data.page_count) || fallbackPageCount || 1),
   );
-  const candidates = (data.offers ?? [])
+  const candidates = dedupeVisionOffers(data.offers ?? [])
     .map((offer) => toCandidate(offer))
     .filter((item): item is RichCandidate => !!item)
     .filter((item) => item.sourcePage >= 1 && item.sourcePage <= totalPages);
@@ -282,7 +388,7 @@ async function analyzePdfFast(file: File, onProgress: Progress) {
   const totalPages = await pdfPageCount(file);
   onProgress(1, totalPages, "Analisando todas as páginas no servidor…");
   const data = await invokeVision(file, 1, totalPages, undefined, totalPages);
-  const candidates = (data.offers ?? [])
+  const candidates = dedupeVisionOffers(data.offers ?? [])
     .map((offer) => toCandidate(offer))
     .filter((item): item is RichCandidate => !!item)
     .filter((item) => item.sourcePage >= 1 && item.sourcePage <= totalPages);
