@@ -204,7 +204,7 @@ Deno.serve(async (req: Request) => {
 
     const bytes = new Uint8Array(await file.arrayBuffer());
     const base64 = bytesToBase64(bytes);
-    const model = Deno.env.get("GEMINI_MODEL") || "gemini-3.6-flash";
+    const preferredModel = Deno.env.get("GEMINI_MODEL") || "gemini-3.5-flash-lite";
 
     const body = {
       contents: [
@@ -230,21 +230,67 @@ Deno.serve(async (req: Request) => {
       },
     };
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify(body),
-      },
+    const modelCandidates = Array.from(
+      new Set([
+        preferredModel,
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3.6-flash",
+      ]),
     );
 
-    const payload = await response.json().catch(async () => ({ message: await response.text() }));
-    if (!response.ok) {
-      throw new Error(geminiError(response.status, payload));
+    let payload: any = null;
+    let model = preferredModel;
+    let lastRateLimit: { status: number; payload: any; model: string } | null = null;
+
+    for (const candidateModel of modelCandidates) {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(candidateModel)}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: JSON.stringify(body),
+        },
+      );
+
+      const candidatePayload = await response
+        .json()
+        .catch(async () => ({ message: await response.text() }));
+
+      if (response.ok) {
+        payload = candidatePayload;
+        model = candidateModel;
+        lastRateLimit = null;
+        break;
+      }
+
+      // Free-tier quotas are model-specific. If one model is temporarily exhausted,
+      // immediately try the next stable multimodal model instead of failing the import.
+      if (response.status === 429) {
+        lastRateLimit = {
+          status: response.status,
+          payload: candidatePayload,
+          model: candidateModel,
+        };
+        continue;
+      }
+
+      throw new Error(geminiError(response.status, candidatePayload));
+    }
+
+    if (!payload) {
+      const rate = lastRateLimit;
+      const message = rate
+        ? `${geminiError(rate.status, rate.payload)} · Todos os modelos gratuitos de fallback estão temporariamente no limite.`
+        : "Nenhum modelo Gemini disponível respondeu à análise.";
+      return json(429, {
+        error: "VISION_RATE_LIMITED",
+        message,
+        retryable: true,
+      });
     }
 
     const text = geminiText(payload);
