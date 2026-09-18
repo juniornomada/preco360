@@ -7,6 +7,13 @@ export type PackageInfo = {
   baseQuantity: number;
 };
 
+export type FlyerImageBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type FlyerCandidate = {
   rawName: string;
   brand?: string | null;
@@ -16,6 +23,8 @@ export type FlyerCandidate = {
   baseUnit: BaseUnit;
   clubPrice: boolean;
   sourcePage: number;
+  imageBox?: FlyerImageBox | null;
+  imageBoxConfidence?: number | null;
 };
 
 export type ProductForMatch = {
