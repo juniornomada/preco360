@@ -14,6 +14,7 @@ import SearchPage from "./pages/SearchPage";
 import ReceiptImportPage from "./pages/ReceiptImportPage";
 import FlyerPage from "./pages/FlyerPage";
 import FlyerHistoryPage from "./pages/FlyerHistoryPage";
+import MarketBasketPage from "./pages/MarketBasketPage";
 import ProfilePage from "./pages/ProfilePage";
 import QrLabPage from "./pages/QrLabPage";
 import NotFound from "./pages/NotFound";
@@ -61,6 +62,7 @@ function AppRoutes() {
         <Route path="/upload" element={<ReceiptImportPage />} />
         <Route path="/offers" element={<FlyerPage />} />
         <Route path="/offers/history" element={<FlyerHistoryPage />} />
+        <Route path="/offers/basket" element={<MarketBasketPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/qr-lab" element={<QrLabPage />} />
         <Route path="*" element={<NotFound />} />
