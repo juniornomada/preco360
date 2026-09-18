@@ -30,6 +30,7 @@ type VisionResponse = {
   valid_from?: string | null;
   valid_to?: string | null;
   page_count?: number | null;
+  refined_pages?: number[];
   offers?: VisionOffer[];
   error?: string;
   message?: string;
@@ -151,10 +152,14 @@ async function invokeVision(
   pageNo: number,
   totalPages: number,
   preferredModel?: string,
+  knownPageCount?: number,
 ) {
   const form = new FormData();
   form.append("file", file, file.name || `tabloide-pagina-${pageNo}`);
   if (preferredModel) form.append("preferred_model", preferredModel);
+  if (knownPageCount && knownPageCount > 0) {
+    form.append("known_page_count", String(knownPageCount));
+  }
 
   const { data, error } = await supabase.functions.invoke<VisionResponse>("analyze-flyer", { body: form });
   if (error) {
@@ -225,13 +230,12 @@ async function pdfPageCount(file: File) {
 }
 
 async function analyzePdfFast(file: File, onProgress: Progress) {
-  // Count pages and start Gemini at the same time. The local PDF parse is useful for
-  // completeness checks, but it should not delay the network request.
-  const pageCountPromise = pdfPageCount(file);
-  onProgress(1, 1, "Analisando o PDF em uma única leitura rápida…");
-  const dataPromise = invokeVision(file, 1, 1);
-
-  const [totalPages, data] = await Promise.all([pageCountPromise, dataPromise]);
+  // Only count pages locally. The expensive extraction/refinement now stays on the
+  // server so mobile browsers may safely suspend the tab after the request starts.
+  onProgress(1, 1, "Preparando PDF para análise no servidor…");
+  const totalPages = await pdfPageCount(file);
+  onProgress(1, totalPages, "Analisando todas as páginas no servidor…");
+  const data = await invokeVision(file, 1, totalPages, undefined, totalPages);
   const candidates = (data.offers ?? [])
     .map((offer) => toCandidate(offer))
     .filter((item): item is RichCandidate => !!item)
@@ -242,25 +246,8 @@ async function analyzePdfFast(file: File, onProgress: Progress) {
   }
 
   const coveredPages = new Set(candidates.map((item) => item.sourcePage));
-  const missingPages = Array.from({ length: totalPages }, (_, index) => index + 1)
-    .filter((pageNo) => !coveredPages.has(pageNo));
-
-  // Reuse the successful fast extraction and refine only pages that were not covered.
-  // Previously one missed page caused the whole PDF to be re-read page by page.
-  if (missingPages.length) {
-    onProgress(
-      1,
-      missingPages.length,
-      `Leitura rápida cobriu ${coveredPages.size}/${totalPages} páginas; refinando apenas ${missingPages.length} página(s)…`,
-    );
-    return analyzePdfByPage(file, onProgress, missingPages, {
-      candidates,
-      retailer: data.retailer ?? null,
-      validFrom: data.valid_from ?? null,
-      validTo: data.valid_to ?? null,
-      model: data.model,
-    });
-  }
+  const serverRefinedPages = new Set(data.refined_pages ?? []);
+  const reviewedPages = new Set([...coveredPages, ...serverRefinedPages]);
 
   const textByPage = Array.from({ length: totalPages }, (_, index) =>
     candidates
@@ -277,7 +264,7 @@ async function analyzePdfFast(file: File, onProgress: Progress) {
   onProgress(
     totalPages,
     totalPages,
-    `${candidates.length} ofertas encontradas em uma única análise`,
+    `${candidates.length} ofertas analisadas no servidor · ${reviewedPages.size}/${totalPages} página(s) com ofertas/refinamento`,
   );
 
   return {
@@ -438,18 +425,10 @@ async function analyzePdfByPage(
 
 export async function readFlyerFileSmart(file: File, onProgress: Progress) {
   if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-    // Fast path: send the original PDF once. Gemini can read multi-page PDFs directly,
-    // so a five-page flyer normally needs a single API request instead of five.
-    // If the response misses a page or comes back malformed, fall back automatically
-    // to the slower page-by-page mode. Do NOT multiply requests when the free quota
-    // itself is exhausted.
-    try {
-      return await analyzePdfFast(file, onProgress);
-    } catch (error) {
-      if (isQuotaError(error)) throw error;
-      onProgress(1, 1, "Leitura rápida incompleta; refinando página por página…");
-      return analyzePdfByPage(file, onProgress);
-    }
+    // PDF analysis/refinement stays in one server request. Do not fall back to the old
+    // browser page-by-page flow: Android/iOS may suspend canvas, timers and JavaScript
+    // as soon as the user changes app or tab.
+    return analyzePdfFast(file, onProgress);
   }
   return analyzeSingleImage(file, onProgress);
 }
