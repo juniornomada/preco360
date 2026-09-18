@@ -49,6 +49,7 @@ type OfferWithMarket = Offer & {
 type Group = {
   key: string;
   label: string;
+  baseUnit: "kg" | "l" | "un";
   offers: OfferWithMarket[];
   markets: string[];
 };
@@ -83,6 +84,26 @@ function fallbackKey(value: string) {
 function normalizedPriceLabel(offer: OfferWithMarket) {
   if (!offer.normalized_price || offer.base_unit === "un") return null;
   return brl(Number(offer.normalized_price)) + "/" + unitLabel(offer.base_unit);
+}
+
+function comparablePrice(offer: OfferWithMarket) {
+  const advertised = Number(offer.advertised_price);
+  const normalized = Number(offer.normalized_price);
+  if (
+    (offer.base_unit === "kg" || offer.base_unit === "l") &&
+    Number.isFinite(normalized) &&
+    normalized > 0
+  ) {
+    return normalized;
+  }
+  return advertised;
+}
+
+function compareOfferValue(a: OfferWithMarket, b: OfferWithMarket) {
+  return (
+    comparablePrice(a) - comparablePrice(b) ||
+    Number(a.advertised_price) - Number(b.advertised_price)
+  );
 }
 
 export default function MarketBasketPage() {
@@ -154,10 +175,12 @@ export default function MarketBasketPage() {
       const flyer = flyerMap.get(offer.flyer_id);
       if (!flyer?.retailer) continue;
 
-      const key = offer.product_id
+      const identityKey = offer.product_id
         ? "p:" + offer.product_id
         : "n:" + (offer.normalized_name || fallbackKey(offer.raw_name));
-      if (!key || key === "n:") continue;
+      if (!identityKey || identityKey === "n:") continue;
+
+      const key = identityKey + "|u:" + offer.base_unit;
 
       const enriched: OfferWithMarket = {
         ...offer,
@@ -173,6 +196,7 @@ export default function MarketBasketPage() {
         map.set(key, {
           key,
           label: offer.raw_name,
+          baseUnit: offer.base_unit,
           offers: [enriched],
           markets: [flyer.retailer],
         });
@@ -211,9 +235,7 @@ export default function MarketBasketPage() {
     const bestOfferByGroup = new Map<string, OfferWithMarket>();
 
     for (const group of selectedGroups) {
-      const best = [...group.offers].sort(
-        (a, b) => Number(a.advertised_price) - Number(b.advertised_price),
-      )[0];
+      const best = [...group.offers].sort(compareOfferValue)[0];
       if (best) bestOfferByGroup.set(group.key, best);
     }
 
@@ -226,17 +248,18 @@ export default function MarketBasketPage() {
       for (const group of selectedGroups) {
         const candidates = group.offers
           .filter((offer) => offer.retailer === retailer)
-          .sort((a, b) => Number(a.advertised_price) - Number(b.advertised_price));
+          .sort(compareOfferValue);
         const offer = candidates[0] ?? null;
         const best = bestOfferByGroup.get(group.key) ?? null;
 
         if (offer) {
+          const offerComparablePrice = comparablePrice(offer);
           covered += 1;
-          total += Number(offer.advertised_price) * group.quantity;
+          total += offerComparablePrice * group.quantity;
           if (best) {
-            bestComparableTotal += Number(best.advertised_price) * group.quantity;
-            premiumVsBest +=
-              (Number(offer.advertised_price) - Number(best.advertised_price)) * group.quantity;
+            const bestPrice = comparablePrice(best);
+            bestComparableTotal += bestPrice * group.quantity;
+            premiumVsBest += (offerComparablePrice - bestPrice) * group.quantity;
           }
         }
       }
@@ -272,7 +295,7 @@ export default function MarketBasketPage() {
           label: group.label,
           quantity: group.quantity,
           offer,
-          subtotal: Number(offer.advertised_price) * group.quantity,
+          subtotal: comparablePrice(offer) * group.quantity,
         };
       })
       .filter(Boolean) as Array<{
@@ -391,7 +414,7 @@ export default function MarketBasketPage() {
             <details className="rounded-xl border bg-card">
               <summary className="flex cursor-pointer list-none items-center gap-2 p-4 font-semibold">
                 <Split className="h-4 w-4 text-primary" />
-                Menor custo dividindo a compra
+                Menor custo equivalente dividindo a compra
                 <span className="ml-auto font-extrabold">{brl(split.total)}</span>
               </summary>
               <div className="space-y-2 border-t p-3">
@@ -405,11 +428,16 @@ export default function MarketBasketPage() {
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="font-bold">{brl(row.subtotal)}</p>
-                      {normalizedPriceLabel(row.offer) && (
-                        <p className="text-[11px] text-muted-foreground">
-                          {normalizedPriceLabel(row.offer)}
-                        </p>
-                      )}
+                      {normalizedPriceLabel(row.offer) ? (
+                        <>
+                          <p className="text-[11px] text-muted-foreground">
+                            equivalente · {normalizedPriceLabel(row.offer)}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            embalagem {brl(Number(row.offer.advertised_price))}
+                          </p>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 ))}
@@ -457,9 +485,7 @@ export default function MarketBasketPage() {
             <div className="mt-3 max-h-[54vh] space-y-2 overflow-y-auto pr-1">
               {visibleGroups.map((group) => {
                 const qty = selected[group.key] ?? 0;
-                const best = [...group.offers].sort(
-                  (a, b) => Number(a.advertised_price) - Number(b.advertised_price),
-                )[0];
+                const best = [...group.offers].sort(compareOfferValue)[0];
                 return (
                   <div
                     key={group.key}
@@ -477,8 +503,11 @@ export default function MarketBasketPage() {
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold leading-snug">{group.label}</p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
-                          {group.markets.length} mercado(s) · melhor oferta {brl(Number(best?.advertised_price ?? 0))}
-                          {best && normalizedPriceLabel(best) ? " · " + normalizedPriceLabel(best) : ""}
+                          {group.markets.length} mercado(s) ·{" "}
+                          {best && normalizedPriceLabel(best)
+                            ? "melhor custo " + normalizedPriceLabel(best) +
+                              " · embalagem " + brl(Number(best.advertised_price))
+                            : "melhor oferta " + brl(Number(best?.advertised_price ?? 0))}
                         </p>
                       </div>
 
@@ -489,7 +518,9 @@ export default function MarketBasketPage() {
                             className="h-7 w-7 rounded-md text-lg"
                             onClick={() => changeQty(group.key, -1)}
                           >−</button>
-                          <span className="w-6 text-center text-sm font-bold">{qty}</span>
+                          <span className="min-w-8 text-center text-sm font-bold">
+                            {qty}{group.baseUnit === "un" ? "" : " " + unitLabel(group.baseUnit)}
+                          </span>
                           <button
                             type="button"
                             className="h-7 w-7 rounded-md text-lg"
@@ -540,7 +571,9 @@ export default function MarketBasketPage() {
                       </p>
                       <p className="text-[11px] text-muted-foreground">
                         {market.complete
-                          ? "cesta promocional completa"
+                          ? selectedGroups.some((group) => group.baseUnit !== "un")
+                            ? "cesta equivalente por kg/L"
+                            : "cesta promocional completa"
                           : market.missing + " sem preço no tabloide"}
                       </p>
                     </div>
@@ -552,9 +585,12 @@ export default function MarketBasketPage() {
       )}
 
       <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">
-        O comparador usa somente preços dos tabloides importados e ainda vigentes. Ausência de um
-        item no tabloide não significa que o mercado não venda o produto — apenas que não temos um
-        preço promocional válido para ele.
+        Para produtos em g/kg ou ml/L, a Cesta 360 compara pelo valor equivalente em R$/kg ou R$/L:
+        cada quantidade selecionada representa 1 kg ou 1 L de referência, enquanto o preço da
+        embalagem continua visível. Itens por unidade usam o preço da embalagem. O comparador usa
+        somente preços dos tabloides importados e ainda vigentes. Ausência de um item no tabloide
+        não significa que o mercado não venda o produto — apenas que não temos um preço promocional
+        válido para ele.
       </p>
     </div>
   );
