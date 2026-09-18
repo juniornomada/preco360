@@ -258,6 +258,11 @@ export default function FlyerPage() {
       return data ?? [];
     },
     enabled: !!selectedHistoryId,
+    refetchInterval: (query) => {
+      const rows = query.state.data as any[] | undefined;
+      return rows?.some((item) => !item.image_source) ? 3000 : false;
+    },
+    refetchOnWindowFocus: true,
   });
 
   const { data: activeJob } = useQuery<FlyerImportJob | null>({
