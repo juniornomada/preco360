@@ -204,12 +204,35 @@ export default function FlyerPage() {
       );
 
       const meta = extractFlyerMeta(result.metaText || result.textByPage.join("\n"));
-      if (meta.retailer && !retailer) setRetailer(meta.retailer);
-      if (meta.validFrom && !validFrom) setValidFrom(meta.validFrom);
-      if (meta.validTo && !validTo) setValidTo(meta.validTo);
+      const direct = result as typeof result & {
+        retailer?: string | null;
+        validFrom?: string | null;
+        validTo?: string | null;
+      };
+      const detectedRetailer = direct.retailer || meta.retailer;
+      const detectedValidFrom = direct.validFrom || meta.validFrom;
+      const detectedValidTo = direct.validTo || meta.validTo;
+
+      if (detectedRetailer && !retailer) setRetailer(detectedRetailer);
+      if (detectedValidFrom && !validFrom) setValidFrom(detectedValidFrom);
+      if (detectedValidTo && !validTo) setValidTo(detectedValidTo);
       setPageCount(result.pageCount);
 
-      const matched = result.candidates.map(matchOne);
+      // One unusual product must never discard the complete AI extraction.
+      const matched = result.candidates.map((candidate) => {
+        try {
+          return matchOne(candidate);
+        } catch {
+          return {
+            ...candidate,
+            localId: crypto.randomUUID(),
+            productId: null,
+            matchConfidence: 0,
+            matchType: "unmatched" as const,
+          };
+        }
+      });
+
       setItems(matched);
       setView("radar");
 
