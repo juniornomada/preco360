@@ -58,6 +58,32 @@ const cardTone = {
 const brl = (value: number) =>
   value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
+const comparableUnit = (unit: "kg" | "l" | "un") =>
+  unit === "l" ? "L" : unit;
+
+const offerPriceWithReference = (
+  price: number,
+  normalizedPrice: number,
+  baseUnit: "kg" | "l" | "un",
+) => {
+  if (baseUnit === "un" || !Number.isFinite(normalizedPrice) || normalizedPrice <= 0) {
+    return brl(price);
+  }
+
+  const normalized = `${brl(normalizedPrice)}/${comparableUnit(baseUnit)}`;
+  if (Math.abs(price - normalizedPrice) < 0.005) return normalized;
+  return `${brl(price)} (${normalized})`;
+};
+
+const historicalReferenceLabel = (
+  referencePrice: number | null,
+  baseUnit: "kg" | "l" | "un",
+) => {
+  if (!referencePrice || !Number.isFinite(referencePrice)) return null;
+  if (baseUnit === "un") return brl(referencePrice);
+  return `${brl(referencePrice)}/${comparableUnit(baseUnit)}`;
+};
+
 const dateBr = (value?: string | null) => {
   if (!value) return "—";
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -683,10 +709,18 @@ export default function FlyerPage() {
                                 </p>
                               </div>
                               <div className="shrink-0 text-right">
-                                <p className="font-extrabold">{brl(item.price)}</p>
-                                <p className="text-[11px] text-muted-foreground">
-                                  {formatNormalizedPrice(item.normalizedPrice, item.baseUnit)}
+                                <p className="font-extrabold">
+                                  {offerPriceWithReference(item.price, item.normalizedPrice, item.baseUnit)}
                                 </p>
+                                {historicalReferenceLabel(item.verdict.referencePrice, item.baseUnit) ? (
+                                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                    Referência histórica: {historicalReferenceLabel(item.verdict.referencePrice, item.baseUnit)}
+                                  </p>
+                                ) : (
+                                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                    Sem referência histórica comparável
+                                  </p>
+                                )}
                               </div>
                             </div>
                             <div className="mt-3 flex items-center justify-between">
@@ -745,8 +779,20 @@ export default function FlyerPage() {
                             <option key={product.id} value={product.id}>{product.name}</option>
                           ))}
                         </select>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>{formatNormalizedPrice(item.normalizedPrice || item.price, item.baseUnit)}</span>
+                        <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                          <span>
+                            {item.baseUnit === "un"
+                              ? `Preço unitário: ${brl(item.price)}`
+                              : `Equivalente: ${formatNormalizedPrice(item.normalizedPrice || item.price, item.baseUnit)}`}
+                          </span>
+                          {historicalReferenceLabel(item.verdict.referencePrice, item.baseUnit) ? (
+                            <>
+                              <span>·</span>
+                              <span>
+                                Referência: {historicalReferenceLabel(item.verdict.referencePrice, item.baseUnit)}
+                              </span>
+                            </>
+                          ) : null}
                           <span>·</span>
                           <span>{item.matchType === "manual" ? "confirmado" : `${Math.round(item.matchConfidence * 100)}% match`}</span>
                         </div>
@@ -838,13 +884,16 @@ export default function FlyerPage() {
                                   <p className="font-semibold">{item.raw_name}</p>
                                   <p className="mt-0.5 text-[11px] text-muted-foreground">
                                     Página {item.source_page ?? "—"}
-                                    {item.normalized_price
-                                      ? ` · ${formatNormalizedPrice(Number(item.normalized_price), item.base_unit || "un")}`
-                                      : ""}
                                   </p>
                                 </div>
                                 <div className="shrink-0 text-right">
-                                  <p className="font-extrabold">{brl(Number(item.advertised_price))}</p>
+                                  <p className="font-extrabold">
+                                    {offerPriceWithReference(
+                                      Number(item.advertised_price),
+                                      Number(item.normalized_price) || Number(item.advertised_price),
+                                      item.base_unit || "un",
+                                    )}
+                                  </p>
                                   {item.club_advertised_price ? (
                                     <p className="text-[11px] font-semibold text-primary">
                                       Clube {brl(Number(item.club_advertised_price))}
