@@ -380,22 +380,44 @@ export default function FlyerPage() {
       if (flyerError) throw flyerError;
 
       const { error: itemsError } = await db.from("flyer_items").insert(
-        validItems.map((item) => ({
-          flyer_id: flyer.id,
-          user_id: user.id,
-          raw_name: item.rawName.trim(),
-          normalized_name: normalizeSearchText(item.rawName),
-          package_quantity: item.packageInfo?.quantity ?? null,
-          package_unit: item.packageInfo?.unit ?? null,
-          advertised_price: item.price,
-          base_unit: item.baseUnit,
-          normalized_price: item.normalizedPrice,
-          club_price: item.clubPrice,
-          product_id: item.productId,
-          match_confidence: item.matchConfidence,
-          match_type: item.matchType,
-          source_page: item.sourcePage,
-        })),
+        validItems.map((item) => {
+          const rich = item as ReviewItem & {
+            clubAdvertisedPrice?: number | null;
+            includedTypes?: string[];
+            excludedTypes?: string[];
+            storeRestrictions?: string[];
+            purchaseLimit?: string | null;
+            offerNotes?: string[];
+            extractionConfidence?: number;
+            priceBasisQuantity?: number;
+            priceBasisUnit?: string;
+          };
+          return {
+            flyer_id: flyer.id,
+            user_id: user.id,
+            raw_name: item.rawName.trim(),
+            normalized_name: normalizeSearchText(item.rawName),
+            package_quantity: item.packageInfo?.quantity ?? null,
+            package_unit: item.packageInfo?.unit ?? null,
+            advertised_price: item.price,
+            base_unit: item.baseUnit,
+            normalized_price: item.normalizedPrice,
+            club_price: item.clubPrice,
+            club_advertised_price: rich.clubAdvertisedPrice ?? null,
+            included_types: rich.includedTypes ?? [],
+            excluded_types: rich.excludedTypes ?? [],
+            store_restrictions: rich.storeRestrictions ?? [],
+            purchase_limit: rich.purchaseLimit ?? null,
+            offer_notes: rich.offerNotes ?? [],
+            extraction_confidence: rich.extractionConfidence ?? null,
+            price_basis_quantity: rich.priceBasisQuantity ?? 1,
+            price_basis_unit: rich.priceBasisUnit ?? "un",
+            product_id: item.productId,
+            match_confidence: item.matchConfidence,
+            match_type: item.matchType,
+            source_page: item.sourcePage,
+          };
+        }),
       );
       if (itemsError) throw itemsError;
 
