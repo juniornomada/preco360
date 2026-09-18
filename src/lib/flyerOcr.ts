@@ -211,6 +211,71 @@ async function analyzeSingleImage(file: File, onProgress: Progress) {
   };
 }
 
+function isQuotaError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /429|RESOURCE_EXHAUSTED|VISION_RATE_LIMITED|quota/i.test(message);
+}
+
+async function pdfPageCount(file: File) {
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc =
+    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+  const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  return pdf.numPages;
+}
+
+async function analyzePdfFast(file: File, onProgress: Progress) {
+  const totalPages = await pdfPageCount(file);
+  onProgress(1, totalPages, `Analisando ${totalPages} páginas em uma única leitura rápida…`);
+
+  const data = await invokeVision(file, 1, totalPages);
+  const candidates = (data.offers ?? [])
+    .map((offer) => toCandidate(offer))
+    .filter((item): item is RichCandidate => !!item)
+    .filter((item) => item.sourcePage >= 1 && item.sourcePage <= totalPages);
+
+  if (!candidates.length) {
+    throw new Error("A leitura rápida não retornou ofertas confiáveis.");
+  }
+
+  const coveredPages = new Set(candidates.map((item) => item.sourcePage));
+  if (totalPages > 1 && coveredPages.size < totalPages) {
+    throw new Error(
+      `A leitura rápida cobriu ${coveredPages.size}/${totalPages} páginas; usando modo detalhado.`,
+    );
+  }
+
+  const textByPage = Array.from({ length: totalPages }, (_, index) =>
+    candidates
+      .filter((item) => item.sourcePage === index + 1)
+      .map((item) => `${item.rawName} ${item.price.toFixed(2)}`)
+      .join("\n"),
+  );
+
+  const metaText = [
+    data.retailer ?? "",
+    data.valid_from && data.valid_to ? `${data.valid_from} a ${data.valid_to}` : "",
+  ].filter(Boolean).join("\n");
+
+  onProgress(
+    totalPages,
+    totalPages,
+    `${candidates.length} ofertas encontradas em uma única análise`,
+  );
+
+  return {
+    textByPage,
+    metaText,
+    pageCount: totalPages,
+    candidates,
+    retailer: data.retailer ?? null,
+    validFrom: data.valid_from ?? null,
+    validTo: data.valid_to ?? null,
+    engine: data.engine ?? "gemini-vision",
+    model: data.model,
+  };
+}
+
 async function analyzePdfByPage(file: File, onProgress: Progress) {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc =
@@ -312,11 +377,19 @@ async function analyzePdfByPage(file: File, onProgress: Progress) {
 }
 
 export async function readFlyerFileSmart(file: File, onProgress: Progress) {
-  // PDFs are analyzed page by page. This keeps each Gemini response small, preserves
-  // the real page number, and prevents one dense five-page flyer from timing out or
-  // returning a truncated JSON response.
   if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-    return analyzePdfByPage(file, onProgress);
+    // Fast path: send the original PDF once. Gemini can read multi-page PDFs directly,
+    // so a five-page flyer normally needs a single API request instead of five.
+    // If the response misses a page or comes back malformed, fall back automatically
+    // to the slower page-by-page mode. Do NOT multiply requests when the free quota
+    // itself is exhausted.
+    try {
+      return await analyzePdfFast(file, onProgress);
+    } catch (error) {
+      if (isQuotaError(error)) throw error;
+      onProgress(1, 1, "Leitura rápida incompleta; refinando página por página…");
+      return analyzePdfByPage(file, onProgress);
+    }
   }
   return analyzeSingleImage(file, onProgress);
 }
