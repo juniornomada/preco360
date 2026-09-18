@@ -170,12 +170,8 @@ Deno.serve(async (req: Request) => {
       generationConfig: {
         temperature: 0.1,
         maxOutputTokens: 65536,
-        responseFormat: {
-          text: {
-            mimeType: "application/json",
-            schema,
-          },
-        },
+        responseMimeType: "application/json",
+        responseJsonSchema: schema,
       },
     };
 
