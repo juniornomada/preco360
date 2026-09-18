@@ -224,8 +224,13 @@ export default function FlyerPage() {
     [analyzed],
   );
 
-  const matchOne = (candidate: FlyerCandidate): ReviewItem => {
-    const match = matchFlyerItem(candidate, products, aliases, retailer);
+  const matchOne = (candidate: FlyerCandidate, retailerOverride?: string): ReviewItem => {
+    const match = matchFlyerItem(
+      candidate,
+      products,
+      aliases,
+      retailerOverride ?? retailer,
+    );
     return {
       ...candidate,
       localId: crypto.randomUUID(),
@@ -299,9 +304,10 @@ export default function FlyerPage() {
       setPageCount(result.pageCount);
 
       // One unusual product must never discard the complete AI extraction.
+      const effectiveRetailer = detectedRetailer || retailer;
       const matched = result.candidates.map((candidate) => {
         try {
-          return matchOne(candidate);
+          return matchOne(candidate, effectiveRetailer);
         } catch {
           return {
             ...candidate,
