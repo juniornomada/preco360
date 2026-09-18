@@ -86,7 +86,7 @@ function displayName(offer: VisionOffer) {
   return pieces.filter(Boolean).join(" · ");
 }
 
-function toCandidate(offer: VisionOffer): RichCandidate | null {
+function toCandidate(offer: VisionOffer, sourcePageOverride?: number): RichCandidate | null {
   const price = Number(offer.price);
   const confidence = Number(offer.confidence);
   if (!offer.product_name?.trim() || !Number.isFinite(price) || price <= 0 || confidence < 0.72) return null;
@@ -104,7 +104,7 @@ function toCandidate(offer: VisionOffer): RichCandidate | null {
     normalizedPrice: normalized.normalizedPrice,
     baseUnit: normalized.baseUnit as BaseUnit,
     clubPrice: Number(offer.club_price) > 0,
-    sourcePage: Math.max(1, Math.trunc(Number(offer.source_page) || 1)),
+    sourcePage: sourcePageOverride ?? Math.max(1, Math.trunc(Number(offer.source_page) || 1)),
     clubAdvertisedPrice: Number(offer.club_price) > 0 ? Number(offer.club_price) : null,
     includedTypes: offer.included_types ?? [],
     excludedTypes: offer.excluded_types ?? [],
@@ -130,49 +130,169 @@ async function visionErrorDetails(error: any) {
   return error?.message || "Falha na análise visual";
 }
 
-async function readWithVision(file: File, onProgress: Progress) {
-  onProgress(1, 1, "Analisando visualmente o tabloide com IA…");
+async function invokeVision(file: File, pageNo: number, totalPages: number) {
   const form = new FormData();
-  form.append("file", file, file.name || "tabloide");
-  const { data, error } = await supabase.functions.invoke<VisionResponse>("analyze-flyer", { body: form });
+  form.append("file", file, file.name || `tabloide-pagina-${pageNo}`);
 
+  const { data, error } = await supabase.functions.invoke<VisionResponse>("analyze-flyer", { body: form });
   if (error) {
     const details = await visionErrorDetails(error);
-    throw new Error(`Análise visual indisponível: ${details}`);
+    throw new Error(`Página ${pageNo}/${totalPages}: ${details}`);
   }
   if (!data?.ok) {
-    throw new Error(`Análise visual indisponível: ${data?.message || data?.error || "resposta inválida do servidor"}`);
+    throw new Error(
+      `Página ${pageNo}/${totalPages}: ${data?.message || data?.error || "resposta inválida do servidor"}`,
+    );
   }
   if (!Array.isArray(data.offers)) {
-    throw new Error("Análise visual indisponível: o servidor não retornou a lista de ofertas.");
+    throw new Error(`Página ${pageNo}/${totalPages}: o servidor não retornou a lista de ofertas.`);
   }
 
-  const candidates = data.offers.map(toCandidate).filter((item): item is RichCandidate => !!item);
+  return data;
+}
+
+async function canvasToJpeg(canvas: HTMLCanvasElement, name: string) {
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", 0.92),
+  );
+  if (!blob) throw new Error("Não foi possível preparar a página para análise visual.");
+  return new File([blob], name, { type: "image/jpeg" });
+}
+
+async function analyzeSingleImage(file: File, onProgress: Progress) {
+  onProgress(1, 1, "Analisando visualmente o tabloide com IA…");
+  const data = await invokeVision(file, 1, 1);
+  const candidates = data.offers!
+    .map((offer) => toCandidate(offer, 1))
+    .filter((item): item is RichCandidate => !!item);
+
   if (!candidates.length) {
     throw new Error("A análise visual terminou, mas não retornou nenhuma oferta confiável.");
   }
 
-  const pageCount = Math.max(1, Number(data.page_count) || Math.max(...candidates.map((item) => item.sourcePage), 1));
-  const textByPage = Array.from({ length: pageCount }, (_, index) =>
-    candidates
-      .filter((item) => item.sourcePage === index + 1)
-      .map((item) => `${item.rawName} ${item.price.toFixed(2)}`)
-      .join("\n"),
-  );
   const metaText = [
     data.retailer ?? "",
     data.valid_from && data.valid_to ? `${data.valid_from} a ${data.valid_to}` : "",
   ].filter(Boolean).join("\n");
 
-  onProgress(pageCount, pageCount, `${candidates.length} ofertas lidas por IA`);
-  return { textByPage, metaText, pageCount, candidates, engine: data.engine ?? "openai-vision", model: data.model };
+  onProgress(1, 1, `${candidates.length} ofertas lidas por IA`);
+  return {
+    textByPage: [candidates.map((item) => `${item.rawName} ${item.price.toFixed(2)}`).join("\n")],
+    metaText,
+    pageCount: 1,
+    candidates,
+    retailer: data.retailer ?? null,
+    validFrom: data.valid_from ?? null,
+    validTo: data.valid_to ?? null,
+    engine: data.engine ?? "gemini-vision",
+    model: data.model,
+  };
+}
+
+async function analyzePdfByPage(file: File, onProgress: Progress) {
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc =
+    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+
+  const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  const totalPages = pdf.numPages;
+  const all: RichCandidate[] = [];
+  const textByPage: string[] = [];
+  let retailer: string | null = null;
+  let validFrom: string | null = null;
+  let validTo: string | null = null;
+  let model: string | undefined;
+
+  for (let pageNo = 1; pageNo <= totalPages; pageNo++) {
+    onProgress(pageNo, totalPages, `Preparando página ${pageNo}/${totalPages}…`);
+
+    const page = await pdf.getPage(pageNo);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const targetWidth = Math.min(2400, Math.max(1700, baseViewport.width * 3));
+    const scale = targetWidth / baseViewport.width;
+    const viewport = page.getViewport({ scale });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error(`Não foi possível preparar a página ${pageNo}.`);
+
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport } as any).promise;
+
+    const pageFile = await canvasToJpeg(
+      canvas,
+      `${file.name.replace(/\.pdf$/i, "") || "tabloide"}-pagina-${pageNo}.jpg`,
+    );
+    canvas.width = 1;
+    canvas.height = 1;
+
+    onProgress(pageNo, totalPages, `Lendo página ${pageNo}/${totalPages} com IA…`);
+
+    let data: VisionResponse;
+    try {
+      data = await invokeVision(pageFile, pageNo, totalPages);
+    } catch (firstError) {
+      // One automatic retry avoids making the user repeat the whole import for a transient API failure.
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      data = await invokeVision(pageFile, pageNo, totalPages).catch(() => {
+        throw firstError;
+      });
+    }
+
+    retailer ||= data.retailer ?? null;
+    validFrom ||= data.valid_from ?? null;
+    validTo ||= data.valid_to ?? null;
+    model ||= data.model;
+
+    const pageCandidates = (data.offers ?? [])
+      .map((offer) => toCandidate(offer, pageNo))
+      .filter((item): item is RichCandidate => !!item);
+
+    all.push(...pageCandidates);
+    textByPage.push(
+      pageCandidates.map((item) => `${item.rawName} ${item.price.toFixed(2)}`).join("\n"),
+    );
+
+    onProgress(
+      pageNo,
+      totalPages,
+      `Página ${pageNo}/${totalPages}: ${pageCandidates.length} ofertas encontradas`,
+    );
+  }
+
+  if (!all.length) {
+    throw new Error("A análise visual terminou, mas não retornou nenhuma oferta confiável.");
+  }
+
+  const metaText = [
+    retailer ?? "",
+    validFrom && validTo ? `${validFrom} a ${validTo}` : "",
+  ].filter(Boolean).join("\n");
+
+  return {
+    textByPage,
+    metaText,
+    pageCount: totalPages,
+    candidates: all,
+    retailer,
+    validFrom,
+    validTo,
+    engine: "gemini-vision",
+    model,
+  };
 }
 
 export async function readFlyerFileSmart(file: File, onProgress: Progress) {
-  // Radar 360 must never silently replace a failed visual extraction with OCR.
-  // That used to make a broken IA integration look like a successful import of the same
-  // low-quality 23 OCR rows. Surface the real error so it can be fixed instead.
-  return readWithVision(file, onProgress);
+  // PDFs are analyzed page by page. This keeps each Gemini response small, preserves
+  // the real page number, and prevents one dense five-page flyer from timing out or
+  // returning a truncated JSON response.
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+    return analyzePdfByPage(file, onProgress);
+  }
+  return analyzeSingleImage(file, onProgress);
 }
 
 // Explicit fallback kept only for future/manual recovery flows.
