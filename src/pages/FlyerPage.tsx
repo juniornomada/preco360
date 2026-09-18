@@ -398,6 +398,7 @@ export default function FlyerPage() {
       const { error: itemsError } = await db.from("flyer_items").insert(
         validItems.map((item) => {
           const rich = item as ReviewItem & {
+            brand?: string | null;
             clubAdvertisedPrice?: number | null;
             includedTypes?: string[];
             excludedTypes?: string[];
@@ -413,6 +414,7 @@ export default function FlyerPage() {
             user_id: user.id,
             raw_name: item.rawName.trim(),
             normalized_name: normalizeSearchText(item.rawName),
+            brand: rich.brand ?? null,
             package_quantity: item.packageInfo?.quantity ?? null,
             package_unit: item.packageInfo?.unit ?? null,
             advertised_price: item.price,
