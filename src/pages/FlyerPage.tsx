@@ -250,7 +250,7 @@ export default function FlyerPage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("flyer_items")
-        .select("id,product_id,raw_name,brand,package_quantity,package_unit,advertised_price,normalized_price,base_unit,club_advertised_price,excluded_types,included_types,purchase_limit,store_restrictions,offer_notes,source_page")
+        .select("id,product_id,raw_name,brand,package_quantity,package_unit,advertised_price,normalized_price,base_unit,club_advertised_price,excluded_types,included_types,purchase_limit,store_restrictions,offer_notes,source_page,image_url,image_source")
         .eq("flyer_id", selectedHistoryId)
         .order("source_page", { ascending: true })
         .order("raw_name", { ascending: true });
@@ -810,6 +810,12 @@ export default function FlyerPage() {
         }
       }
 
+      // Resolve real packshots in the background. The resolver only keeps high-confidence
+      // matches and leaves category thumbnails in place when the catalog match is unsafe.
+      void supabase.functions.invoke("resolve-flyer-images", {
+        body: { flyer_id: flyer.id },
+      }).catch(() => {});
+
       await queryClient.invalidateQueries({ queryKey: ["flyers"] });
       await queryClient.invalidateQueries({ queryKey: ["flyer-item-history"] });
       await queryClient.invalidateQueries({ queryKey: ["product-aliases"] });
@@ -1236,7 +1242,7 @@ export default function FlyerPage() {
                                   <ProductThumb
                                     name={item.raw_name}
                                     category={item.product?.category}
-                                    imageUrl={item.product?.image_url}
+                                    imageUrl={item.image_url || item.product?.image_url}
                                   />
 
                                   <div className="min-w-0 flex-1">
