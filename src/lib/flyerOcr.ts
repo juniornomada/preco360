@@ -31,6 +31,8 @@ type VisionResponse = {
   valid_to?: string | null;
   page_count?: number | null;
   offers?: VisionOffer[];
+  error?: string;
+  message?: string;
 };
 
 type RichCandidate = FlyerCandidate & {
@@ -95,7 +97,7 @@ function toCandidate(offer: VisionOffer): RichCandidate | null {
   }
 
   const normalized = normalizedUnitPrice(price, pkg);
-  const candidate: RichCandidate = {
+  return {
     rawName: displayName(offer),
     price,
     packageInfo: pkg,
@@ -113,7 +115,6 @@ function toCandidate(offer: VisionOffer): RichCandidate | null {
     priceBasisQuantity: Number(offer.price_basis_quantity) || 1,
     priceBasisUnit: offer.price_basis_unit || "un",
   };
-  return candidate;
 }
 
 async function visionErrorDetails(error: any) {
@@ -130,14 +131,27 @@ async function visionErrorDetails(error: any) {
 }
 
 async function readWithVision(file: File, onProgress: Progress) {
-  onProgress(1, 1, "Analisando visualmente o tabloide…");
+  onProgress(1, 1, "Analisando visualmente o tabloide com IA…");
   const form = new FormData();
   form.append("file", file, file.name || "tabloide");
   const { data, error } = await supabase.functions.invoke<VisionResponse>("analyze-flyer", { body: form });
-  if (error) throw new Error(await visionErrorDetails(error));
-  if (!data?.ok || !Array.isArray(data.offers)) throw new Error("O analisador visual não retornou ofertas.");
+
+  if (error) {
+    const details = await visionErrorDetails(error);
+    throw new Error(`Análise visual indisponível: ${details}`);
+  }
+  if (!data?.ok) {
+    throw new Error(`Análise visual indisponível: ${data?.message || data?.error || "resposta inválida do servidor"}`);
+  }
+  if (!Array.isArray(data.offers)) {
+    throw new Error("Análise visual indisponível: o servidor não retornou a lista de ofertas.");
+  }
 
   const candidates = data.offers.map(toCandidate).filter((item): item is RichCandidate => !!item);
+  if (!candidates.length) {
+    throw new Error("A análise visual terminou, mas não retornou nenhuma oferta confiável.");
+  }
+
   const pageCount = Math.max(1, Number(data.page_count) || Math.max(...candidates.map((item) => item.sourcePage), 1));
   const textByPage = Array.from({ length: pageCount }, (_, index) =>
     candidates
@@ -150,16 +164,18 @@ async function readWithVision(file: File, onProgress: Progress) {
     data.valid_from && data.valid_to ? `${data.valid_from} a ${data.valid_to}` : "",
   ].filter(Boolean).join("\n");
 
-  onProgress(pageCount, pageCount, `${candidates.length} ofertas lidas visualmente`);
-  return { textByPage, metaText, pageCount, candidates, engine: data.engine ?? "vision", model: data.model };
+  onProgress(pageCount, pageCount, `${candidates.length} ofertas lidas por IA`);
+  return { textByPage, metaText, pageCount, candidates, engine: data.engine ?? "openai-vision", model: data.model };
 }
 
 export async function readFlyerFileSmart(file: File, onProgress: Progress) {
-  try {
-    return await readWithVision(file, onProgress);
-  } catch (error) {
-    console.warn("Radar 360: análise visual indisponível; usando OCR local.", error);
-    onProgress(1, 1, "Análise visual indisponível · usando leitura local…");
-    return readFlyerLocal(file, onProgress);
-  }
+  // Radar 360 must never silently replace a failed visual extraction with OCR.
+  // That used to make a broken IA integration look like a successful import of the same
+  // low-quality 23 OCR rows. Surface the real error so it can be fixed instead.
+  return readWithVision(file, onProgress);
+}
+
+// Explicit fallback kept only for future/manual recovery flows.
+export async function readFlyerFileLocal(file: File, onProgress: Progress) {
+  return readFlyerLocal(file, onProgress);
 }
