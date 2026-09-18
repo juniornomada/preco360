@@ -122,16 +122,24 @@ function serviceClient() {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
-function jwtPayload(req: Request) {
+async function callerIdentity(req: Request) {
   const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  const parts = token.split(".");
-  if (parts.length !== 3) return {} as any;
-  try {
-    const raw = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(raw + "=".repeat((4 - (raw.length % 4)) % 4)));
-  } catch {
-    return {} as any;
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  if (token && serviceKey && token === serviceKey) {
+    return { isService: true, userId: null as string | null };
   }
+  if (!token) return { isService: false, userId: null as string | null };
+
+  const url = Deno.env.get("SUPABASE_URL");
+  const anon = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!url || !anon) return { isService: false, userId: null as string | null };
+
+  const authClient = createClient(url, anon, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data, error } = await authClient.auth.getUser(token);
+  if (error || !data.user) return { isService: false, userId: null as string | null };
+  return { isService: false, userId: data.user.id };
 }
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -444,11 +452,10 @@ Deno.serve(async (req: Request) => {
     const mode = body?.mode === "refine" ? "refine" : "start";
     if (!jobId) return json(400, { error: "JOB_ID_REQUIRED" });
 
-    const claims = jwtPayload(req);
+    const caller = await callerIdentity(req);
     const job = await fetchJob(jobId);
-    const isService = claims?.role === "service_role";
-    const isOwner = !!claims?.sub && claims.sub === job.user_id;
-    if (!isService && !isOwner) return json(403, { error: "FORBIDDEN" });
+    const isOwner = !!caller.userId && caller.userId === job.user_id;
+    if (!caller.isService && !isOwner) return json(403, { error: "FORBIDDEN" });
     if (job.status === "completed") return json(200, { ok: true, job_id: jobId, status: "completed" });
 
     if (mode === "refine") EdgeRuntime.waitUntil(processRefine(jobId));
