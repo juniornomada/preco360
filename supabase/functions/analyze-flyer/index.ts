@@ -6,6 +6,19 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// Only models that currently have a Standard Free Tier are kept here.
+// Order favors high-throughput/lite models first, then progressively stronger Flash models.
+const FREE_GEMINI_MODELS = [
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-3.5-flash",
+  "gemini-3.6-flash",
+  "gemini-3.7-flash",
+  "gemini-3.8-flash",
+  "gemini-3-flash-preview",
+  "gemini-2.5-flash-lite",
+] as const;
+
 const EXTRACTION_PROMPT = `
 Você é o extrator visual do Radar 360. Leia o encarte como uma pessoa olhando cada página, não como texto corrido de OCR.
 
@@ -204,7 +217,14 @@ Deno.serve(async (req: Request) => {
 
     const bytes = new Uint8Array(await file.arrayBuffer());
     const base64 = bytesToBase64(bytes);
-    const preferredModel = Deno.env.get("GEMINI_MODEL") || "gemini-3.5-flash-lite";
+
+    const requestedPreferred = String(form.get("preferred_model") || "").trim();
+    const configuredPreferred = String(Deno.env.get("GEMINI_MODEL") || "").trim();
+    const freeSet = new Set<string>(FREE_GEMINI_MODELS);
+    const preferredModel =
+      (freeSet.has(requestedPreferred) && requestedPreferred) ||
+      (freeSet.has(configuredPreferred) && configuredPreferred) ||
+      FREE_GEMINI_MODELS[0];
 
     const body = {
       contents: [
@@ -231,17 +251,13 @@ Deno.serve(async (req: Request) => {
     };
 
     const modelCandidates = Array.from(
-      new Set([
-        preferredModel,
-        "gemini-3.5-flash-lite",
-        "gemini-3.1-flash-lite",
-        "gemini-3.6-flash",
-      ]),
+      new Set([preferredModel, ...FREE_GEMINI_MODELS]),
     );
 
     let payload: any = null;
     let model = preferredModel;
-    let lastRateLimit: { status: number; payload: any; model: string } | null = null;
+    const attempts: Array<{ model: string; status: number }> = [];
+    let lastFallbackError: { status: number; payload: any; model: string } | null = null;
 
     for (const candidateModel of modelCandidates) {
       const response = await fetch(
@@ -260,17 +276,25 @@ Deno.serve(async (req: Request) => {
         .json()
         .catch(async () => ({ message: await response.text() }));
 
+      attempts.push({ model: candidateModel, status: response.status });
+
       if (response.ok) {
         payload = candidatePayload;
         model = candidateModel;
-        lastRateLimit = null;
+        lastFallbackError = null;
         break;
       }
 
-      // Free-tier quotas are model-specific. If one model is temporarily exhausted,
-      // immediately try the next stable multimodal model instead of failing the import.
-      if (response.status === 429) {
-        lastRateLimit = {
+      // Quotas are model-specific. Also skip models unavailable for this project or
+      // temporarily unhealthy, then continue through the free-only pool.
+      const fallbackEligible =
+        response.status === 429 ||
+        response.status === 404 ||
+        response.status === 403 ||
+        response.status >= 500;
+
+      if (fallbackEligible) {
+        lastFallbackError = {
           status: response.status,
           payload: candidatePayload,
           model: candidateModel,
@@ -278,18 +302,21 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
+      // A 400 usually means our request shape is wrong. Do not hide an integration bug
+      // by cycling through models with the same malformed request.
       throw new Error(geminiError(response.status, candidatePayload));
     }
 
     if (!payload) {
-      const rate = lastRateLimit;
-      const message = rate
-        ? `${geminiError(rate.status, rate.payload)} · Todos os modelos gratuitos de fallback estão temporariamente no limite.`
-        : "Nenhum modelo Gemini disponível respondeu à análise.";
-      return json(429, {
-        error: "VISION_RATE_LIMITED",
+      const last = lastFallbackError;
+      const message = last
+        ? `${geminiError(last.status, last.payload)} · Todos os modelos do pool gratuito foram tentados sem sucesso.`
+        : "Nenhum modelo Gemini gratuito disponível respondeu à análise.";
+      return json(last?.status === 429 ? 429 : 503, {
+        error: last?.status === 429 ? "VISION_RATE_LIMITED" : "VISION_MODELS_UNAVAILABLE",
         message,
         retryable: true,
+        attempted_models: attempts.map((item) => item.model),
       });
     }
 
