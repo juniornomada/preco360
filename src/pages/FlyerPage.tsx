@@ -591,7 +591,7 @@ export default function FlyerPage() {
     ]);
 
   const saveFlyer = async () => {
-    if (!user || !file || !retailer.trim()) {
+    if (!user || (!file && !processedSource) || !retailer.trim()) {
       toast({ title: "Complete os dados", description: "Informe o mercado e selecione o arquivo." });
       return;
     }
@@ -604,7 +604,15 @@ export default function FlyerPage() {
 
     setSaving(true);
     try {
-      const fileHash = await sha256(file);
+      const fileHash = processedSource?.fileHash ?? (file ? await sha256(file) : null);
+      if (!fileHash) throw new Error("Não foi possível identificar o arquivo importado.");
+      const sourceMime = processedSource?.mimeType ?? file?.type ?? "";
+      const sourceFileName = processedSource?.fileName ?? file?.name ?? "tabloide";
+      const sourceType = sourceMime === "application/pdf" || sourceFileName.toLowerCase().endsWith(".pdf")
+        ? "pdf"
+        : "image";
+      let sourcePath = processedSource?.path ?? null;
+
       const { data: duplicate, error: duplicateError } = await db
         .from("flyers")
         .select("id,source_file_path")
@@ -626,8 +634,9 @@ export default function FlyerPage() {
             title: `${retailer.trim()} · ${validFrom ? dateBr(validFrom) : "Ofertas"}`,
             valid_from: validFrom || null,
             valid_to: validTo || null,
-            source_type: file.type === "application/pdf" ? "pdf" : "image",
-            source_file_name: file.name,
+            source_type: sourceType,
+            source_file_name: sourceFileName,
+            source_file_path: sourcePath ?? duplicate.source_file_path,
             page_count: pageCount,
           })
           .eq("id", duplicate.id);
@@ -642,11 +651,14 @@ export default function FlyerPage() {
         flyer = { id: duplicate.id };
         replacedExisting = true;
       } else {
-        const path = `${user.id}/${Date.now()}-${safeName(file.name || "tabloide")}`;
-        const { error: uploadError } = await supabase.storage
-          .from("flyers")
-          .upload(path, file, { contentType: file.type || undefined, upsert: false });
-        if (uploadError) throw uploadError;
+        if (!sourcePath) {
+          if (!file) throw new Error("O arquivo original não está mais disponível.");
+          sourcePath = `${user.id}/${Date.now()}-${safeName(sourceFileName)}`;
+          const { error: uploadError } = await supabase.storage
+            .from("flyers")
+            .upload(sourcePath, file, { contentType: sourceMime || undefined, upsert: false });
+          if (uploadError) throw uploadError;
+        }
 
         const { data: insertedFlyer, error: flyerError } = await db
           .from("flyers")
@@ -656,9 +668,9 @@ export default function FlyerPage() {
             title: `${retailer.trim()} · ${validFrom ? dateBr(validFrom) : "Ofertas"}`,
             valid_from: validFrom || null,
             valid_to: validTo || null,
-            source_type: file.type === "application/pdf" ? "pdf" : "image",
-            source_file_name: file.name,
-            source_file_path: path,
+            source_type: sourceType,
+            source_file_name: sourceFileName,
+            source_file_path: sourcePath,
             file_hash: fileHash,
             page_count: pageCount,
           })
@@ -748,6 +760,10 @@ export default function FlyerPage() {
       setFile(null);
       setItems([]);
       setPageCount(null);
+      setProcessedSource(null);
+      setActiveJobId(null);
+      appliedJobRef.current = null;
+      localStorage.removeItem(IMPORT_JOB_KEY);
       setView("history");
     } catch (error: any) {
       toast({
@@ -812,17 +828,6 @@ export default function FlyerPage() {
           </span>
         </span>
         <span className="text-primary">›</span>
-      </Button>
-
-      <Button
-        type="button"
-        variant="outline"
-        className="mb-4 h-11 w-full justify-start gap-2 border-primary/25 bg-primary/5"
-        onClick={() => navigate("/offers/basket")}
-      >
-        <ShoppingBasket className="h-4 w-4 text-primary" />
-        <span className="font-bold">Cesta 360</span>
-        <span className="ml-auto text-xs font-normal text-muted-foreground">Comparar supermercados</span>
       </Button>
 
       {view === "import" && (
@@ -899,12 +904,18 @@ export default function FlyerPage() {
                       }}
                     />
                   </div>
+                  {activeJobId && (
+                    <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                      O arquivo já está no servidor. Você pode trocar de aplicativo ou bloquear a tela;
+                      ao voltar, o Preço 360 consulta o andamento novamente.
+                    </p>
+                  )}
                 </div>
               )}
 
               <Button className="mt-4 h-11 w-full" disabled={!file || processing} onClick={() => void processFile()}>
                 {processing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                {processing ? "Lendo ofertas…" : "Analisar tabloide"}
+                {processing ? "Importando no servidor…" : "Analisar tabloide"}
               </Button>
             </CardContent>
           </Card>
