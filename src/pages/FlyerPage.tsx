@@ -235,6 +235,44 @@ export default function FlyerPage() {
     };
   };
 
+  const handleFileSelect = async (selected: File | null) => {
+    setFile(selected);
+    setItems([]);
+    setPageCount(null);
+
+    if (!selected) return;
+
+    // Avoid carrying metadata from a previously selected flyer.
+    setRetailer("");
+    setValidFrom("");
+    setValidTo("");
+
+    if (!user) return;
+
+    try {
+      const fileHash = await sha256(selected);
+      const { data: knownFlyer, error } = await db
+        .from("flyers")
+        .select("retailer,valid_from,valid_to")
+        .eq("file_hash", fileHash)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!knownFlyer) return;
+
+      setRetailer(knownFlyer.retailer ?? "");
+      setValidFrom(knownFlyer.valid_from ?? "");
+      setValidTo(knownFlyer.valid_to ?? "");
+
+      toast({
+        title: "Dados reconhecidos",
+        description: "Mercado e validade foram preenchidos pelo histórico deste mesmo tabloide.",
+      });
+    } catch {
+      // Metadata reuse is optional and must never block the flyer analysis.
+    }
+  };
+
   const processFile = async () => {
     if (!file) return;
     setProcessing(true);
@@ -605,21 +643,36 @@ export default function FlyerPage() {
                 className="hidden"
                 type="file"
                 accept="application/pdf,image/*"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                onChange={(event) => void handleFileSelect(event.target.files?.[0] ?? null)}
               />
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-muted-foreground">Mercado</label>
-                  <Input value={retailer} onChange={(event) => setRetailer(event.target.value)} placeholder="Ex.: Confiança" />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-muted-foreground">Válido de</label>
-                  <Input type="date" value={validFrom} onChange={(event) => setValidFrom(event.target.value)} />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-muted-foreground">Até</label>
-                  <Input type="date" value={validTo} onChange={(event) => setValidTo(event.target.value)} />
+              <div className="mt-4">
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Opcional nesta etapa — a IA tenta identificar mercado e validade no tabloide.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-muted-foreground">
+                      Mercado <span className="font-normal">(opcional)</span>
+                    </label>
+                    <Input
+                      value={retailer}
+                      onChange={(event) => setRetailer(event.target.value)}
+                      placeholder="A IA tenta identificar"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-muted-foreground">
+                      Válido de <span className="font-normal">(opcional)</span>
+                    </label>
+                    <Input type="date" value={validFrom} onChange={(event) => setValidFrom(event.target.value)} />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-muted-foreground">
+                      Até <span className="font-normal">(opcional)</span>
+                    </label>
+                    <Input type="date" value={validTo} onChange={(event) => setValidTo(event.target.value)} />
+                  </div>
                 </div>
               </div>
 
