@@ -146,7 +146,7 @@ Deno.serve(async (req: Request) => {
 
     const bytes = new Uint8Array(await file.arrayBuffer());
     const base64 = bytesToBase64(bytes);
-    const model = Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash";
+    const model = Deno.env.get("GEMINI_MODEL") || "gemini-3.6-flash";
 
     const body = {
       contents: [
@@ -168,10 +168,13 @@ Deno.serve(async (req: Request) => {
         },
       ],
       generationConfig: {
-        temperature: 0.1,
         maxOutputTokens: 65536,
-        responseMimeType: "application/json",
-        responseJsonSchema: schema,
+        responseFormat: {
+          text: {
+            mimeType: "application/json",
+            schema,
+          },
+        },
       },
     };
 
