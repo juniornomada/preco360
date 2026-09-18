@@ -36,6 +36,34 @@ REGRAS OBRIGATÓRIAS
 18. Em produtos vendidos por peso, não confunda o preço com peso/volume. "1,35L" é embalagem de 1,35 litro, não preço de R$ 1,35.
 19. Se um preço atende dois produtos separados por "ou", gere dois registros. Se "ou" apenas descreve variações do mesmo produto, mantenha um registro e coloque as variações em included_types.
 20. Retorne JSON compacto, sem explicações fora do esquema.
+21. TODOS os campos abaixo são obrigatórios em cada oferta. Quando não houver informação, use null, [] ou valor padrão apropriado; nunca omita o campo.
+22. Use EXATAMENTE esta estrutura de saída:
+{
+  "retailer": "nome do mercado ou null",
+  "valid_from": "YYYY-MM-DD ou null",
+  "valid_to": "YYYY-MM-DD ou null",
+  "page_count": 1,
+  "offers": [
+    {
+      "product_name": "nome legível do produto",
+      "brand": "marca ou null",
+      "package_quantity": null,
+      "package_unit": null,
+      "price": 0,
+      "price_basis_quantity": 1,
+      "price_basis_unit": "un",
+      "club_price": null,
+      "included_types": [],
+      "excluded_types": [],
+      "store_restrictions": [],
+      "purchase_limit": null,
+      "notes": [],
+      "source_page": 1,
+      "confidence": 0.95
+    }
+  ]
+}
+23. Não use markdown, não envolva o JSON em crases e não escreva texto antes ou depois do objeto.
 `;
 
 const schema = {
