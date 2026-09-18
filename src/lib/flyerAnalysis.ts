@@ -146,7 +146,8 @@ export function normalizedUnitPrice(price: number, pkg: PackageInfo | null) {
 }
 
 export function formatNormalizedPrice(price: number, unit: BaseUnit) {
-  return `${price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/${unit}`;
+  const label = unit === "l" ? "L" : unit;
+  return `${price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/${label}`;
 }
 
 function plausibleName(value: string) {
