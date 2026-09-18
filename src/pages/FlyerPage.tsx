@@ -8,13 +8,19 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
+  ArrowDown,
+  ArrowUp,
   BadgeCheck,
   CalendarDays,
+  CheckCircle2,
   ChevronDown,
   FileImage,
   FileText,
+  HelpCircle,
   History,
   Loader2,
+  Minus,
+  MinusCircle,
   Plus,
   Radar,
   Save,
@@ -24,6 +30,7 @@ import {
   Tags,
   Trash2,
   Upload,
+  XCircle,
 } from "lucide-react";
 import {
   evaluateFlyerOffer,
@@ -123,6 +130,31 @@ const dateBr = (value?: string | null) => {
   return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
 };
 
+const visualTone = (key: "exceptional" | "good" | "normal" | "high" | "unknown") => {
+  if (key === "exceptional" || key === "good") return "good";
+  if (key === "normal") return "ok";
+  if (key === "high") return "bad";
+  return "unknown";
+};
+
+const productEmoji = (name: string, category?: string | null) => {
+  const text = normalizeSearchText(`${category ?? ""} ${name}`);
+  if (/vinho/.test(text)) return "🍷";
+  if (/cerveja|refrigerante|suco|bebida|agua/.test(text)) return "🧃";
+  if (/cafe/.test(text)) return "☕";
+  if (/biscoito|cookie|bolacha/.test(text)) return "🍪";
+  if (/arroz/.test(text)) return "🍚";
+  if (/azeite|oleo/.test(text)) return "🫒";
+  if (/batata.*airfryer|batata.*congel/.test(text)) return "🍟";
+  if (/peixe|tilapia|pescado/.test(text)) return "🐟";
+  if (/frango|bovino|carne|lagarto|suino|linguica/.test(text)) return "🥩";
+  if (/leite|iogurte|queijo|manteiga/.test(text)) return "🥛";
+  if (/abobora|cenoura|beterraba|repolho|berinjela|tomate|hortifruti|legume|verdura/.test(text)) return "🥕";
+  if (/banana|maca|laranja|fruta/.test(text)) return "🍎";
+  if (/limpeza|detergente|sabao|amaciante|desinfetante/.test(text)) return "🧴";
+  return "📦";
+};
+
 const safeName = (value: string) =>
   value
     .normalize("NFD")
@@ -164,7 +196,7 @@ export default function FlyerPage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("products")
-        .select("id,name,brand,package_size,unit,stockable,prices(price,date,supermarket)")
+        .select("id,name,category,brand,package_size,unit,stockable,image_url,image_source,prices(price,date,supermarket)")
         .order("name");
       if (error) throw error;
       return data ?? [];
@@ -189,7 +221,7 @@ export default function FlyerPage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("flyer_items")
-        .select("product_id,normalized_price,base_unit,advertised_price,created_at")
+        .select("flyer_id,product_id,normalized_price,base_unit,advertised_price,created_at")
         .not("product_id", "is", null)
         .order("created_at", { ascending: false })
         .limit(1500);
@@ -218,7 +250,7 @@ export default function FlyerPage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("flyer_items")
-        .select("id,raw_name,advertised_price,normalized_price,base_unit,club_advertised_price,excluded_types,included_types,purchase_limit,store_restrictions,offer_notes,source_page")
+        .select("id,product_id,raw_name,brand,package_quantity,package_unit,advertised_price,normalized_price,base_unit,club_advertised_price,excluded_types,included_types,purchase_limit,store_restrictions,offer_notes,source_page")
         .eq("flyer_id", selectedHistoryId)
         .order("source_page", { ascending: true })
         .order("raw_name", { ascending: true });
@@ -289,6 +321,37 @@ export default function FlyerPage() {
       unknown: analyzed.filter((item) => !item.productId || item.verdict.key === "unknown").length,
     }),
     [analyzed],
+  );
+
+  const historyAnalyzedItems = useMemo(
+    () =>
+      selectedHistoryItems.map((item) => {
+        const product = item.product_id ? productMap.get(item.product_id) ?? null : null;
+        const previous = item.product_id
+          ? previousOffers.filter(
+              (offer) =>
+                offer.product_id === item.product_id &&
+                offer.flyer_id !== selectedHistoryId,
+            )
+          : [];
+        const candidate: FlyerCandidate = {
+          rawName: item.raw_name,
+          brand: item.brand ?? null,
+          price: Number(item.advertised_price),
+          packageInfo: inferPackage(item.raw_name),
+          normalizedPrice:
+            Number(item.normalized_price) || Number(item.advertised_price),
+          baseUnit: (item.base_unit || "un") as "kg" | "l" | "un",
+          clubPrice: Number(item.club_advertised_price) > 0,
+          sourcePage: item.source_page || 1,
+        };
+        return {
+          ...item,
+          product,
+          verdict: evaluateFlyerOffer(candidate, product, previous),
+        };
+      }),
+    [selectedHistoryItems, productMap, previousOffers, selectedHistoryId],
   );
 
   const matchOne = (candidate: FlyerCandidate, retailerOverride?: string): ReviewItem => {
@@ -1150,51 +1213,93 @@ export default function FlyerPage() {
                         </div>
                       ) : (
                         <div className="space-y-2">
-                          {selectedHistoryItems.map((item) => (
-                            <div key={item.id} className="rounded-lg border bg-background p-3">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="font-semibold">{item.raw_name}</p>
-                                  <p className="mt-0.5 text-[11px] text-muted-foreground">
-                                    Página {item.source_page ?? "—"}
-                                  </p>
-                                </div>
-                                <div className="shrink-0 text-right">
-                                  <p className="font-extrabold">
-                                    {offerPriceWithReference(
-                                      Number(item.advertised_price),
-                                      Number(item.normalized_price) || Number(item.advertised_price),
-                                      item.base_unit || "un",
-                                    )}
-                                  </p>
-                                  {item.club_advertised_price ? (
-                                    <p className="text-[11px] font-semibold text-primary">
-                                      Clube {brl(Number(item.club_advertised_price))}
-                                    </p>
-                                  ) : null}
+                          <div className="mb-3 flex flex-wrap gap-1.5 text-[10px] font-bold">
+                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-emerald-400">
+                              <CheckCircle2 className="h-3 w-3" /> Vale a pena
+                            </span>
+                            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-400">
+                              <MinusCircle className="h-3 w-3" /> Preço ok
+                            </span>
+                            <span className="inline-flex items-center gap-1 rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-rose-400">
+                              <XCircle className="h-3 w-3" /> Não vale
+                            </span>
+                          </div>
+
+                          {historyAnalyzedItems.map((item) => {
+                            const tone = visualTone(item.verdict.key);
+                            return (
+                              <div
+                                key={item.id}
+                                className="rounded-xl border border-white/10 bg-background/70 p-3 shadow-sm"
+                              >
+                                <div className="flex gap-3">
+                                  <ProductThumb
+                                    name={item.raw_name}
+                                    category={item.product?.category}
+                                    imageUrl={item.product?.image_url}
+                                  />
+
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <p className="font-bold leading-snug">{item.raw_name}</p>
+                                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                          Página {item.source_page ?? "—"}
+                                        </p>
+                                      </div>
+                                      <div className="shrink-0 text-right">
+                                        <p className="font-extrabold">
+                                          {offerPriceWithReference(
+                                            Number(item.advertised_price),
+                                            Number(item.normalized_price) || Number(item.advertised_price),
+                                            item.base_unit || "un",
+                                          )}
+                                        </p>
+                                        {item.club_advertised_price ? (
+                                          <p className="text-[11px] font-semibold text-primary">
+                                            Clube {brl(Number(item.club_advertised_price))}
+                                          </p>
+                                        ) : null}
+                                      </div>
+                                    </div>
+
+                                    <div className="mt-2 flex items-end justify-between gap-2">
+                                      <VerdictDelta
+                                        tone={tone}
+                                        deltaPct={item.verdict.deltaPct}
+                                        reference={historicalReferenceLabel(
+                                          item.verdict.referencePrice,
+                                          item.base_unit || "un",
+                                        )}
+                                      />
+                                      <VerdictBadge tone={tone} />
+                                    </div>
+
+                                    {Array.isArray(item.excluded_types) && item.excluded_types.length > 0 ? (
+                                      <p className="mt-2 text-xs text-muted-foreground">
+                                        Exceto: {item.excluded_types.join(", ")}
+                                      </p>
+                                    ) : null}
+                                    {Array.isArray(item.included_types) && item.included_types.length > 0 ? (
+                                      <p className="mt-1 text-xs text-muted-foreground">
+                                        Tipos: {item.included_types.join(", ")}
+                                      </p>
+                                    ) : null}
+                                    {item.purchase_limit ? (
+                                      <p className="mt-1 text-xs text-muted-foreground">
+                                        Limite: {item.purchase_limit}
+                                      </p>
+                                    ) : null}
+                                    {Array.isArray(item.store_restrictions) && item.store_restrictions.length > 0 ? (
+                                      <p className="mt-1 text-xs text-muted-foreground">
+                                        Lojas: {item.store_restrictions.join(", ")}
+                                      </p>
+                                    ) : null}
+                                  </div>
                                 </div>
                               </div>
-
-                              {Array.isArray(item.excluded_types) && item.excluded_types.length > 0 ? (
-                                <p className="mt-2 text-xs text-muted-foreground">
-                                  Exceto: {item.excluded_types.join(", ")}
-                                </p>
-                              ) : null}
-                              {Array.isArray(item.included_types) && item.included_types.length > 0 ? (
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  Tipos: {item.included_types.join(", ")}
-                                </p>
-                              ) : null}
-                              {item.purchase_limit ? (
-                                <p className="mt-1 text-xs text-muted-foreground">Limite: {item.purchase_limit}</p>
-                              ) : null}
-                              {Array.isArray(item.store_restrictions) && item.store_restrictions.length > 0 ? (
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  Lojas: {item.store_restrictions.join(", ")}
-                                </p>
-                              ) : null}
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -1205,6 +1310,108 @@ export default function FlyerPage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function ProductThumb({
+  name,
+  category,
+  imageUrl,
+}: {
+  name: string;
+  category?: string | null;
+  imageUrl?: string | null;
+}) {
+  return (
+    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-muted/50">
+      {imageUrl ? (
+        <img
+          src={imageUrl}
+          alt=""
+          loading="lazy"
+          className="h-full w-full object-contain p-1"
+          onError={(event) => {
+            event.currentTarget.style.display = "none";
+            const fallback = event.currentTarget.nextElementSibling as HTMLElement | null;
+            if (fallback) fallback.style.display = "flex";
+          }}
+        />
+      ) : null}
+      <span
+        aria-hidden="true"
+        className={`${imageUrl ? "hidden" : "flex"} h-full w-full items-center justify-center text-3xl`}
+      >
+        {productEmoji(name, category)}
+      </span>
+    </div>
+  );
+}
+
+function VerdictBadge({ tone }: { tone: "good" | "ok" | "bad" | "unknown" }) {
+  if (tone === "good") {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2.5 py-1.5 text-[11px] font-extrabold text-emerald-400">
+        <CheckCircle2 className="h-3.5 w-3.5" /> Vale a pena
+      </span>
+    );
+  }
+  if (tone === "bad") {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-rose-500/30 bg-rose-500/15 px-2.5 py-1.5 text-[11px] font-extrabold text-rose-400">
+        <XCircle className="h-3.5 w-3.5" /> Não vale
+      </span>
+    );
+  }
+  if (tone === "ok") {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/15 px-2.5 py-1.5 text-[11px] font-extrabold text-amber-400">
+        <MinusCircle className="h-3.5 w-3.5" /> Preço ok
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border bg-muted/60 px-2.5 py-1.5 text-[11px] font-bold text-muted-foreground">
+      <HelpCircle className="h-3.5 w-3.5" /> Sem histórico
+    </span>
+  );
+}
+
+function VerdictDelta({
+  tone,
+  deltaPct,
+  reference,
+}: {
+  tone: "good" | "ok" | "bad" | "unknown";
+  deltaPct: number | null;
+  reference: string | null;
+}) {
+  if (deltaPct === null || tone === "unknown") {
+    return (
+      <div className="min-w-0 text-[11px] text-muted-foreground">
+        <p>Sem referência histórica comparável</p>
+      </div>
+    );
+  }
+
+  const pct = Math.abs(deltaPct).toFixed(0);
+  const content =
+    tone === "good"
+      ? { Icon: ArrowDown, cls: "text-emerald-400", text: `${pct}% mais barato` }
+      : tone === "bad"
+        ? { Icon: ArrowUp, cls: "text-rose-400", text: `${pct}% mais caro` }
+        : { Icon: Minus, cls: "text-amber-400", text: `${pct}% na faixa` };
+  const Icon = content.Icon;
+
+  return (
+    <div className="min-w-0">
+      <p className={`flex items-center gap-1 text-sm font-extrabold ${content.cls}`}>
+        <Icon className="h-4 w-4" />
+        {content.text}
+      </p>
+      <p className="mt-0.5 text-[10px] text-muted-foreground">
+        {reference ? `Referência: ${reference}` : "Referência histórica"}
+      </p>
     </div>
   );
 }
