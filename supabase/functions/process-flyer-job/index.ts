@@ -89,6 +89,10 @@ REGRAS OBRIGATÓRIAS
    Estes exemplos ensinam a REGRA; não use essas marcas em outros itens sem evidência visual.
 29. Quando uma mesma oferta contém o MESMO tipo de produto e embalagem com marcas/linhas alternativas unidas por "ou" (ex.: "Arroz Riviera ou Patéko 5kg"), mantenha UMA oferta e preserve as alternativas no product_name. Quando forem produtos realmente diferentes (ex.: Abóbora e Repolho), continue criando registros separados.
 30. Faça uma checagem final de completude por oferta nesta ordem: categoria do produto → marca → linha/modelo → sabor/tipo → embalagem → preço → Clube/exceções/limites. Só então finalize o JSON.
+31. Antes de finalizar, consolide REPETIÇÕES do mesmo produto e mesma embalagem dentro do próprio encarte. Capa e páginas de destaque podem repetir uma oferta que reaparece depois na seção correta.
+32. Se produto + embalagem + preço + condições forem equivalentes em duas páginas, devolva apenas UM registro e prefira a ocorrência mais completa/detalhada; em empate, prefira a ocorrência da página posterior (normalmente a seção da categoria) em vez da chamada de capa.
+33. Se uma ocorrência mostrar apenas um preço promocional e outra ocorrência do mesmo produto/embalagem mostrar preço normal + Clube/Vantagens, e o preço promocional coincidir com o preço Clube, devolva somente a ocorrência completa com price normal e club_price.
+34. NÃO consolide ofertas realmente distintas: se o mesmo produto tiver preços/condições diferentes sem relação entre preço normal e Clube, mantenha registros separados.
 `;
 
 type JobRow = {
@@ -186,12 +190,131 @@ function validOffers(parsed: any) {
     : [];
 }
 
-function offerKey(offer: any) {
+function normalizeOfferIdentity(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function offerIdentityKey(offer: any) {
+  const quantity = Number(offer?.package_quantity);
+  const quantityKey = Number.isFinite(quantity) && quantity > 0 ? String(quantity) : "";
+  const unitKey = normalizeOfferIdentity(offer?.package_unit);
   return [
-    Math.max(1, Math.trunc(Number(offer?.source_page) || 1)),
-    String(offer?.product_name || "").trim().toLowerCase().replace(/\s+/g, " "),
-    Number(offer?.price || 0).toFixed(2),
+    normalizeOfferIdentity(offer?.product_name),
+    quantityKey,
+    unitKey,
   ].join("|");
+}
+
+function positiveMoney(value: unknown) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function sameMoney(a: unknown, b: unknown) {
+  const left = positiveMoney(a);
+  const right = positiveMoney(b);
+  if (left === null || right === null) return left === right;
+  return Math.abs(left - right) < 0.005;
+}
+
+function mergeableDuplicate(a: any, b: any) {
+  if (offerIdentityKey(a) !== offerIdentityKey(b)) return false;
+
+  const aPrice = positiveMoney(a?.price);
+  const bPrice = positiveMoney(b?.price);
+  const aClub = positiveMoney(a?.club_price);
+  const bClub = positiveMoney(b?.club_price);
+  if (aPrice === null || bPrice === null) return false;
+
+  if (sameMoney(aPrice, bPrice)) {
+    if (aClub !== null && bClub !== null && !sameMoney(aClub, bClub)) return false;
+    return true;
+  }
+
+  if (aClub !== null && sameMoney(aClub, bPrice)) return true;
+  if (bClub !== null && sameMoney(bClub, aPrice)) return true;
+
+  return false;
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : [];
+}
+
+function unionStrings(a: unknown, b: unknown) {
+  const map = new Map<string, string>();
+  for (const item of [...stringArray(a), ...stringArray(b)]) {
+    const key = normalizeOfferIdentity(item);
+    if (key && !map.has(key)) map.set(key, item);
+  }
+  return [...map.values()];
+}
+
+function offerRichness(offer: any) {
+  let score = 0;
+  if (positiveMoney(offer?.club_price) !== null) score += 12;
+  if (offer?.brand) score += 3;
+  if (positiveMoney(offer?.package_quantity) !== null && offer?.package_unit) score += 3;
+  if (offer?.purchase_limit) score += 3;
+  score += stringArray(offer?.included_types).length;
+  score += stringArray(offer?.excluded_types).length * 2;
+  score += stringArray(offer?.store_restrictions).length * 2;
+  score += stringArray(offer?.notes).length * 2;
+  score += Math.max(0, Math.min(1, Number(offer?.confidence) || 0));
+  return score;
+}
+
+function preferredDuplicate(a: any, b: any) {
+  const scoreA = offerRichness(a);
+  const scoreB = offerRichness(b);
+  if (scoreA !== scoreB) return scoreB > scoreA ? b : a;
+  const pageA = Math.max(1, Math.trunc(Number(a?.source_page) || 1));
+  const pageB = Math.max(1, Math.trunc(Number(b?.source_page) || 1));
+  return pageB >= pageA ? b : a;
+}
+
+function mergeDuplicateDetails(preferred: any, other: any) {
+  return {
+    ...other,
+    ...preferred,
+    brand: preferred?.brand || other?.brand || null,
+    package_quantity: preferred?.package_quantity ?? other?.package_quantity ?? null,
+    package_unit: preferred?.package_unit || other?.package_unit || null,
+    club_price: positiveMoney(preferred?.club_price) ?? positiveMoney(other?.club_price),
+    included_types: unionStrings(preferred?.included_types, other?.included_types),
+    excluded_types: unionStrings(preferred?.excluded_types, other?.excluded_types),
+    store_restrictions: unionStrings(preferred?.store_restrictions, other?.store_restrictions),
+    purchase_limit: preferred?.purchase_limit || other?.purchase_limit || null,
+    notes: unionStrings(preferred?.notes, other?.notes),
+    confidence: Math.max(Number(preferred?.confidence) || 0, Number(other?.confidence) || 0),
+  };
+}
+
+function dedupeOffers(offers: any[]) {
+  const deduped: any[] = [];
+  for (const offer of offers) {
+    const index = deduped.findIndex((existing) => mergeableDuplicate(existing, offer));
+    if (index < 0) {
+      deduped.push(offer);
+      continue;
+    }
+    const existing = deduped[index];
+    const preferred = preferredDuplicate(existing, offer);
+    const other = preferred === existing ? offer : existing;
+    deduped[index] = mergeDuplicateDetails(preferred, other);
+  }
+  return deduped.sort(
+    (a, b) =>
+      Math.max(1, Math.trunc(Number(a?.source_page) || 1)) -
+      Math.max(1, Math.trunc(Number(b?.source_page) || 1)),
+  );
 }
 
 async function runGemini(file: File, prompt: string, preferredModel?: string) {
@@ -300,11 +423,13 @@ async function processInitial(jobId: string) {
         "\n\nExtraia todas as ofertas deste tabloide agora. Faça a leitura página por página e só finalize depois de revisar todas as páginas.",
     );
 
-    const offers = validOffers(parsed);
-    if (!offers.length) throw new Error("A IA terminou a leitura, mas não retornou ofertas confiáveis.");
+    const rawOffers = validOffers(parsed);
+    if (!rawOffers.length) throw new Error("A IA terminou a leitura, mas não retornou ofertas confiáveis.");
+    const offers = dedupeOffers(rawOffers);
+    const deduplicatedCount = rawOffers.length - offers.length;
     const pageCount = Math.max(1, Math.trunc(Number(job.page_count) || Number(parsed.page_count) || 1));
     const covered = new Set(
-      offers.map((o: any) => Math.trunc(Number(o.source_page) || 0))
+      rawOffers.map((o: any) => Math.trunc(Number(o.source_page) || 0))
         .filter((p: number) => p >= 1 && p <= pageCount),
     );
     const missing = file.type === "application/pdf"
@@ -319,6 +444,7 @@ async function processInitial(jobId: string) {
       valid_from: parsed.valid_from ?? job.valid_from ?? null,
       valid_to: parsed.valid_to ?? job.valid_to ?? null,
       page_count: pageCount,
+      deduplicated_count: deduplicatedCount,
       offers,
     };
 
@@ -354,7 +480,9 @@ async function processInitial(jobId: string) {
       status: "completed",
       progress_current: pageCount,
       progress_total: pageCount,
-      progress_label: offers.length + " ofertas importadas com sucesso.",
+      progress_label:
+        offers.length + " ofertas importadas com sucesso." +
+        (deduplicatedCount ? " " + deduplicatedCount + " repetição(ões) consolidada(s)." : ""),
       retailer: result.retailer,
       valid_from: result.valid_from,
       valid_to: result.valid_to,
@@ -406,9 +534,11 @@ async function processRefine(jobId: string) {
     const allowed = new Set(missing);
     const refined = validOffers(parsed).filter((o: any) =>
       allowed.has(Math.trunc(Number(o.source_page) || 0)));
-    const merged = new Map<string, any>();
-    for (const offer of [...(job.result.offers ?? []), ...refined]) merged.set(offerKey(offer), offer);
-    const offers = [...merged.values()];
+    const mergedRaw = [...(job.result.offers ?? []), ...refined];
+    const offers = dedupeOffers(mergedRaw);
+    const newlyDeduplicated = mergedRaw.length - offers.length;
+    const deduplicatedCount =
+      Math.max(0, Number(job.result?.deduplicated_count) || 0) + newlyDeduplicated;
     const refinedPages = new Set(
       refined.map((o: any) => Math.trunc(Number(o.source_page) || 0)),
     );
@@ -419,8 +549,16 @@ async function processRefine(jobId: string) {
       status: "completed",
       progress_current: total,
       progress_total: total,
-      progress_label: offers.length + " ofertas importadas com sucesso.",
-      result: { ...job.result, model, offers, refined_pages: [...refinedPages] },
+      progress_label:
+        offers.length + " ofertas importadas com sucesso." +
+        (deduplicatedCount ? " " + deduplicatedCount + " repetição(ões) consolidada(s)." : ""),
+      result: {
+        ...job.result,
+        model,
+        offers,
+        refined_pages: [...refinedPages],
+        deduplicated_count: deduplicatedCount,
+      },
       missing_pages: remaining,
       warning_message: remaining.length
         ? "A IA não encontrou ofertas confiáveis em " + remaining.length + " página(s): " + remaining.join(", ") + "."
