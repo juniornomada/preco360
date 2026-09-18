@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -17,6 +18,7 @@ import {
   Plus,
   Radar,
   Save,
+  ShoppingBasket,
   Sparkles,
   Store,
   Tags,
@@ -108,6 +110,7 @@ export default function FlyerPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [view, setView] = useState<View>("radar");
@@ -621,6 +624,17 @@ export default function FlyerPage() {
           </button>
         ))}
       </div>
+
+      <Button
+        type="button"
+        variant="outline"
+        className="mb-4 h-11 w-full justify-start gap-2 border-primary/25 bg-primary/5"
+        onClick={() => navigate("/offers/basket")}
+      >
+        <ShoppingBasket className="h-4 w-4 text-primary" />
+        <span className="font-bold">Cesta 360</span>
+        <span className="ml-auto text-xs font-normal text-muted-foreground">Comparar supermercados</span>
+      </Button>
 
       {view === "import" && (
         <div className="space-y-3">
