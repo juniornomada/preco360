@@ -362,38 +362,66 @@ export default function FlyerPage() {
       const fileHash = await sha256(file);
       const { data: duplicate, error: duplicateError } = await db
         .from("flyers")
-        .select("id")
+        .select("id,source_file_path")
         .eq("file_hash", fileHash)
         .maybeSingle();
       if (duplicateError) throw duplicateError;
+
+      let flyer: { id: string };
+      let replacedExisting = false;
+
       if (duplicate) {
-        toast({ title: "Esse tabloide já foi importado", description: "O histórico não foi duplicado." });
-        return;
+        // Same source file means this is a reprocessing of the same flyer, not a new
+        // historical event. Replace the extracted offers so OCR/IA refinements can be
+        // validated without forcing the user to delete the flyer manually.
+        const { error: updateFlyerError } = await db
+          .from("flyers")
+          .update({
+            retailer: retailer.trim(),
+            title: `${retailer.trim()} · ${validFrom ? dateBr(validFrom) : "Ofertas"}`,
+            valid_from: validFrom || null,
+            valid_to: validTo || null,
+            source_type: file.type === "application/pdf" ? "pdf" : "image",
+            source_file_name: file.name,
+            page_count: pageCount,
+          })
+          .eq("id", duplicate.id);
+        if (updateFlyerError) throw updateFlyerError;
+
+        const { error: clearItemsError } = await db
+          .from("flyer_items")
+          .delete()
+          .eq("flyer_id", duplicate.id);
+        if (clearItemsError) throw clearItemsError;
+
+        flyer = { id: duplicate.id };
+        replacedExisting = true;
+      } else {
+        const path = `${user.id}/${Date.now()}-${safeName(file.name || "tabloide")}`;
+        const { error: uploadError } = await supabase.storage
+          .from("flyers")
+          .upload(path, file, { contentType: file.type || undefined, upsert: false });
+        if (uploadError) throw uploadError;
+
+        const { data: insertedFlyer, error: flyerError } = await db
+          .from("flyers")
+          .insert({
+            user_id: user.id,
+            retailer: retailer.trim(),
+            title: `${retailer.trim()} · ${validFrom ? dateBr(validFrom) : "Ofertas"}`,
+            valid_from: validFrom || null,
+            valid_to: validTo || null,
+            source_type: file.type === "application/pdf" ? "pdf" : "image",
+            source_file_name: file.name,
+            source_file_path: path,
+            file_hash: fileHash,
+            page_count: pageCount,
+          })
+          .select("id")
+          .single();
+        if (flyerError) throw flyerError;
+        flyer = insertedFlyer;
       }
-
-      const path = `${user.id}/${Date.now()}-${safeName(file.name || "tabloide")}`;
-      const { error: uploadError } = await supabase.storage
-        .from("flyers")
-        .upload(path, file, { contentType: file.type || undefined, upsert: false });
-      if (uploadError) throw uploadError;
-
-      const { data: flyer, error: flyerError } = await db
-        .from("flyers")
-        .insert({
-          user_id: user.id,
-          retailer: retailer.trim(),
-          title: `${retailer.trim()} · ${validFrom ? dateBr(validFrom) : "Ofertas"}`,
-          valid_from: validFrom || null,
-          valid_to: validTo || null,
-          source_type: file.type === "application/pdf" ? "pdf" : "image",
-          source_file_name: file.name,
-          source_file_path: path,
-          file_hash: fileHash,
-          page_count: pageCount,
-        })
-        .select("id")
-        .single();
-      if (flyerError) throw flyerError;
 
       const { error: itemsError } = await db.from("flyer_items").insert(
         validItems.map((item) => {
@@ -467,8 +495,10 @@ export default function FlyerPage() {
       await queryClient.invalidateQueries({ queryKey: ["product-aliases"] });
 
       toast({
-        title: "Preços ofertados salvos",
-        description: `${validItems.length} ofertas agora fazem parte do histórico do Radar 360.`,
+        title: replacedExisting ? "Tabloide reprocessado" : "Preços ofertados salvos",
+        description: replacedExisting
+          ? `${validItems.length} ofertas substituíram a leitura anterior desse mesmo arquivo.`
+          : `${validItems.length} ofertas agora fazem parte do histórico do Radar 360.`,
       });
       setFile(null);
       setItems([]);
