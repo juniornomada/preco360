@@ -220,6 +220,10 @@ async function analyzePdfByPage(file: File, onProgress: Progress) {
   let model: string | undefined;
 
   for (let pageNo = 1; pageNo <= totalPages; pageNo++) {
+    if (pageNo > 1) {
+      onProgress(pageNo, totalPages, `Aguardando cota gratuita antes da página ${pageNo}/${totalPages}…`);
+      await new Promise((resolve) => setTimeout(resolve, 2200));
+    }
     onProgress(pageNo, totalPages, `Preparando página ${pageNo}/${totalPages}…`);
 
     const page = await pdf.getPage(pageNo);
