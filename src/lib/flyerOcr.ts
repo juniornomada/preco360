@@ -117,11 +117,27 @@ function normalizeIdentity(value: string) {
     .trim();
 }
 
+function normalizeOfferNameForDedupe(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/(\d)\s*[,\.]\s*(\d)/g, "$1.$2")
+    .replace(/\b\d+(?:\.\d+)?\s*(?:kg|g|ml|l|lt)\b/g, " ")
+    .replace(
+      /\b(?:pacote|embalagem|unidade|unidades|un|und|kg|g|ml|l|lt|sabor|sabores)\b/g,
+      " ",
+    )
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function offerIdentityKey(offer: VisionOffer) {
   const quantity = Number(offer.package_quantity);
   const quantityKey = Number.isFinite(quantity) && quantity > 0 ? String(quantity) : "";
   return [
-    normalizeIdentity(offer.product_name || ""),
+    normalizeOfferNameForDedupe(offer.product_name || ""),
     quantityKey,
     normalizeIdentity(offer.package_unit || ""),
   ].join("|");
@@ -255,12 +271,22 @@ function toCandidate(offer: VisionOffer, sourcePageOverride?: number): RichCandi
       offer.image_box &&
       Number(offer.image_box.width) > 0 &&
       Number(offer.image_box.height) > 0
-        ? {
-            x: Math.max(0, Math.min(1000, Number(offer.image_box.x) || 0)),
-            y: Math.max(0, Math.min(1000, Number(offer.image_box.y) || 0)),
-            width: Math.max(0, Math.min(1000, Number(offer.image_box.width) || 0)),
-            height: Math.max(0, Math.min(1000, Number(offer.image_box.height) || 0)),
-          }
+        ? (() => {
+            const x = Math.max(0, Math.min(999, Number(offer.image_box.x) || 0));
+            const y = Math.max(0, Math.min(999, Number(offer.image_box.y) || 0));
+            return {
+              x,
+              y,
+              width: Math.max(
+                1,
+                Math.min(1000 - x, Number(offer.image_box.width) || 0),
+              ),
+              height: Math.max(
+                1,
+                Math.min(1000 - y, Number(offer.image_box.height) || 0),
+              ),
+            };
+          })()
         : null,
     imageBoxConfidence: Math.max(
       0,
