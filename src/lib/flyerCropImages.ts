@@ -387,8 +387,23 @@ function cropToSquare(
     height: (box.height / 1000) * pageCanvas.height,
   };
 
-  const refined = refineProductRect(pageCanvas, rough);
-  const source = refined ?? rough;
+  // The AI now runs a dedicated localization pass for product images. Keep the
+  // final crop anchored to that exact box; the previous connected-component
+  // refinement could drift into a neighboring offer when the page was dense.
+  const padX = Math.min(rough.width * 0.035, pageCanvas.width * 0.004);
+  const padY = Math.min(rough.height * 0.035, pageCanvas.height * 0.004);
+  const source = {
+    x: Math.max(0, rough.x - padX),
+    y: Math.max(0, rough.y - padY),
+    width: Math.min(
+      pageCanvas.width - Math.max(0, rough.x - padX),
+      rough.width + padX * 2,
+    ),
+    height: Math.min(
+      pageCanvas.height - Math.max(0, rough.y - padY),
+      rough.height + padY * 2,
+    ),
+  };
 
   const size = 320;
   const margin = 18;
