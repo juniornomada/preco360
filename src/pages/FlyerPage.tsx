@@ -140,34 +140,49 @@ const visualTone = (key: "exceptional" | "good" | "normal" | "high" | "unknown")
 
 const productEmoji = (name: string, category?: string | null) => {
   const text = normalizeSearchText(`${category ?? ""} ${name}`);
-  if (/vinho/.test(text)) return "🍷";
+  if (/vinho|frisante|chopp de vinho|aperitivo campari/.test(text)) return "🍷";
   if (/cerveja/.test(text)) return "🍺";
-  if (/refrigerante|suco|bebida|agua/.test(text)) return "🧃";
+  if (/agua mineral|agua de coco/.test(text)) return "💧";
+  if (/refrigerante|suco|refresco|bebida/.test(text)) return "🧃";
   if (/cafe|cappuccino|capsula/.test(text)) return "☕";
-  if (/biscoito|cookie|bolacha|wafer|rosquinha/.test(text)) return "🍪";
-  if (/bala|gelatina|doce|chocolate|barra de proteina/.test(text)) return "🍫";
+  if (/biscoito|cookie|bolacha|wafer|rosquinha|polvilho/.test(text)) return "🍪";
+  if (/bala|gelatina|doce|chocolate|barra de proteina|suplemento.*proteina|whey/.test(text)) return "🍫";
   if (/arroz/.test(text)) return "🍚";
   if (/feijao/.test(text)) return "🫘";
   if (/azeite|oleo/.test(text)) return "🫒";
   if (/massa|macarrao/.test(text)) return "🍝";
   if (/pao|bolo|farofa|farinha/.test(text)) return "🍞";
-  if (/batata.*airfryer|batata.*congel/.test(text)) return "🍟";
-  if (/peixe|tilapia|pescado|salmao|sardinha/.test(text)) return "🐟";
-  if (/frango|bovino|carne|lagarto|suino|linguica|hamburguer|salsicha/.test(text)) return "🥩";
-  if (/leite|iogurte|queijo|manteiga|requeijao|creme de leite/.test(text)) return "🥛";
+  if (/pizza/.test(text)) return "🍕";
+  if (/sanduiche|temaki/.test(text)) return "🥪";
+  if (/sorvete|sobremesa|pudim/.test(text)) return "🍨";
+  if (/batata.*airfryer|batata.*congel|batata mister|batata uni/.test(text)) return "🍟";
+  if (/peixe|tilapia|pescado|salmao|sardinha|mapara|pangasius/.test(text)) return "🐟";
+  if (/frango|bovino|carne|lagarto|suino|pernil|linguica|hamburguer|salsicha|steak/.test(text)) return "🥩";
+  if (/leite|iogurte|queijo|manteiga|margarina|requeijao|creme de leite|ricota/.test(text)) return "🥛";
+  if (/ovo/.test(text)) return "🥚";
+  if (/mel\b/.test(text)) return "🍯";
+  if (/granola|cereal/.test(text)) return "🥣";
+  if (/pickles|pepino|champignon|cogumelo/.test(text)) return "🥒";
   if (/uva/.test(text)) return "🍇";
   if (/abacaxi/.test(text)) return "🍍";
   if (/melancia/.test(text)) return "🍉";
   if (/manga/.test(text)) return "🥭";
   if (/banana/.test(text)) return "🍌";
-  if (/maca/.test(text)) return "🍎";
+  if (/maca|kiwi|mamao|maracuja|caju/.test(text)) return "🍎";
   if (/laranja|tangerina|limao/.test(text)) return "🍊";
-  if (/abobora|cenoura|beterraba|repolho|berinjela|tomate|mandioquinha|mandioca|hortifruti|legume|verdura/.test(text)) return "🥕";
+  if (/abobora|cenoura|beterraba|beteroba|repolho|berinjela|tomate|mandioquinha|mandioca|hortifruti|legume|verdura/.test(text)) return "🥕";
+  if (/alimento.*cao|alimento.*gato|racao|whiskas|pedigree|qualidy/.test(text)) return "🐾";
+  if (/fralda/.test(text)) return "👶";
   if (/papel higienico|papel toalha/.test(text)) return "🧻";
-  if (/shampoo|condicionador|sabonete|desodorante|creme dental|higiene/.test(text)) return "🧴";
-  if (/limpeza|detergente|lava louca|sabao|amaciante|desinfetante/.test(text)) return "🧼";
-  if (/vaso|flor|planta/.test(text)) return "🪴";
-  return "📦";
+  if (/shampoo|condicionador|sabonete|desodorante|creme dental|antisseptico|prestobarba|higiene/.test(text)) return "🧴";
+  if (/agua sanitaria|tira manchas|lava roupa|lava louca|detergente|sabao|amaciante|desinfetante|limpeza|essencia concentrada/.test(text)) return "🧼";
+  if (/rodo/.test(text)) return "🧹";
+  if (/ducha|chuveiro/.test(text)) return "🚿";
+  if (/panela|pote tramontina|talher/.test(text)) return "🍳";
+  if (/sandalia|havaianas/.test(text)) return "🩴";
+  if (/cola|super bonder/.test(text)) return "🛠️";
+  if (/orquidea|astromelia|flor|planta|vaso/.test(text)) return "🌸";
+  return null;
 };
 
 const safeName = (value: string) =>
@@ -1624,9 +1639,13 @@ function ProductThumb({
       ) : null}
       <span
         aria-hidden="true"
-        className={`${imageUrl ? "hidden" : "flex"} h-full w-full items-center justify-center text-3xl`}
+        className={`${imageUrl ? "hidden" : "flex"} h-full w-full items-center justify-center`}
       >
-        {productEmoji(name, category)}
+        {productEmoji(name, category) ? (
+          <span className="text-3xl">{productEmoji(name, category)}</span>
+        ) : (
+          <Tags className="h-7 w-7 text-primary/70" />
+        )}
       </span>
     </div>
   );
