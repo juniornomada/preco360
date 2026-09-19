@@ -397,6 +397,147 @@ async function runGemini(file: File, prompt: string, preferredModel?: string) {
   throw new Error(lastError);
 }
 
+function validLocatorBox(value: any) {
+  const x = Number(value?.x);
+  const y = Number(value?.y);
+  const width = Number(value?.width);
+  const height = Number(value?.height);
+  const confidence = Math.max(0, Math.min(1, Number(value?.confidence) || 0));
+
+  const valid =
+    [x, y, width, height].every(Number.isFinite) &&
+    x >= 0 && y >= 0 &&
+    width > 8 && height > 8 &&
+    x < 1000 && y < 1000 &&
+    x + width <= 1005 &&
+    y + height <= 1005 &&
+    width <= 340 &&
+    height <= 360;
+
+  if (!valid || confidence < 0.82) {
+    return {
+      image_box: { x: 0, y: 0, width: 0, height: 0 },
+      image_box_confidence: 0,
+    };
+  }
+
+  return {
+    image_box: {
+      x: Math.max(0, Math.min(999, x)),
+      y: Math.max(0, Math.min(999, y)),
+      width: Math.max(1, Math.min(1000 - x, width)),
+      height: Math.max(1, Math.min(1000 - y, height)),
+    },
+    image_box_confidence: confidence,
+  };
+}
+
+function boxOverlap(a: any, b: any) {
+  const left = Math.max(a.x, b.x);
+  const top = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.width, b.x + b.width);
+  const bottom = Math.min(a.y + a.height, b.y + b.height);
+  if (right <= left || bottom <= top) return 0;
+  const intersection = (right - left) * (bottom - top);
+  const minArea = Math.min(a.width * a.height, b.width * b.height);
+  return intersection / Math.max(1, minArea);
+}
+
+async function locatePageImages(
+  file: File,
+  pageNo: number,
+  total: number,
+  pageOffers: any[],
+  preferredModel?: string,
+) {
+  if (!pageOffers.length) return pageOffers;
+
+  const manifest = pageOffers.map((offer, index) => ({
+    index,
+    product_name: offer.product_name,
+    brand: offer.brand ?? null,
+    package_quantity: offer.package_quantity ?? null,
+    package_unit: offer.package_unit ?? null,
+    price: offer.price ?? null,
+  }));
+
+  const prompt = `
+LOCALIZAÇÃO VISUAL DE PRODUTOS — PÁGINA ${pageNo}/${total}
+
+Analise SOMENTE a página física ${pageNo} deste tabloide.
+A extração de texto/preço já foi feita. Sua única tarefa agora é localizar a FOTO/EMBALAGEM visual correspondente a cada oferta abaixo.
+
+OFERTAS:
+${JSON.stringify(manifest)}
+
+Regras obrigatórias:
+1. Para cada index, localize SOMENTE a imagem visual do produto correspondente àquele product_name.
+2. NÃO enquadre o quadrinho promocional inteiro.
+3. NÃO inclua preço, nome do produto, texto promocional, bordas verdes, selo, QR code ou anúncio vizinho.
+4. Se houver duas ofertas próximas, confirme visualmente marca/tipo/tamanho antes de escolher a imagem.
+5. Não use a imagem de um produto vizinho apenas porque está mais perto do texto.
+6. Para ofertas "tipos", pode enquadrar várias embalagens SOMENTE se forem claramente variações da mesma linha anunciada.
+7. Para hortifruti/carnes/granel, enquadre apenas a foto do alimento correspondente.
+8. Dê margem pequena para não cortar embalagem, tampa ou extremidades.
+9. Coordenadas normalizadas 0..1000 com origem no canto superior esquerdo da página.
+10. Se não houver uma imagem clara e inequívoca do produto, devolva confidence=0 e caixa zerada.
+11. Confidence >=0.82 somente quando a imagem visual corresponde claramente à oferta.
+12. Antes de responder, confira se nenhuma caixa aponta para texto/preço ou para um produto diferente.
+
+Retorne SOMENTE JSON válido:
+{
+  "boxes": [
+    {
+      "index": 0,
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0,
+      "confidence": 0
+    }
+  ]
+}
+`;
+
+  const { parsed } = await runGemini(file, prompt, preferredModel);
+  const rows = Array.isArray(parsed?.boxes) ? parsed.boxes : [];
+  const byIndex = new Map<number, any>();
+
+  for (const row of rows) {
+    const index = Math.trunc(Number(row?.index));
+    if (index < 0 || index >= pageOffers.length) continue;
+    byIndex.set(index, validLocatorBox(row));
+  }
+
+  const located = pageOffers.map((offer, index) => ({
+    ...offer,
+    ...(byIndex.get(index) ?? {
+      image_box: { x: 0, y: 0, width: 0, height: 0 },
+      image_box_confidence: 0,
+    }),
+  }));
+
+  // Two different offers should not receive virtually the same product image box.
+  // When that happens, suppress the weaker one instead of showing a wrong thumbnail.
+  for (let i = 0; i < located.length; i++) {
+    const a = located[i];
+    if (Number(a.image_box_confidence) < 0.82) continue;
+    for (let j = i + 1; j < located.length; j++) {
+      const b = located[j];
+      if (Number(b.image_box_confidence) < 0.82) continue;
+      if (boxOverlap(a.image_box, b.image_box) < 0.72) continue;
+
+      const aConfidence = Number(a.image_box_confidence) || 0;
+      const bConfidence = Number(b.image_box_confidence) || 0;
+      const loser = aConfidence >= bConfidence ? b : a;
+      loser.image_box = { x: 0, y: 0, width: 0, height: 0 };
+      loser.image_box_confidence = 0;
+    }
+  }
+
+  return located;
+}
+
 async function fetchJob(jobId: string) {
   const { data, error } = await serviceClient()
     .from("flyer_import_jobs").select("*").eq("id", jobId).single();
@@ -508,10 +649,30 @@ async function processPage(jobId: string, requestedPage: number) {
       job.result?.model,
     );
 
-    const pageOffers = validOffers(parsed).map((offer: any) => ({
+    const extractedPageOffers = validOffers(parsed).map((offer: any) => ({
       ...offer,
       source_page: pageNo,
+      // The extraction pass is not trusted for thumbnails. A dedicated second pass
+      // below remaps visual boxes against the already-known product list.
+      image_box: { x: 0, y: 0, width: 0, height: 0 },
+      image_box_confidence: 0,
     }));
+
+    await updateJob(jobId, {
+      status: "processing",
+      progress_current: processedPages.length,
+      progress_total: total,
+      progress_label:
+        "Página " + pageNo + "/" + total + " lida. Localizando imagens dos produtos…",
+    });
+
+    const pageOffers = await locatePageImages(
+      file,
+      pageNo,
+      total,
+      extractedPageOffers,
+      model,
+    );
 
     const previousOffers = Array.isArray(job.result?.offers)
       ? job.result.offers
