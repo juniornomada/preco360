@@ -1168,6 +1168,11 @@ export default function FlyerPage() {
                   </div>
                   {activeJobId && (
                     <>
+                      {activeJob?.source_file_name && (
+                        <p className="mt-2 truncate text-[11px] font-semibold text-foreground">
+                          Arquivo: {activeJob.source_file_name}
+                        </p>
+                      )}
                       <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
                         O arquivo já está no servidor. Você pode trocar de aplicativo ou bloquear a tela;
                         ao voltar, o Preço 360 consulta o andamento novamente.
@@ -1215,6 +1220,11 @@ export default function FlyerPage() {
                   <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                     {activeJob.error_message || "O servidor não conseguiu concluir a leitura."}
                   </p>
+                  {activeJob.source_file_name && (
+                    <p className="mt-2 truncate text-[11px] font-semibold text-foreground">
+                      Arquivo: {activeJob.source_file_name}
+                    </p>
+                  )}
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <Button
                       type="button"
