@@ -45,26 +45,353 @@ async function canvasJpeg(canvas: HTMLCanvasElement, quality = 0.9) {
   return blob;
 }
 
+type PixelRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type Component = PixelRect & {
+  pixels: number;
+  redPixels: number;
+};
+
+function median(values: number[]) {
+  if (!values.length) return 255;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function estimateBackground(image: ImageData) {
+  const { data, width, height } = image;
+  const rs: number[] = [];
+  const gs: number[] = [];
+  const bs: number[] = [];
+  const step = Math.max(1, Math.floor(Math.min(width, height) / 50));
+
+  const sample = (x: number, y: number) => {
+    const idx = (y * width + x) * 4;
+    if (data[idx + 3] < 200) return;
+    rs.push(data[idx]);
+    gs.push(data[idx + 1]);
+    bs.push(data[idx + 2]);
+  };
+
+  for (let x = 0; x < width; x += step) {
+    sample(x, 0);
+    sample(x, height - 1);
+  }
+  for (let y = 0; y < height; y += step) {
+    sample(0, y);
+    sample(width - 1, y);
+  }
+
+  return { r: median(rs), g: median(gs), b: median(bs) };
+}
+
+function buildForegroundMask(image: ImageData) {
+  const { data, width, height } = image;
+  const background = estimateBackground(image);
+  const mask = new Uint8Array(width * height);
+  const red = new Uint8Array(width * height);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const a = data[idx + 3];
+      if (a < 40) continue;
+
+      const dr = r - background.r;
+      const dg = g - background.g;
+      const db = b - background.b;
+      const distance = Math.sqrt(dr * dr + dg * dg + db * db);
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const saturation = max - min;
+      const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      const backgroundLum =
+        0.2126 * background.r + 0.7152 * background.g + 0.0722 * background.b;
+
+      const isForeground =
+        distance > 34 ||
+        Math.abs(luminance - backgroundLum) > 34 ||
+        saturation > 48;
+
+      if (!isForeground) continue;
+      mask[y * width + x] = 1;
+
+      if (r > 145 && r > g * 1.55 && r > b * 1.45) {
+        red[y * width + x] = 1;
+      }
+    }
+  }
+
+  // One-pixel dilation joins nearby pieces of a package without turning text lines
+  // into one giant block.
+  const dilated = new Uint8Array(mask.length);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let active = 0;
+      for (let dy = -1; dy <= 1 && !active; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= height) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= width) continue;
+          if (mask[ny * width + nx]) {
+            active = 1;
+            break;
+          }
+        }
+      }
+      dilated[y * width + x] = active;
+    }
+  }
+
+  return { mask: dilated, red };
+}
+
+function findComponents(mask: Uint8Array, red: Uint8Array, width: number, height: number) {
+  const visited = new Uint8Array(mask.length);
+  const components: Component[] = [];
+  const queue = new Int32Array(mask.length);
+
+  for (let start = 0; start < mask.length; start++) {
+    if (!mask[start] || visited[start]) continue;
+
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = start;
+    visited[start] = 1;
+
+    let minX = width;
+    let minY = height;
+    let maxX = 0;
+    let maxY = 0;
+    let pixels = 0;
+    let redPixels = 0;
+
+    while (head < tail) {
+      const current = queue[head++];
+      const x = current % width;
+      const y = Math.floor(current / width);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      pixels += 1;
+      redPixels += red[current] ? 1 : 0;
+
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= height) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx;
+          if (nx < 0 || nx >= width) continue;
+          const next = ny * width + nx;
+          if (!mask[next] || visited[next]) continue;
+          visited[next] = 1;
+          queue[tail++] = next;
+        }
+      }
+    }
+
+    components.push({
+      x: minX,
+      y: minY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+      pixels,
+      redPixels,
+    });
+  }
+
+  return components;
+}
+
+function rectIntersectionRatio(a: PixelRect, b: PixelRect) {
+  const left = Math.max(a.x, b.x);
+  const top = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.width, b.x + b.width);
+  const bottom = Math.min(a.y + a.height, b.y + b.height);
+  if (right <= left || bottom <= top) return 0;
+  const intersection = (right - left) * (bottom - top);
+  return intersection / Math.max(1, a.width * a.height);
+}
+
+function pickProductComponent(
+  components: Component[],
+  width: number,
+  height: number,
+  target: PixelRect,
+) {
+  const canvasArea = width * height;
+  let best: Component | null = null;
+  let bestScore = -Infinity;
+
+  for (const component of components) {
+    const boxArea = component.width * component.height;
+    const areaRatio = boxArea / canvasArea;
+    const fillRatio = component.pixels / Math.max(1, boxArea);
+    const aspect = component.width / Math.max(1, component.height);
+
+    if (component.pixels < canvasArea * 0.0025) continue;
+    if (component.width < width * 0.035 || component.height < height * 0.035) continue;
+    if (aspect > 6.5 || aspect < 0.14) continue;
+
+    const centerX = component.x + component.width / 2;
+    const centerY = component.y + component.height / 2;
+    const targetCenterX = target.x + target.width / 2;
+    const targetCenterY = target.y + target.height / 2;
+    const distance = Math.hypot(
+      (centerX - targetCenterX) / Math.max(1, width),
+      (centerY - targetCenterY) / Math.max(1, height),
+    );
+    const centrality = 1 - Math.min(1, distance * 1.8);
+    const overlap = rectIntersectionRatio(component, target);
+    const upperBias = 1 - Math.min(1, centerY / Math.max(1, height)) * 0.28;
+    const redRatio = component.redPixels / Math.max(1, component.pixels);
+
+    // Text usually forms thin, sparse horizontal components. Giant red price digits
+    // often have lots of red pixels but relatively little filled area.
+    const textPenalty =
+      (aspect > 2.8 && component.height < height * 0.22 ? 0.42 : 0) +
+      (fillRatio < 0.12 ? 0.22 : 0);
+    const pricePenalty =
+      redRatio > 0.48 && centerY > height * 0.42 && fillRatio < 0.5 ? 0.34 : 0;
+    const edgePenalty =
+      (component.x <= 1 ||
+      component.y <= 1 ||
+      component.x + component.width >= width - 1 ||
+      component.y + component.height >= height - 1)
+        ? 0.08
+        : 0;
+
+    const sizeScore = Math.min(1, areaRatio / 0.24);
+    const densityScore = Math.min(1, fillRatio / 0.48);
+
+    const score =
+      sizeScore * 0.34 +
+      densityScore * 0.16 +
+      centrality * 0.18 +
+      overlap * 0.24 +
+      upperBias * 0.08 -
+      textPenalty -
+      pricePenalty -
+      edgePenalty;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = component;
+    }
+  }
+
+  return bestScore >= 0.22 ? best : null;
+}
+
+function refineProductRect(
+  pageCanvas: HTMLCanvasElement,
+  rough: PixelRect,
+): PixelRect | null {
+  // Expand the AI box before refinement. This recovers packages whose first bbox
+  // clipped an edge, while the component scorer prevents neighboring offers from
+  // becoming the final crop.
+  const expandX = Math.min(rough.width * 0.22, pageCanvas.width * 0.035);
+  const expandY = Math.min(rough.height * 0.22, pageCanvas.height * 0.035);
+  const region = {
+    x: Math.max(0, rough.x - expandX),
+    y: Math.max(0, rough.y - expandY),
+    width: Math.min(pageCanvas.width - Math.max(0, rough.x - expandX), rough.width + expandX * 2),
+    height: Math.min(pageCanvas.height - Math.max(0, rough.y - expandY), rough.height + expandY * 2),
+  };
+
+  if (region.width < 20 || region.height < 20) return null;
+
+  const maxAnalysis = 300;
+  const scale = Math.min(1, maxAnalysis / Math.max(region.width, region.height));
+  const analysis = document.createElement("canvas");
+  analysis.width = Math.max(40, Math.round(region.width * scale));
+  analysis.height = Math.max(40, Math.round(region.height * scale));
+  const ctx = analysis.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+
+  ctx.drawImage(
+    pageCanvas,
+    region.x,
+    region.y,
+    region.width,
+    region.height,
+    0,
+    0,
+    analysis.width,
+    analysis.height,
+  );
+
+  const image = ctx.getImageData(0, 0, analysis.width, analysis.height);
+  const { mask, red } = buildForegroundMask(image);
+  const components = findComponents(mask, red, analysis.width, analysis.height);
+
+  const target = {
+    x: ((rough.x - region.x) / region.width) * analysis.width,
+    y: ((rough.y - region.y) / region.height) * analysis.height,
+    width: (rough.width / region.width) * analysis.width,
+    height: (rough.height / region.height) * analysis.height,
+  };
+
+  const selected = pickProductComponent(
+    components,
+    analysis.width,
+    analysis.height,
+    target,
+  );
+  if (!selected) return null;
+
+  const sx = region.x + (selected.x / analysis.width) * region.width;
+  const sy = region.y + (selected.y / analysis.height) * region.height;
+  const sw = (selected.width / analysis.width) * region.width;
+  const sh = (selected.height / analysis.height) * region.height;
+
+  // Final padding is deliberately small: enough to restore package edges without
+  // pulling the neighboring product, text block or price back into the thumbnail.
+  const padX = Math.max(4, Math.min(sw * 0.055, pageCanvas.width * 0.008));
+  const padY = Math.max(4, Math.min(sh * 0.055, pageCanvas.height * 0.008));
+  const x = Math.max(0, sx - padX);
+  const y = Math.max(0, sy - padY);
+  const right = Math.min(pageCanvas.width, sx + sw + padX);
+  const bottom = Math.min(pageCanvas.height, sy + sh + padY);
+  const refined = { x, y, width: right - x, height: bottom - y };
+
+  const aspect = refined.width / Math.max(1, refined.height);
+  const roughArea = rough.width * rough.height;
+  const refinedArea = refined.width * refined.height;
+  if (refined.width < 24 || refined.height < 24) return null;
+  if (aspect > 5 || aspect < 0.2) return null;
+  if (refinedArea < roughArea * 0.035) return null;
+
+  return refined;
+}
+
 function cropToSquare(
   pageCanvas: HTMLCanvasElement,
   box: ReturnType<typeof validBox> extends infer T ? Exclude<T, null> : never,
 ) {
-  const px = (box.x / 1000) * pageCanvas.width;
-  const py = (box.y / 1000) * pageCanvas.height;
-  const pw = (box.width / 1000) * pageCanvas.width;
-  const ph = (box.height / 1000) * pageCanvas.height;
+  const rough = {
+    x: (box.x / 1000) * pageCanvas.width,
+    y: (box.y / 1000) * pageCanvas.height,
+    width: (box.width / 1000) * pageCanvas.width,
+    height: (box.height / 1000) * pageCanvas.height,
+  };
 
-  // A small margin prevents packages from looking clipped while staying inside
-  // the offer's visual cell.
-  const padX = Math.min(pw * 0.07, pageCanvas.width * 0.018);
-  const padY = Math.min(ph * 0.07, pageCanvas.height * 0.018);
-  const sx = Math.max(0, px - padX);
-  const sy = Math.max(0, py - padY);
-  const sw = Math.min(pageCanvas.width - sx, pw + padX * 2);
-  const sh = Math.min(pageCanvas.height - sy, ph + padY * 2);
+  const refined = refineProductRect(pageCanvas, rough);
+  const source = refined ?? rough;
 
   const size = 320;
-  const margin = 16;
+  const margin = 18;
   const output = document.createElement("canvas");
   output.width = size;
   output.height = size;
@@ -74,15 +401,28 @@ function cropToSquare(
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, size, size);
 
-  const scale = Math.min((size - margin * 2) / sw, (size - margin * 2) / sh);
-  const dw = sw * scale;
-  const dh = sh * scale;
+  const scale = Math.min(
+    (size - margin * 2) / source.width,
+    (size - margin * 2) / source.height,
+  );
+  const dw = source.width * scale;
+  const dh = source.height * scale;
   const dx = (size - dw) / 2;
   const dy = (size - dh) / 2;
 
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(pageCanvas, sx, sy, sw, sh, dx, dy, dw, dh);
+  ctx.drawImage(
+    pageCanvas,
+    source.x,
+    source.y,
+    source.width,
+    source.height,
+    dx,
+    dy,
+    dw,
+    dh,
+  );
   return output;
 }
 
