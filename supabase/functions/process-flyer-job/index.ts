@@ -209,7 +209,14 @@ function normalizeOfferIdentity(value: unknown) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/(\d)\s*[,\.]\s*(\d)/g, "$1.$2")
+    .replace(/\b\d+(?:\.\d+)?\s*(?:kg|g|ml|l|lt)\b/g, " ")
+    .replace(
+      /\b(?:pacote|embalagem|unidade|unidades|un|und|kg|g|ml|l|lt|sabor|sabores)\b/g,
+      " ",
+    )
     .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
