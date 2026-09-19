@@ -87,6 +87,14 @@ function displayPackage(offer: VisionOffer) {
   return `${rendered}${offer.package_unit}`;
 }
 
+function normalizeCommonProduceOcr(value: string) {
+  return value
+    .replace(/\bBeteroba\b/gi, "Beterraba")
+    .replace(/\bBeterroba\b/gi, "Beterraba")
+    .replace(/\bAbeterraba\b/gi, "Beterraba")
+    .replace(/\bMamão Formoso\b/gi, "Mamão Formosa");
+}
+
 function displayName(offer: VisionOffer) {
   let identity = offer.product_name.trim();
   const brand = offer.brand?.trim() ?? "";
@@ -105,7 +113,7 @@ function displayName(offer: VisionOffer) {
     identity = `${identity} ${pkg}`;
   }
 
-  return identity.replace(/\s+/g, " ").trim();
+  return normalizeCommonProduceOcr(identity.replace(/\s+/g, " ").trim());
 }
 
 function normalizeIdentity(value: string) {
