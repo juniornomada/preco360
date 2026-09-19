@@ -116,6 +116,44 @@ async function persistCrop(
   if (updateError) throw updateError;
 }
 
+async function persistPageCrops(
+  pageCanvas: HTMLCanvasElement,
+  entries: Array<{
+    item: StoredCropItem;
+    box: Exclude<ReturnType<typeof validBox>, null>;
+  }>,
+  userId: string,
+  flyerId: string,
+) {
+  let generated = 0;
+  const concurrency = 6;
+
+  for (let start = 0; start < entries.length; start += concurrency) {
+    const batch = entries.slice(start, start + concurrency);
+    const results = await Promise.all(
+      batch.map(async ({ item, box }) => {
+        let crop: HTMLCanvasElement | null = null;
+        try {
+          crop = cropToSquare(pageCanvas, box);
+          await persistCrop(crop, item, userId, flyerId, box.confidence);
+          return 1;
+        } catch (error) {
+          console.warn("flyer crop failed", item.id, error);
+          return 0;
+        } finally {
+          if (crop) {
+            crop.width = 1;
+            crop.height = 1;
+          }
+        }
+      }),
+    );
+    generated += results.reduce((sum, value) => sum + value, 0);
+  }
+
+  return generated;
+}
+
 async function renderPdfPage(pdf: any, pageNo: number) {
   const page = await pdf.getPage(pageNo);
   const base = page.getViewport({ scale: 1 });
@@ -209,17 +247,12 @@ export async function generateFlyerOfferCrops({
       );
 
       const pageCanvas = await renderPdfPage(pdf, pageNo);
-      for (const { item, box } of byPage.get(pageNo) ?? []) {
-        try {
-          const crop = cropToSquare(pageCanvas, box);
-          await persistCrop(crop, item, userId, flyerId, box.confidence);
-          generated += 1;
-          crop.width = 1;
-          crop.height = 1;
-        } catch (error) {
-          console.warn("flyer crop failed", item.id, error);
-        }
-      }
+      generated += await persistPageCrops(
+        pageCanvas,
+        byPage.get(pageNo) ?? [],
+        userId,
+        flyerId,
+      );
       pageCanvas.width = 1;
       pageCanvas.height = 1;
     }
@@ -227,18 +260,12 @@ export async function generateFlyerOfferCrops({
     await pdf.destroy();
   } else {
     const pageCanvas = await imageFileCanvas(file);
-    for (const { item, box } of valid) {
-      if (Math.max(1, Number(item.source_page) || 1) !== 1) continue;
-      try {
-        const crop = cropToSquare(pageCanvas, box);
-        await persistCrop(crop, item, userId, flyerId, box.confidence);
-        generated += 1;
-        crop.width = 1;
-        crop.height = 1;
-      } catch (error) {
-        console.warn("flyer crop failed", item.id, error);
-      }
-    }
+    generated += await persistPageCrops(
+      pageCanvas,
+      valid.filter(({ item }) => Math.max(1, Number(item.source_page) || 1) === 1),
+      userId,
+      flyerId,
+    );
     pageCanvas.width = 1;
     pageCanvas.height = 1;
   }
