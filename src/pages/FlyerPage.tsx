@@ -196,6 +196,7 @@ export default function FlyerPage() {
   const [processedSource, setProcessedSource] = useState<ProcessedSource | null>(null);
   const [jobActioning, setJobActioning] = useState(false);
   const appliedJobRef = useRef<string | null>(null);
+  const cropRepairRef = useRef<string | null>(null);
 
   const { data: products = [] } = useQuery<ProductForMatch[]>({
     queryKey: ["flyer-products", user?.id],
@@ -242,7 +243,7 @@ export default function FlyerPage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("flyers")
-        .select("id,retailer,title,valid_from,valid_to,source_file_name,created_at,flyer_items(count)")
+        .select("id,retailer,title,valid_from,valid_to,source_file_name,source_file_path,created_at,flyer_items(count)")
         .order("created_at", { ascending: false })
         .limit(30);
       if (error) throw error;
@@ -280,6 +281,71 @@ export default function FlyerPage() {
       )],
     [selectedHistoryItems],
   );
+
+  const selectedHistoryFlyer = useMemo(
+    () => flyerHistory.find((flyer) => flyer.id === selectedHistoryId) ?? null,
+    [flyerHistory, selectedHistoryId],
+  );
+
+  useEffect(() => {
+    if (!user || !selectedHistoryId || !selectedHistoryFlyer?.source_file_path) return;
+
+    const pending = selectedHistoryItems.filter(
+      (item) =>
+        !item.image_storage_path &&
+        Number(item.image_bbox_confidence) >= 0.82 &&
+        item.image_bbox &&
+        Number(item.image_bbox.width) > 0 &&
+        Number(item.image_bbox.height) > 0,
+    );
+    if (!pending.length) return;
+
+    const repairKey = `${selectedHistoryId}:${pending.length}`;
+    if (cropRepairRef.current === repairKey) return;
+    cropRepairRef.current = repairKey;
+
+    let cancelled = false;
+    const repair = async () => {
+      try {
+        const source = await sourceFileFromStorage(
+          selectedHistoryFlyer.source_file_path,
+          selectedHistoryFlyer.source_file_name || "tabloide.pdf",
+          "application/pdf",
+        );
+        if (cancelled) return;
+
+        await generateFlyerOfferCrops({
+          file: source,
+          userId: user.id,
+          flyerId: selectedHistoryId,
+          items: pending,
+        });
+        if (cancelled) return;
+
+        await queryClient.invalidateQueries({
+          queryKey: ["flyer-history-items", selectedHistoryId],
+        });
+        await queryClient.invalidateQueries({
+          queryKey: ["flyer-crop-urls", selectedHistoryId],
+        });
+      } catch (error) {
+        console.warn("automatic flyer crop repair failed", error);
+        cropRepairRef.current = null;
+      }
+    };
+
+    void repair();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    user?.id,
+    selectedHistoryId,
+    selectedHistoryFlyer?.source_file_path,
+    selectedHistoryFlyer?.source_file_name,
+    selectedHistoryItems,
+    queryClient,
+  ]);
 
   const { data: cropUrlMap = {} } = useQuery<Record<string, string>>({
     queryKey: ["flyer-crop-urls", selectedHistoryId, cropPaths.join("|")],
