@@ -80,6 +80,7 @@ type FlyerImportJob = {
   missing_pages: number[];
   warning_message: string | null;
   error_message: string | null;
+  updated_at: string | null;
 };
 type ProcessedSource = {
   path: string;
@@ -193,6 +194,7 @@ export default function FlyerPage() {
   const [progress, setProgress] = useState({ current: 0, total: 0, label: "" });
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [processedSource, setProcessedSource] = useState<ProcessedSource | null>(null);
+  const [jobActioning, setJobActioning] = useState(false);
   const appliedJobRef = useRef<string | null>(null);
 
   const { data: products = [] } = useQuery<ProductForMatch[]>({
@@ -303,7 +305,7 @@ export default function FlyerPage() {
       if (!activeJobId) return null;
       const { data, error } = await db
         .from("flyer_import_jobs")
-        .select("id,status,progress_current,progress_total,progress_label,source_file_path,source_file_name,mime_type,file_hash,page_count,retailer,valid_from,valid_to,result,missing_pages,warning_message,error_message")
+        .select("id,status,progress_current,progress_total,progress_label,source_file_path,source_file_name,mime_type,file_hash,page_count,retailer,valid_from,valid_to,result,missing_pages,warning_message,error_message,updated_at")
         .eq("id", activeJobId)
         .maybeSingle();
       if (error) throw error;
@@ -511,6 +513,102 @@ export default function FlyerPage() {
     validTo,
   ]);
 
+  const activeJobStale =
+    !!activeJob &&
+    ["queued", "processing", "refining"].includes(activeJob.status) &&
+    !!activeJob.updated_at &&
+    Date.now() - new Date(activeJob.updated_at).getTime() > 4 * 60 * 1000;
+
+  const retryActiveJob = async () => {
+    if (!activeJobId || !activeJob) return;
+    setJobActioning(true);
+    setProcessing(true);
+    appliedJobRef.current = null;
+
+    try {
+      const { error: resetError } = await db
+        .from("flyer_import_jobs")
+        .update({
+          status: "queued",
+          error_message: null,
+          warning_message: null,
+          completed_at: null,
+          progress_label: "Retomando importação no servidor…",
+        })
+        .eq("id", activeJobId);
+      if (resetError) throw resetError;
+
+      localStorage.setItem(IMPORT_JOB_KEY, activeJobId);
+      const { error: invokeError } = await supabase.functions.invoke(
+        "process-flyer-job",
+        { body: { job_id: activeJobId, mode: "resume" } },
+      );
+      if (invokeError) throw invokeError;
+
+      setProgress({
+        current: Math.max(0, Number(activeJob.progress_current) || 0),
+        total: Math.max(1, Number(activeJob.progress_total) || Number(activeJob.page_count) || 1),
+        label: "Importação retomada. Continuando da primeira página pendente…",
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["flyer-import-job", user?.id, activeJobId],
+      });
+      toast({
+        title: "Importação retomada",
+        description: "O servidor vai continuar a partir da primeira página que ainda não foi concluída.",
+      });
+    } catch (error: any) {
+      setProcessing(false);
+      toast({
+        title: "Não consegui retomar a importação",
+        description: error?.message ?? "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setJobActioning(false);
+    }
+  };
+
+  const cancelActiveJob = async () => {
+    if (!activeJobId) return;
+    setJobActioning(true);
+    try {
+      const { error } = await db
+        .from("flyer_import_jobs")
+        .update({
+          status: "failed",
+          progress_label: "Importação cancelada.",
+          error_message: "Importação cancelada pelo usuário.",
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", activeJobId);
+      if (error) throw error;
+
+      localStorage.removeItem(IMPORT_JOB_KEY);
+      setProcessing(false);
+      await queryClient.invalidateQueries({
+        queryKey: ["flyer-import-job", user?.id, activeJobId],
+      });
+    } catch (error: any) {
+      toast({
+        title: "Não consegui cancelar",
+        description: error?.message ?? "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setJobActioning(false);
+    }
+  };
+
+  const chooseAnotherFile = () => {
+    localStorage.removeItem(IMPORT_JOB_KEY);
+    setActiveJobId(null);
+    setProcessing(false);
+    setProgress({ current: 0, total: 0, label: "" });
+    appliedJobRef.current = null;
+    setTimeout(() => fileRef.current?.click(), 0);
+  };
+
   const handleFileSelect = async (selected: File | null) => {
     setFile(selected);
     setItems([]);
@@ -595,14 +693,26 @@ export default function FlyerPage() {
       });
       if (jobError) throw jobError;
 
+      setActiveJobId(jobId);
+      localStorage.setItem(IMPORT_JOB_KEY, jobId);
       setProgress({ current: 3, total: 3, label: "Importação iniciada no servidor…" });
+
       const { error: invokeError } = await supabase.functions.invoke("process-flyer-job", {
         body: { job_id: jobId, mode: "start" },
       });
-      if (invokeError) throw invokeError;
+      if (invokeError) {
+        await db
+          .from("flyer_import_jobs")
+          .update({
+            status: "failed",
+            progress_label: "Não foi possível iniciar o processamento.",
+            error_message: invokeError.message || "Falha ao chamar o servidor.",
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", jobId);
+        throw invokeError;
+      }
 
-      setActiveJobId(jobId);
-      localStorage.setItem(IMPORT_JOB_KEY, jobId);
       setProgress({
         current: 1,
         total: detectedPages,
@@ -1050,18 +1160,80 @@ export default function FlyerPage() {
                   </div>
                   <div className="mt-2 h-2 rounded-full bg-background">
                     <div
-                      className="h-full rounded-full bg-primary"
+                      className="h-full rounded-full bg-primary transition-all"
                       style={{
                         width: `${progress.total ? Math.max(8, (progress.current / progress.total) * 100) : 15}%`,
                       }}
                     />
                   </div>
                   {activeJobId && (
-                    <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-                      O arquivo já está no servidor. Você pode trocar de aplicativo ou bloquear a tela;
-                      ao voltar, o Preço 360 consulta o andamento novamente.
-                    </p>
+                    <>
+                      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                        O arquivo já está no servidor. Você pode trocar de aplicativo ou bloquear a tela;
+                        ao voltar, o Preço 360 consulta o andamento novamente.
+                      </p>
+                      {activeJobStale && (
+                        <p className="mt-2 text-[11px] font-semibold text-amber-400">
+                          Essa etapa está demorando mais que o esperado. Você pode reiniciar sem reenviar o PDF.
+                        </p>
+                      )}
+                      <div className="mt-3 flex gap-2">
+                        {activeJobStale && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="flex-1"
+                            disabled={jobActioning}
+                            onClick={() => void retryActiveJob()}
+                          >
+                            {jobActioning ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+                            Reiniciar processamento
+                          </Button>
+                        )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="flex-1 text-muted-foreground"
+                          disabled={jobActioning}
+                          onClick={() => void cancelActiveJob()}
+                        >
+                          Cancelar
+                        </Button>
+                      </div>
+                    </>
                   )}
+                </div>
+              )}
+
+              {activeJob?.status === "failed" && !processing && (
+                <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/5 p-3">
+                  <p className="text-sm font-bold text-destructive">
+                    A importação foi interrompida
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {activeJob.error_message || "O servidor não conseguiu concluir a leitura."}
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={jobActioning}
+                      onClick={() => void retryActiveJob()}
+                    >
+                      {jobActioning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Tentar novamente
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={jobActioning}
+                      onClick={chooseAnotherFile}
+                    >
+                      Escolher outro arquivo
+                    </Button>
+                  </div>
                 </div>
               )}
 
