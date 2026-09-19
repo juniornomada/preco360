@@ -11,6 +11,7 @@ type OfferRow = {
   id: string;
   flyer_id: string;
   user_id: string;
+  product_id: string | null;
   raw_name: string;
   brand: string | null;
   package_quantity: number | string | null;
@@ -20,6 +21,7 @@ type OfferRow = {
   image_confidence: number | string | null;
   image_match_status: string | null;
   image_query: string | null;
+  category?: string | null;
 };
 
 type Candidate = {
@@ -35,6 +37,23 @@ type Candidate = {
   packageScore: number;
 };
 
+type LibraryImage = {
+  id: string;
+  product_id: string | null;
+  product_key: string;
+  normalized_name: string;
+  brand: string | null;
+  package_quantity: number | string | null;
+  package_unit: string | null;
+  category: string | null;
+  image_url: string;
+  image_source: string;
+  external_code: string | null;
+  confidence: number | string;
+  status: string;
+  search_query: string | null;
+};
+
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
@@ -46,7 +65,9 @@ function serviceClient() {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!url || !key) throw new Error("Supabase service credentials unavailable.");
-  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 }
 
 async function callerIdentity(req: Request) {
@@ -76,6 +97,7 @@ function normalize(value: unknown) {
     .toLowerCase()
     .replace(/([a-z])\.([a-z])/g, "$1 $2")
     .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -132,16 +154,11 @@ function parseQuantity(value: unknown) {
     .replace(/\s+/g, " ")
     .trim();
 
-  const multipack = raw.match(/(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(kg|g|ml|l|lt)\b/);
-  if (multipack) {
-    const count = Number(multipack[1]);
-    const each = Number(multipack[2]);
-    return packageBase(count * each, multipack[3]);
-  }
+  const multi = raw.match(/(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(kg|g|ml|l|lt)\b/);
+  if (multi) return packageBase(Number(multi[1]) * Number(multi[2]), multi[3]);
 
   const match = raw.match(/(\d+(?:\.\d+)?)\s*(kg|g|ml|l|lt)\b/);
-  if (!match) return null;
-  return packageBase(Number(match[1]), match[2]);
+  return match ? packageBase(Number(match[1]), match[2]) : null;
 }
 
 function overlapScore(a: string[], b: string[]) {
@@ -160,10 +177,8 @@ function overlapScore(a: string[], b: string[]) {
 function brandSimilarity(item: OfferRow, candidateBrand: string, candidateTitle: string) {
   const expected = meaningfulBrandTokens(item.brand);
   if (!expected.length) return 0.5;
-
   const haystack = new Set(tokens(`${candidateBrand} ${candidateTitle}`));
-  const matched = expected.filter((token) => haystack.has(token)).length;
-  return matched / expected.length;
+  return expected.filter((token) => haystack.has(token)).length / expected.length;
 }
 
 function packageSimilarity(item: OfferRow, candidateQuantity: string) {
@@ -172,7 +187,8 @@ function packageSimilarity(item: OfferRow, candidateQuantity: string) {
   const candidate = parseQuantity(candidateQuantity);
   if (!candidate || expected.unit !== candidate.unit) return 0;
 
-  const ratio = Math.min(expected.value, candidate.value) / Math.max(expected.value, candidate.value);
+  const ratio = Math.min(expected.value, candidate.value) /
+    Math.max(expected.value, candidate.value);
   if (ratio >= 0.97) return 1;
   if (ratio >= 0.9) return 0.72;
   if (ratio >= 0.8) return 0.35;
@@ -188,24 +204,31 @@ function nameSimilarity(item: OfferRow, candidateTitle: string, candidateBrand =
   return overlap.containment * 0.65 + overlap.jaccard * 0.35;
 }
 
-function offerLooksFreshOrBulk(item: OfferRow) {
-  const text = normalize(item.raw_name);
-  return (
-    /\b(cenoura|beterraba|abobora|repolho|berinjela|cebola|chuchu|maca|manga|maracuja|tangerina|uva|banana|tomate|limao|laranja|melao|melancia|batata doce|mandioca|bovino|bovina|carne|lagarto|acem|coxao|ponta de peito|costela|frango|suino|pernil|paleta)\b/.test(text) &&
-    /\bkg\b/.test(text)
-  );
+function normalizedPackageKey(item: OfferRow) {
+  const pkg = packageBase(item.package_quantity, item.package_unit);
+  if (!pkg) {
+    const q = Number(item.package_quantity);
+    const unit = normalize(item.package_unit);
+    return Number.isFinite(q) && q > 0 && unit ? `${q}:${unit}` : "";
+  }
+  return `${pkg.value.toFixed(4)}:${pkg.unit}`;
 }
 
-function offerLooksNonFood(item: OfferRow) {
-  const text = normalize(item.raw_name);
-  return /\b(vaso|papel higienico|shampoo|condicionador|creme dental|escova dental|antisseptico|detergente|lava louca|desinfetante|sabao|amaciante|filme pvc|papel aluminio|saco para alimento|fralda|absorvente|limpeza|desodorante|sabonete|protetor solar|inseticida)\b/.test(text);
+function canonicalName(item: OfferRow) {
+  const brandSet = new Set(meaningfulBrandTokens(item.brand));
+  return tokens(item.raw_name)
+    .filter((token) => !brandSet.has(token))
+    .join(" ")
+    .trim();
 }
 
-function offerIsAmbiguousMultiProduct(item: OfferRow) {
-  const text = normalize(item.raw_name);
-  const hasOr = /\bou\b/.test(text);
-  const hasDifferentWeights = (text.match(/\d+(?:[.,]\d+)?\s*(?:kg|g|ml|l)\b/g) ?? []).length >= 2;
-  return hasOr && hasDifferentWeights;
+function productKey(item: OfferRow) {
+  const core = canonicalName(item) || normalize(item.raw_name);
+  const brand = normalize(item.brand);
+  const pkg = normalizedPackageKey(item);
+  return item.product_id
+    ? `product:${item.product_id}|${pkg}`
+    : `name:${core}|brand:${brand}|pkg:${pkg}`;
 }
 
 function buildSearchQuery(item: OfferRow) {
@@ -220,8 +243,90 @@ function buildSearchQuery(item: OfferRow) {
       ? `${item.package_quantity}${String(item.package_unit).toLowerCase()}`
       : "";
 
-  const parts = [brand, raw, packageText].filter(Boolean);
-  return [...new Set(parts)].join(" ").trim();
+  return [...new Set([brand, raw, packageText].filter(Boolean))].join(" ").trim();
+}
+
+function offerLooksFreshOrBulk(item: OfferRow) {
+  const text = normalize(item.raw_name);
+  return (
+    /\b(cenoura|beterraba|abobora|repolho|berinjela|cebola|chuchu|maca|manga|maracuja|tangerina|uva|banana|tomate|limao|laranja|melao|melancia|batata doce|mandioca|bovino|bovina|carne|lagarto|acem|coxao|ponta de peito|costela|frango|suino|pernil|paleta)\b/.test(text) &&
+    (/\bkg\b/.test(text) || !item.brand)
+  );
+}
+
+function offerLooksNonFood(item: OfferRow) {
+  const text = normalize(item.raw_name);
+  return /\b(vaso|papel higienico|shampoo|condicionador|creme dental|escova dental|antisseptico|detergente|lava louca|desinfetante|sabao|amaciante|filme pvc|papel aluminio|saco para alimento|fralda|absorvente|limpeza|desodorante|sabonete|protetor solar|inseticida)\b/.test(text);
+}
+
+function offerIsAmbiguousMultiProduct(item: OfferRow) {
+  const text = normalize(item.raw_name);
+  const hasOr = /\bou\b/.test(text);
+  const weights = text.match(/\d+(?:[.,]\d+)?\s*(?:kg|g|ml|l)\b/g) ?? [];
+  return hasOr && weights.length >= 2;
+}
+
+function cacheScore(item: OfferRow, cached: LibraryImage) {
+  if (item.product_id && cached.product_id === item.product_id) {
+    const pkg = packageSimilarity(item, `${cached.package_quantity ?? ""}${cached.package_unit ?? ""}`);
+    if (pkg >= 0.72 || !packageBase(item.package_quantity, item.package_unit)) {
+      return 1.05;
+    }
+  }
+
+  const expectedBrand = normalize(item.brand);
+  const cachedBrand = normalize(cached.brand);
+  if (expectedBrand && cachedBrand && expectedBrand !== cachedBrand) return 0;
+
+  const expectedPkg = packageBase(item.package_quantity, item.package_unit);
+  const cachedPkg = packageBase(cached.package_quantity, cached.package_unit);
+  if (expectedPkg && cachedPkg) {
+    if (expectedPkg.unit !== cachedPkg.unit) return 0;
+    const ratio = Math.min(expectedPkg.value, cachedPkg.value) /
+      Math.max(expectedPkg.value, cachedPkg.value);
+    if (ratio < 0.9) return 0;
+  }
+
+  const name = overlapScore(
+    tokens(canonicalName(item) || item.raw_name),
+    tokens(cached.normalized_name),
+  );
+  const brandBonus = expectedBrand && cachedBrand ? 0.08 : 0;
+  const pkgBonus = expectedPkg && cachedPkg ? 0.12 : 0;
+  return name.containment * 0.55 + name.jaccard * 0.25 + brandBonus + pkgBonus;
+}
+
+async function findLibraryImage(
+  supabase: ReturnType<typeof serviceClient>,
+  item: OfferRow,
+) {
+  const key = productKey(item);
+
+  const { data: exact } = await supabase
+    .from("product_images")
+    .select("*")
+    .eq("user_id", item.user_id)
+    .eq("product_key", key)
+    .maybeSingle();
+
+  if (exact?.image_url && Number(exact.confidence) >= 0.85) {
+    return exact as LibraryImage;
+  }
+
+  const { data: rows } = await supabase
+    .from("product_images")
+    .select("*")
+    .eq("user_id", item.user_id)
+    .gte("confidence", 0.85)
+    .order("updated_at", { ascending: false })
+    .limit(120);
+
+  const ranked = ((rows ?? []) as LibraryImage[])
+    .map((row) => ({ row, score: cacheScore(item, row) }))
+    .filter((entry) => entry.score >= 0.74)
+    .sort((a, b) => b.score - a.score);
+
+  return ranked[0]?.row ?? null;
 }
 
 function scoreOffHit(item: OfferRow, hit: any): Candidate | null {
@@ -236,11 +341,8 @@ function scoreOffHit(item: OfferRow, hit: any): Candidate | null {
   const packageScore = packageSimilarity(item, quantity);
   const nameScore = nameSimilarity(item, title, brands);
 
-  // For branded packaged goods, wrong brand or wrong size is an immediate rejection.
   if (item.brand && brandScore < 0.99) return null;
   if (packageBase(item.package_quantity, item.package_unit) && packageScore < 0.72) return null;
-
-  // Require real semantic overlap; package+brand alone is not enough (e.g. two unrelated 350ml beers).
   if (nameScore < 0.34) return null;
 
   const countries = Array.isArray(hit?.countries_tags) ? hit.countries_tags.join(" ") : "";
@@ -276,24 +378,21 @@ async function searchOpenFoodFacts(item: OfferRow, query: string) {
     body: JSON.stringify({
       q: query,
       fields: [
-        "code",
-        "product_name",
-        "brands",
-        "quantity",
-        "countries_tags",
-        "image_front_small_url",
-        "image_front_url",
+        "code","product_name","brands","quantity","countries_tags",
+        "image_front_small_url","image_front_url",
       ],
-      page_size: 10,
+      page_size: 12,
       page: 1,
       boost_phrase: true,
       langs: ["pt", "en"],
     }),
-  });
+    signal: AbortSignal.timeout(12000),
+  }).catch(() => null);
 
-  if (!response.ok) return [] as Candidate[];
+  if (!response?.ok) return [] as Candidate[];
   const payload = await response.json().catch(() => null);
   const hits = Array.isArray(payload?.hits) ? payload.hits : [];
+
   return hits
     .map((hit: any) => scoreOffHit(item, hit))
     .filter((entry: Candidate | null): entry is Candidate => !!entry)
@@ -315,19 +414,18 @@ async function searchGoogleImages(item: OfferRow, query: string) {
   url.searchParams.set("gl", "br");
   url.searchParams.set("lr", "lang_pt");
 
-  const response = await fetch(url);
-  if (!response.ok) return [] as Candidate[];
-  const payload = await response.json().catch(() => null);
-  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const response = await fetch(url, { signal: AbortSignal.timeout(12000) }).catch(() => null);
+  if (!response?.ok) return [] as Candidate[];
 
-  return items
+  const payload = await response.json().catch(() => null);
+  const hits = Array.isArray(payload?.items) ? payload.items : [];
+
+  return hits
     .map((hit: any) => {
       const title = String(hit?.title ?? "");
       const brandScore = brandSimilarity(item, title, title);
       const nameScore = nameSimilarity(item, title, title);
-      const packageScore = parseQuantity(title)
-        ? packageSimilarity(item, title)
-        : 0.5;
+      const packageScore = parseQuantity(title) ? packageSimilarity(item, title) : 0.5;
 
       if (item.brand && brandScore < 0.99) return null;
       if (nameScore < 0.42) return null;
@@ -353,9 +451,8 @@ async function searchGoogleImages(item: OfferRow, query: string) {
 
 function bytesToBase64(bytes: Uint8Array) {
   let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   }
   return btoa(binary);
 }
@@ -364,20 +461,15 @@ async function verifyCandidateWithGemini(item: OfferRow, candidate: Candidate) {
   const apiKey = Deno.env.get("GEMINI_API_KEY") || "";
   if (!apiKey) return { match: false, confidence: 0 };
 
-  let imageResponse: Response;
-  try {
-    imageResponse = await fetch(candidate.imageUrl, {
-      headers: { "User-Agent": "Preco360/1.0 (https://preco360.vercel.app)" },
-      signal: AbortSignal.timeout(8000),
-    });
-  } catch {
-    return { match: false, confidence: 0 };
-  }
-  if (!imageResponse.ok) return { match: false, confidence: 0 };
+  const response = await fetch(candidate.imageUrl, {
+    headers: { "User-Agent": "Preco360/1.0 (https://preco360.vercel.app)" },
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => null);
+  if (!response?.ok) return { match: false, confidence: 0 };
 
-  const contentType = imageResponse.headers.get("content-type")?.split(";")[0] || "image/jpeg";
+  const contentType = response.headers.get("content-type")?.split(";")[0] || "image/jpeg";
   if (!contentType.startsWith("image/")) return { match: false, confidence: 0 };
-  const bytes = new Uint8Array(await imageResponse.arrayBuffer());
+  const bytes = new Uint8Array(await response.arrayBuffer());
   if (!bytes.length || bytes.length > 2_500_000) return { match: false, confidence: 0 };
 
   const prompt = `
@@ -390,7 +482,7 @@ Candidato:
 - título/origem: ${candidate.title}
 - quantidade catalogada: ${candidate.quantityText || "não informada"}
 
-Analise a embalagem visível na imagem. Aceite somente se for claramente a mesma marca e a mesma linha/tipo de produto, e a quantidade/volume for compatível com a oferta. Para ofertas "tipos", o sabor pode variar, mas marca, linha, categoria e tamanho devem continuar compatíveis. Rejeite se houver dúvida, marca diferente, produto diferente, tamanho incompatível, foto genérica, logotipo isolado ou imagem que não mostre o produto.
+Aceite somente se a imagem mostrar claramente o mesmo produto/linha, marca compatível e embalagem/tamanho compatível. Para ofertas "tipos", o sabor pode variar, mas marca, linha, categoria e tamanho devem continuar compatíveis. Rejeite marca diferente, produto diferente, tamanho incompatível, foto genérica, montagem, logotipo isolado ou imagem que não mostre a embalagem.
 
 Retorne SOMENTE JSON válido:
 {"match":true,"confidence":0.98}
@@ -411,22 +503,25 @@ Retorne SOMENTE JSON válido:
     },
   };
 
-  for (const model of ["gemini-3.5-flash-lite", "gemini-3-flash-preview", "gemini-2.5-flash-lite"]) {
-    const response = await fetch(
+  for (const model of ["gemini-3.5-flash-lite","gemini-3-flash-preview","gemini-2.5-flash-lite"]) {
+    const check = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(20000),
       },
-    );
-    if (!response.ok) continue;
-    const payload = await response.json().catch(() => null);
+    ).catch(() => null);
+    if (!check?.ok) continue;
+
+    const payload = await check.json().catch(() => null);
     const text = payload?.candidates?.[0]?.content?.parts
       ?.map((part: any) => part?.text ?? "")
       .join("")
       .trim();
     if (!text) continue;
+
     try {
       const parsed = JSON.parse(text);
       return {
@@ -441,24 +536,17 @@ Retorne SOMENTE JSON válido:
   return { match: false, confidence: 0 };
 }
 
-async function resolveImage(item: OfferRow) {
-  const query = buildSearchQuery(item);
-
+async function resolveExternal(item: OfferRow, query: string) {
   if (offerLooksFreshOrBulk(item) || offerIsAmbiguousMultiProduct(item)) {
-    return { query, candidate: null as Candidate | null, confidence: 0, status: "fallback" };
+    return { candidate: null as Candidate | null, confidence: 0, status: "fallback" };
   }
 
-  // Open Food Facts is excellent for packaged food/beverages. Never use it for unrelated
-  // household/personal-care categories; those need Google CSE or a category fallback.
   let candidates: Candidate[] = [];
   if (!offerLooksNonFood(item)) {
     candidates = await searchOpenFoodFacts(item, query);
   }
 
   let best = candidates[0] ?? null;
-
-  // Optional Google Programmable Search fallback. It is only active when the project has
-  // GOOGLE_CSE_API_KEY + GOOGLE_CSE_CX configured; every Google candidate is vision-verified.
   if (!best || best.deterministicScore < 0.9) {
     const google = await searchGoogleImages(item, query);
     if (google[0] && (!best || google[0].deterministicScore > best.deterministicScore)) {
@@ -466,12 +554,8 @@ async function resolveImage(item: OfferRow) {
     }
   }
 
-  if (!best) {
-    return { query, candidate: null, confidence: 0, status: "fallback" };
-  }
+  if (!best) return { candidate: null, confidence: 0, status: "fallback" };
 
-  // Very strong catalog matches can be accepted deterministically. Everything else must
-  // survive a second-stage visual verification before it is shown to the user.
   if (
     best.source === "open_food_facts" &&
     best.deterministicScore >= 0.94 &&
@@ -479,22 +563,16 @@ async function resolveImage(item: OfferRow) {
     best.packageScore >= 0.97 &&
     best.nameScore >= 0.5
   ) {
-    return {
-      query,
-      candidate: best,
-      confidence: Math.min(1, best.deterministicScore),
-      status: "verified",
-    };
+    return { candidate: best, confidence: best.deterministicScore, status: "verified" };
   }
 
   if (best.deterministicScore < 0.78) {
-    return { query, candidate: null, confidence: best.deterministicScore, status: "rejected" };
+    return { candidate: null, confidence: best.deterministicScore, status: "rejected" };
   }
 
   const visual = await verifyCandidateWithGemini(item, best);
   if (!visual.match || visual.confidence < 0.9) {
     return {
-      query,
       candidate: null,
       confidence: Math.max(best.deterministicScore, visual.confidence),
       status: "rejected",
@@ -502,11 +580,172 @@ async function resolveImage(item: OfferRow) {
   }
 
   return {
-    query,
     candidate: best,
     confidence: Math.min(1, (best.deterministicScore + visual.confidence) / 2),
     status: "verified",
   };
+}
+
+async function sha256Hex(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function extensionFor(contentType: string) {
+  if (contentType.includes("png")) return "png";
+  if (contentType.includes("webp")) return "webp";
+  return "jpg";
+}
+
+async function persistCandidateImage(
+  supabase: ReturnType<typeof serviceClient>,
+  item: OfferRow,
+  candidate: Candidate,
+  confidence: number,
+  query: string,
+) {
+  const response = await fetch(candidate.imageUrl, {
+    headers: { "User-Agent": "Preco360/1.0 (https://preco360.vercel.app)" },
+    signal: AbortSignal.timeout(10000),
+  }).catch(() => null);
+  if (!response?.ok) throw new Error("Não foi possível copiar a imagem validada.");
+
+  const contentType = response.headers.get("content-type")?.split(";")[0] || "image/jpeg";
+  if (!["image/jpeg","image/png","image/webp"].includes(contentType)) {
+    throw new Error("Formato de imagem não suportado.");
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.length || bytes.length > 5_000_000) {
+    throw new Error("Imagem vazia ou grande demais.");
+  }
+
+  const key = productKey(item);
+  const hash = await sha256Hex(key);
+  const storagePath = `${item.user_id}/${hash}.${extensionFor(contentType)}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from("product-images")
+    .upload(storagePath, bytes, {
+      contentType,
+      cacheControl: "31536000",
+      upsert: true,
+    });
+  if (uploadError) throw uploadError;
+
+  const { data: publicUrl } = supabase.storage
+    .from("product-images")
+    .getPublicUrl(storagePath);
+
+  const imageUrl = publicUrl.publicUrl;
+  const normalizedName = canonicalName(item) || normalize(item.raw_name);
+
+  const { error: libraryError } = await supabase
+    .from("product_images")
+    .upsert({
+      user_id: item.user_id,
+      product_id: item.product_id,
+      product_key: key,
+      normalized_name: normalizedName,
+      brand: item.brand,
+      package_quantity: item.package_quantity,
+      package_unit: item.package_unit,
+      category: item.category ?? null,
+      image_url: imageUrl,
+      image_source: candidate.source,
+      external_code: candidate.code || null,
+      confidence,
+      status: "verified",
+      search_query: query,
+      storage_path: storagePath,
+      source_url: candidate.imageUrl,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id,product_key" });
+  if (libraryError) throw libraryError;
+
+  if (item.product_id) {
+    await supabase
+      .from("products")
+      .update({
+        image_url: imageUrl,
+        image_source: "product_library",
+      })
+      .eq("id", item.product_id)
+      .or("image_source.is.null,image_source.eq.product_library");
+  }
+
+  return imageUrl;
+}
+
+async function applyImage(
+  supabase: ReturnType<typeof serviceClient>,
+  item: OfferRow,
+  values: {
+    imageUrl: string | null;
+    source: string;
+    confidence: number;
+    status: string;
+    query: string;
+  },
+) {
+  await supabase
+    .from("flyer_items")
+    .update({
+      image_url: values.imageUrl,
+      image_source: values.source,
+      image_confidence: values.confidence,
+      image_match_status: values.status,
+      image_query: values.query,
+    })
+    .eq("id", item.id);
+}
+
+async function resolveOne(
+  supabase: ReturnType<typeof serviceClient>,
+  item: OfferRow,
+) {
+  const query = buildSearchQuery(item);
+
+  const cached = await findLibraryImage(supabase, item);
+  if (cached?.image_url) {
+    await applyImage(supabase, item, {
+      imageUrl: cached.image_url,
+      source: "product_library",
+      confidence: Number(cached.confidence) || 0.9,
+      status: "verified",
+      query: cached.search_query || query,
+    });
+    return;
+  }
+
+  const resolved = await resolveExternal(item, query);
+  if (!resolved.candidate) {
+    await applyImage(supabase, item, {
+      imageUrl: null,
+      source: "category_fallback",
+      confidence: resolved.confidence,
+      status: resolved.status === "rejected" ? "rejected" : "fallback",
+      query,
+    });
+    return;
+  }
+
+  const imageUrl = await persistCandidateImage(
+    supabase,
+    item,
+    resolved.candidate,
+    resolved.confidence,
+    query,
+  );
+
+  await applyImage(supabase, item, {
+    imageUrl,
+    source: "product_library",
+    confidence: resolved.confidence,
+    status: "verified",
+    query,
+  });
 }
 
 async function triggerNext(flyerId: string) {
@@ -529,7 +768,7 @@ async function processBatch(flyerId: string) {
 
   const { data: rows, error } = await supabase
     .from("flyer_items")
-    .select("id,flyer_id,user_id,raw_name,brand,package_quantity,package_unit,image_url,image_source,image_confidence,image_match_status,image_query")
+    .select("id,flyer_id,user_id,product_id,raw_name,brand,package_quantity,package_unit,image_url,image_source,image_confidence,image_match_status,image_query")
     .eq("flyer_id", flyerId)
     .is("image_match_status", null)
     .order("source_page", { ascending: true })
@@ -539,47 +778,34 @@ async function processBatch(flyerId: string) {
   const items = (rows ?? []) as OfferRow[];
   if (!items.length) return;
 
+  const productIds = [...new Set(items.map((item) => item.product_id).filter(Boolean))];
+  const categoryByProduct = new Map<string, string | null>();
+  if (productIds.length) {
+    const { data: products } = await supabase
+      .from("products")
+      .select("id,category")
+      .in("id", productIds);
+    for (const product of products ?? []) {
+      categoryByProduct.set(product.id, product.category ?? null);
+    }
+  }
+
   for (const item of items) {
+    item.category = item.product_id
+      ? categoryByProduct.get(item.product_id) ?? null
+      : null;
+
     try {
-      const resolved = await resolveImage(item);
-      if (resolved.candidate) {
-        await supabase
-          .from("flyer_items")
-          .update({
-            image_url: resolved.candidate.imageUrl,
-            image_source:
-              resolved.candidate.source === "google"
-                ? "google_cse_v1"
-                : `open_food_facts_v3:${resolved.candidate.code || "matched"}`,
-            image_confidence: resolved.confidence,
-            image_match_status: resolved.status,
-            image_query: resolved.query,
-          })
-          .eq("id", item.id);
-      } else {
-        await supabase
-          .from("flyer_items")
-          .update({
-            image_url: null,
-            image_source: "category_fallback",
-            image_confidence: resolved.confidence,
-            image_match_status: resolved.status === "rejected" ? "rejected" : "fallback",
-            image_query: resolved.query,
-          })
-          .eq("id", item.id);
-      }
+      await resolveOne(supabase, item);
     } catch (error) {
       console.warn("resolve-flyer-images failed", item.id, error);
-      await supabase
-        .from("flyer_items")
-        .update({
-          image_url: null,
-          image_source: "category_fallback",
-          image_confidence: 0,
-          image_match_status: "fallback",
-          image_query: buildSearchQuery(item),
-        })
-        .eq("id", item.id);
+      await applyImage(supabase, item, {
+        imageUrl: null,
+        source: "category_fallback",
+        confidence: 0,
+        status: "fallback",
+        query: buildSearchQuery(item),
+      });
     }
 
     await new Promise((resolve) => setTimeout(resolve, 120));
@@ -591,9 +817,7 @@ async function processBatch(flyerId: string) {
     .eq("flyer_id", flyerId)
     .is("image_match_status", null);
 
-  if ((count ?? 0) > 0) {
-    await triggerNext(flyerId);
-  }
+  if ((count ?? 0) > 0) await triggerNext(flyerId);
 }
 
 Deno.serve(async (req: Request) => {
