@@ -321,11 +321,55 @@ export default function FlyerPage() {
 
   useEffect(() => {
     if (!user) return;
-    const saved = localStorage.getItem(IMPORT_JOB_KEY);
-    if (saved) {
-      setActiveJobId(saved);
-      setProgress({ current: 1, total: 1, label: "Recuperando importação…" });
-    }
+
+    let cancelled = false;
+    const recoverImport = async () => {
+      const saved = localStorage.getItem(IMPORT_JOB_KEY);
+      if (saved) {
+        if (!cancelled) {
+          setActiveJobId(saved);
+          setProgress({ current: 1, total: 1, label: "Recuperando importação…" });
+        }
+        return;
+      }
+
+      // Older builds removed the local job id as soon as analysis completed.
+      // Recover a recent completed-but-not-saved import so a refresh does not
+      // discard the review screen.
+      const cutoff = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+      const { data: latest, error: latestError } = await db
+        .from("flyer_import_jobs")
+        .select("id,file_hash,completed_at")
+        .eq("status", "completed")
+        .gte("completed_at", cutoff)
+        .order("completed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestError || !latest || cancelled) return;
+
+      let alreadySaved = false;
+      if (latest.file_hash) {
+        const { data: savedFlyer } = await db
+          .from("flyers")
+          .select("id")
+          .eq("file_hash", latest.file_hash)
+          .limit(1)
+          .maybeSingle();
+        alreadySaved = !!savedFlyer;
+      }
+
+      if (!alreadySaved && !cancelled) {
+        localStorage.setItem(IMPORT_JOB_KEY, latest.id);
+        setActiveJobId(latest.id);
+        setProgress({ current: 1, total: 1, label: "Recuperando importação concluída…" });
+      }
+    };
+
+    void recoverImport();
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   const productMap = useMemo(
