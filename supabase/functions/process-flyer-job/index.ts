@@ -71,8 +71,6 @@ REGRAS OBRIGATÓRIAS
       "purchase_limit": null,
       "notes": [],
       "source_page": 1,
-      "image_box": {"x": 0, "y": 0, "width": 0, "height": 0},
-      "image_box_confidence": 0,
       "confidence": 0.95
     }
   ]
@@ -95,18 +93,6 @@ REGRAS OBRIGATÓRIAS
 32. Se produto + embalagem + preço + condições forem equivalentes em duas páginas, devolva apenas UM registro e prefira a ocorrência mais completa/detalhada; em empate, prefira a ocorrência da página posterior (normalmente a seção da categoria) em vez da chamada de capa.
 33. Se uma ocorrência mostrar apenas um preço promocional e outra ocorrência do mesmo produto/embalagem mostrar preço normal + Clube/Vantagens, e o preço promocional coincidir com o preço Clube, devolva somente a ocorrência completa com price normal e club_price.
 34. NÃO consolide ofertas realmente distintas: se o mesmo produto tiver preços/condições diferentes sem relação entre preço normal e Clube, mantenha registros separados.
-35. Para cada oferta, localize a FOTO/EMBALAGEM/PRODUTO VISUAL correspondente dentro da página e preencha image_box em coordenadas NORMALIZADAS de 0 a 1000, origem no canto superior esquerdo: x, y, width, height.
-36. image_box deve enquadrar prioritariamente o PRODUTO VISUAL, não o preço grande, texto promocional nem anúncios vizinhos. Pode incluir pequena margem ao redor da embalagem/produto para evitar cortes.
-37. Se o anúncio tiver mais de uma embalagem claramente pertencente à MESMA oferta, image_box pode enquadrar o conjunto dessas embalagens.
-38. Se não houver imagem clara do produto, houver ambiguidade entre anúncios vizinhos ou você não conseguir localizar a imagem com segurança, use {"x":0,"y":0,"width":0,"height":0} e image_box_confidence=0.
-39. image_box_confidence vai de 0 a 1 e mede APENAS a confiança de que a caixa recorta a imagem correta do produto. Só use valor >=0.80 quando a associação visual for realmente clara.
-40. Antes de finalizar cada oferta, confirme que image_box está dentro de 0..1000, possui width/height positivos e pertence à mesma source_page da oferta.
-41. image_box deve conter SOMENTE o produto visual principal da oferta. Não use a moldura inteira do quadrinho promocional.
-42. Evite incluir nome do produto, preço, selo promocional, bordas da grade, produto de outra oferta acima/abaixo/lado ou qualquer texto vizinho.
-43. Se duas embalagens diferentes aparecerem muito próximas, escolha apenas a embalagem que corresponde ao product_name desta oferta. Só agrupe duas embalagens quando ambas forem claramente a mesma oferta/mesma linha anunciada em conjunto.
-44. Dê uma pequena folga ao redor do produto para não cortar embalagem, tampa, alça ou extremidades, mas essa folga deve ser mínima.
-45. Se o produto estiver parcialmente encoberto ou próximo da borda do anúncio, expanda image_box o suficiente para recuperar o produto inteiro, sem invadir o anúncio vizinho.
-46. Faça uma checagem visual final: se image_box incluir preço/texto em área relevante, mais de um anúncio diferente ou cortar parte evidente do produto, corrija a caixa antes de finalizar.
 `;
 
 type JobRow = {
