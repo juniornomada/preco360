@@ -138,15 +138,30 @@ const visualTone = (key: "exceptional" | "good" | "normal" | "high" | "unknown")
   return "unknown";
 };
 
+const normalizeProduceOcr = (value: string) =>
+  value
+    .replace(/\bbeteroba\b/gi, "beterraba")
+    .replace(/\bbeterroba\b/gi, "beterraba")
+    .replace(/\babeterraba\b/gi, "beterraba")
+    .replace(/\bmamao formoso\b/gi, "mamão formosa");
+
+const displayProductName = (value: string) => normalizeProduceOcr(value);
+
 const productEmoji = (name: string, category?: string | null) => {
-  const text = normalizeSearchText(`${category ?? ""} ${name}`);
+  const text = normalizeProduceOcr(
+    normalizeSearchText(`${category ?? ""} ${name}`),
+  );
+
+  // Product type has priority over flavor/variant words.
+  if (/barra de proteina|protein bar|suplemento.*proteina|whey/.test(text)) return "🍫";
+
   if (/vinho|frisante|chopp de vinho|aperitivo campari/.test(text)) return "🍷";
   if (/cerveja/.test(text)) return "🍺";
   if (/agua mineral|agua de coco/.test(text)) return "💧";
   if (/refrigerante|suco|refresco|bebida/.test(text)) return "🧃";
   if (/cafe|cappuccino|capsula/.test(text)) return "☕";
   if (/biscoito|cookie|bolacha|wafer|rosquinha|polvilho/.test(text)) return "🍪";
-  if (/bala|gelatina|doce|chocolate|barra de proteina|suplemento.*proteina|whey/.test(text)) return "🍫";
+  if (/bala|gelatina|doce|chocolate/.test(text)) return "🍫";
   if (/arroz/.test(text)) return "🍚";
   if (/feijao/.test(text)) return "🫘";
   if (/azeite|oleo/.test(text)) return "🫒";
@@ -163,14 +178,29 @@ const productEmoji = (name: string, category?: string | null) => {
   if (/mel\b/.test(text)) return "🍯";
   if (/granola|cereal/.test(text)) return "🥣";
   if (/pickles|pepino|champignon|cogumelo/.test(text)) return "🥒";
+
+  // Hortifruti: prefer the closest available emoji instead of a generic carrot.
+  if (/berinjela/.test(text)) return "🍆";
+  if (/tomate/.test(text)) return "🍅";
+  if (/milho/.test(text)) return "🌽";
+  if (/pepino/.test(text)) return "🥒";
+  if (/pimenta/.test(text)) return "🌶️";
+  if (/alface|repolho|couve|acelga/.test(text)) return "🥬";
+  if (/cenoura/.test(text)) return "🥕";
+  if (/beterraba/.test(text)) return "🟣";
+  if (/abobora|moranga/.test(text)) return "🎃";
+  if (/mandioquinha|mandioca/.test(text)) return "🍠";
   if (/uva/.test(text)) return "🍇";
   if (/abacaxi/.test(text)) return "🍍";
   if (/melancia/.test(text)) return "🍉";
   if (/manga/.test(text)) return "🥭";
   if (/banana/.test(text)) return "🍌";
-  if (/maca|kiwi|mamao|maracuja|caju/.test(text)) return "🍎";
-  if (/laranja|tangerina|limao/.test(text)) return "🍊";
-  if (/abobora|cenoura|beterraba|beteroba|repolho|berinjela|tomate|mandioquinha|mandioca|hortifruti|legume|verdura/.test(text)) return "🥕";
+  if (/kiwi/.test(text)) return "🥝";
+  if (/maca/.test(text)) return "🍎";
+  if (/laranja|tangerina|mexerica|limao/.test(text)) return "🍊";
+  if (/mamao|maracuja|caju|goiaba|fruta/.test(text)) return "🍈";
+  if (/hortifruti|legume|verdura/.test(text)) return "🥬";
+
   if (/alimento.*cao|alimento.*gato|racao|whiskas|pedigree|qualidy/.test(text)) return "🐾";
   if (/fralda/.test(text)) return "👶";
   if (/papel higienico|papel toalha/.test(text)) return "🧻";
@@ -1533,7 +1563,7 @@ export default function FlyerPage() {
                               >
                                 <div className="flex gap-3">
                                   <ProductThumb
-                                    name={item.raw_name}
+                                    name={displayProductName(item.raw_name)}
                                     category={item.product?.category}
                                     imageUrl={item.image_url || item.product?.image_url}
                                   />
@@ -1541,7 +1571,7 @@ export default function FlyerPage() {
                                   <div className="min-w-0 flex-1">
                                     <div className="flex items-start justify-between gap-3">
                                       <div className="min-w-0">
-                                        <p className="font-bold leading-snug">{item.raw_name}</p>
+                                        <p className="font-bold leading-snug">{displayProductName(item.raw_name)}</p>
                                         <p className="mt-0.5 text-[11px] text-muted-foreground">
                                           Página {item.source_page ?? "—"}
                                         </p>
