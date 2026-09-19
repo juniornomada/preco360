@@ -48,10 +48,6 @@ import {
   visionResponseToFlyerResult,
   type VisionResponse,
 } from "@/lib/flyerOcr";
-import {
-  generateFlyerOfferCrops,
-  sourceFileFromStorage,
-} from "@/lib/flyerCropImages";
 
 const db = supabase as any;
 type MatchType = "exact" | "equivalent" | "suggested" | "manual" | "unmatched";
@@ -196,7 +192,6 @@ export default function FlyerPage() {
   const [processedSource, setProcessedSource] = useState<ProcessedSource | null>(null);
   const [jobActioning, setJobActioning] = useState(false);
   const appliedJobRef = useRef<string | null>(null);
-  const cropRepairRef = useRef<string | null>(null);
 
   const { data: products = [] } = useQuery<ProductForMatch[]>({
     queryKey: ["flyer-products", user?.id],
@@ -257,7 +252,7 @@ export default function FlyerPage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("flyer_items")
-        .select("id,product_id,raw_name,brand,package_quantity,package_unit,advertised_price,normalized_price,base_unit,club_advertised_price,excluded_types,included_types,purchase_limit,store_restrictions,offer_notes,source_page,image_url,image_source,image_storage_path,image_bbox,image_bbox_confidence")
+        .select("id,product_id,raw_name,brand,package_quantity,package_unit,advertised_price,normalized_price,base_unit,club_advertised_price,excluded_types,included_types,purchase_limit,store_restrictions,offer_notes,source_page,image_url,image_source,image_confidence,image_match_status")
         .eq("flyer_id", selectedHistoryId)
         .order("source_page", { ascending: true })
         .order("raw_name", { ascending: true });
@@ -270,99 +265,6 @@ export default function FlyerPage() {
       return rows?.some((item) => !item.image_source) ? 3000 : false;
     },
     refetchOnWindowFocus: true,
-  });
-
-  const cropPaths = useMemo(
-    () =>
-      [...new Set(
-        selectedHistoryItems
-          .map((item) => String(item.image_storage_path || "").trim())
-          .filter(Boolean),
-      )],
-    [selectedHistoryItems],
-  );
-
-  const selectedHistoryFlyer = useMemo(
-    () => flyerHistory.find((flyer) => flyer.id === selectedHistoryId) ?? null,
-    [flyerHistory, selectedHistoryId],
-  );
-
-  useEffect(() => {
-    if (!user || !selectedHistoryId || !selectedHistoryFlyer?.source_file_path) return;
-
-    const pending = selectedHistoryItems.filter(
-      (item) =>
-        !item.image_storage_path &&
-        Number(item.image_bbox_confidence) >= 0.82 &&
-        item.image_bbox &&
-        Number(item.image_bbox.width) > 0 &&
-        Number(item.image_bbox.height) > 0,
-    );
-    if (!pending.length) return;
-
-    const repairKey = `${selectedHistoryId}:${pending.length}`;
-    if (cropRepairRef.current === repairKey) return;
-    cropRepairRef.current = repairKey;
-
-    let cancelled = false;
-    const repair = async () => {
-      try {
-        const source = await sourceFileFromStorage(
-          selectedHistoryFlyer.source_file_path,
-          selectedHistoryFlyer.source_file_name || "tabloide.pdf",
-          "application/pdf",
-        );
-        if (cancelled) return;
-
-        await generateFlyerOfferCrops({
-          file: source,
-          userId: user.id,
-          flyerId: selectedHistoryId,
-          items: pending,
-        });
-        if (cancelled) return;
-
-        await queryClient.invalidateQueries({
-          queryKey: ["flyer-history-items", selectedHistoryId],
-        });
-        await queryClient.invalidateQueries({
-          queryKey: ["flyer-crop-urls", selectedHistoryId],
-        });
-      } catch (error) {
-        console.warn("automatic flyer crop repair failed", error);
-        cropRepairRef.current = null;
-      }
-    };
-
-    void repair();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    user?.id,
-    selectedHistoryId,
-    selectedHistoryFlyer?.source_file_path,
-    selectedHistoryFlyer?.source_file_name,
-    selectedHistoryItems,
-    queryClient,
-  ]);
-
-  const { data: cropUrlMap = {} } = useQuery<Record<string, string>>({
-    queryKey: ["flyer-crop-urls", selectedHistoryId, cropPaths.join("|")],
-    queryFn: async () => {
-      if (!cropPaths.length) return {};
-      const { data, error } = await supabase.storage
-        .from("flyers")
-        .createSignedUrls(cropPaths, 60 * 60);
-      if (error) throw error;
-      const map: Record<string, string> = {};
-      for (const row of data ?? []) {
-        if (row.path && row.signedUrl) map[row.path] = row.signedUrl;
-      }
-      return map;
-    },
-    enabled: !!selectedHistoryId && cropPaths.length > 0,
-    staleTime: 50 * 60 * 1000,
   });
 
   const { data: activeJob } = useQuery<FlyerImportJob | null>({
@@ -1054,43 +956,6 @@ export default function FlyerPage() {
       );
       if (itemsError) throw itemsError;
 
-      // The flyer itself is the primary image source. Generate persistent thumbnails
-      // from the exact product boxes returned by the visual extractor before trying
-      // any external catalog fallback.
-      try {
-        const { data: cropItems, error: cropItemsError } = await db
-          .from("flyer_items")
-          .select("id,source_page,image_bbox,image_bbox_confidence")
-          .eq("flyer_id", flyer.id);
-        if (cropItemsError) throw cropItemsError;
-
-        const finalSourcePath = sourcePath ?? duplicate?.source_file_path ?? null;
-        let cropFile = file;
-        if (!cropFile && finalSourcePath) {
-          cropFile = await sourceFileFromStorage(
-            finalSourcePath,
-            sourceFileName,
-            sourceMime || null,
-          );
-        }
-
-        if (cropFile) {
-          const cropResult = await generateFlyerOfferCrops({
-            file: cropFile,
-            userId: user.id,
-            flyerId: flyer.id,
-            items: cropItems ?? [],
-          });
-          if (cropResult.generated > 0) {
-            await queryClient.invalidateQueries({
-              queryKey: ["flyer-history-items", flyer.id],
-            });
-          }
-        }
-      } catch (cropError) {
-        console.warn("flyer thumbnail generation failed", cropError);
-      }
-
       const aliasRows = validItems.filter(
         (item) => item.productId && (item.matchType === "manual" || item.matchConfidence >= 0.9),
       );
@@ -1114,8 +979,8 @@ export default function FlyerPage() {
         }
       }
 
-      // Only offers that could not produce a reliable crop from the flyer continue to
-      // the external catalog resolver.
+      // Resolve a reusable product image from the normalized name/brand/package.
+      // If no trustworthy image exists, the card keeps a category fallback icon.
       void supabase.functions.invoke("resolve-flyer-images", {
         body: { flyer_id: flyer.id },
       }).catch(() => {});
@@ -1641,13 +1506,7 @@ export default function FlyerPage() {
                                   <ProductThumb
                                     name={item.raw_name}
                                     category={item.product?.category}
-                                    imageUrl={
-                                      (item.image_storage_path
-                                        ? cropUrlMap[item.image_storage_path]
-                                        : null) ||
-                                      item.image_url ||
-                                      item.product?.image_url
-                                    }
+                                    imageUrl={item.image_url || item.product?.image_url}
                                   />
 
                                   <div className="min-w-0 flex-1">
