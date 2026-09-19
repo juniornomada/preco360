@@ -638,7 +638,8 @@ async function processPage(jobId: string, requestedPage: number) {
       "\n\nEXECUÇÃO EM ETAPAS — PÁGINA ALVO " + pageNo + "/" + total +
       "\nAnalise SOMENTE a página física " + pageNo + " deste arquivo." +
       "\nIgnore completamente as demais páginas nesta execução." +
-      "\nExtraia TODAS as ofertas visíveis da página alvo, inclusive os image_box." +
+      "\nExtraia TODAS as ofertas visíveis da página alvo." +
+      "\nNesta primeira etapa NÃO localize imagens: use image_box zerado e image_box_confidence=0. A localização visual será feita em uma segunda etapa dedicada." +
       "\nDefina source_page=" + pageNo + " em todos os registros retornados." +
       "\nNão omita ofertas só porque o mesmo produto pode aparecer em outra página." +
       "\nRetorne o mesmo formato JSON do schema principal.";
