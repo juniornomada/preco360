@@ -153,41 +153,66 @@ const productEmoji = (name: string, category?: string | null) => {
   );
 
   // Product type has priority over flavor/variant words.
-  if (/barra de proteina|protein bar|suplemento.*proteina|whey/.test(text)) return "🍫";
+  if (/bebida lactea/.test(text)) return "🥛";
+  if (/barra de proteina|protein bar|suplemento.*proteina|suplemento.*whey/.test(text)) return "🍫";
 
-  if (/vinho|frisante|chopp de vinho|aperitivo campari/.test(text)) return "🍷";
+  if (/vinho|frisante|chopp de vinho/.test(text)) return "🍷";
+  if (/aperitivo campari/.test(text)) return "🍹";
   if (/cerveja/.test(text)) return "🍺";
-  if (/agua mineral|agua de coco/.test(text)) return "💧";
+  if (/agua de coco/.test(text)) return "🥥";
+  if (/agua mineral/.test(text)) return "💧";
   if (/refrigerante|suco|refresco|bebida/.test(text)) return "🧃";
+  if (/achocolatado/.test(text)) return "🍫";
   if (/cafe|cappuccino|capsula/.test(text)) return "☕";
+
   if (/biscoito|cookie|bolacha|wafer|rosquinha|polvilho/.test(text)) return "🍪";
   if (/bala|gelatina|doce|chocolate/.test(text)) return "🍫";
+  if (/amendoim/.test(text)) return "🥜";
   if (/arroz/.test(text)) return "🍚";
   if (/feijao/.test(text)) return "🫘";
   if (/azeite|oleo/.test(text)) return "🫒";
-  if (/massa|macarrao/.test(text)) return "🍝";
-  if (/pao|bolo|farofa|farinha/.test(text)) return "🍞";
+  if (/macarrao|nhoque|massa/.test(text)) return "🍝";
+  if (/pipoca/.test(text)) return "🍿";
+  if (/farofa/.test(text)) return "🥣";
+  if (/farinha de milho|flocao/.test(text)) return "🌽";
+  if (/bolo|churros/.test(text)) return "🍰";
+  if (/pao/.test(text)) return "🍞";
   if (/pizza/.test(text)) return "🍕";
-  if (/sanduiche|temaki/.test(text)) return "🥪";
-  if (/sorvete|sobremesa|pudim/.test(text)) return "🍨";
+  if (/temaki|sushi/.test(text)) return "🍣";
+  if (/sanduiche/.test(text)) return "🥪";
+  if (/kibe/.test(text)) return "🧆";
+  if (/strogonoff/.test(text)) return "🍲";
+  if (/pudim/.test(text)) return "🍮";
+  if (/sorvete|sobremesa/.test(text)) return "🍨";
+  if (/maionese|molho de tomate|extrato de tomate|molho de soja|shoyu/.test(text)) return "🥫";
+
   if (/batata.*airfryer|batata.*congel|batata mister|batata uni/.test(text)) return "🍟";
   if (/peixe|tilapia|pescado|salmao|sardinha|mapara|pangasius/.test(text)) return "🐟";
-  if (/frango|bovino|carne|lagarto|suino|pernil|linguica|hamburguer|salsicha|steak/.test(text)) return "🥩";
-  if (/leite|iogurte|queijo|manteiga|margarina|requeijao|creme de leite|ricota/.test(text)) return "🥛";
+  if (/salsicha|hot dog|linguica/.test(text)) return "🌭";
+  if (/hamburguer/.test(text)) return "🍔";
+  if (/frango|sobrecoxa|filezinho|steak de frango/.test(text)) return "🍗";
+  if (/bovino|bovina|carne|lagarto|suino|pernil|lombo|paleta|ponta de peito/.test(text)) return "🥩";
+
+  if (/manteiga|margarina/.test(text)) return "🧈";
+  if (/queijo|cream cheese|requeijao|ricota|quark/.test(text)) return "🧀";
+  if (/leite|iogurte|batavinho/.test(text)) return "🥛";
   if (/ovo/.test(text)) return "🥚";
   if (/mel\b/.test(text)) return "🍯";
   if (/granola|cereal/.test(text)) return "🥣";
-  if (/pickles|pepino|champignon|cogumelo/.test(text)) return "🥒";
 
-  // Hortifruti: prefer the closest available emoji instead of a generic carrot.
+  if (/champignon|cogumelo|shimeji/.test(text)) return "🍄";
+  if (/pickles|pepino/.test(text)) return "🥒";
+  if (/alho/.test(text)) return "🧄";
+  if (/brocolis/.test(text)) return "🥦";
+
+  // Hortifruti: use the closest available visual; beet gets a custom SVG below.
   if (/berinjela/.test(text)) return "🍆";
   if (/tomate/.test(text)) return "🍅";
   if (/milho/.test(text)) return "🌽";
-  if (/pepino/.test(text)) return "🥒";
   if (/pimenta/.test(text)) return "🌶️";
   if (/alface|repolho|couve|acelga/.test(text)) return "🥬";
   if (/cenoura/.test(text)) return "🥕";
-  if (/beterraba/.test(text)) return "🟣";
+  if (/beterraba/.test(text)) return "__beet__";
   if (/abobora|moranga/.test(text)) return "🎃";
   if (/mandioquinha|mandioca/.test(text)) return "🍠";
   if (/uva/.test(text)) return "🍇";
@@ -203,15 +228,20 @@ const productEmoji = (name: string, category?: string | null) => {
 
   if (/alimento.*cao|alimento.*gato|racao|whiskas|pedigree|qualidy/.test(text)) return "🐾";
   if (/fralda/.test(text)) return "👶";
-  if (/papel higienico|papel toalha/.test(text)) return "🧻";
-  if (/shampoo|condicionador|sabonete|desodorante|creme dental|antisseptico|prestobarba|higiene/.test(text)) return "🧴";
+  if (/papel toalha/.test(text)) return "🧽";
+  if (/papel higienico/.test(text)) return "🧻";
+  if (/prestobarba|barbeador|aparelho de barbear/.test(text)) return "🪒";
+  if (/creme dental|listerine|antisseptico bucal/.test(text)) return "🪥";
+  if (/shampoo|condicionador|sabonete|desodorante|higiene/.test(text)) return "🧴";
   if (/agua sanitaria|tira manchas|lava roupa|lava louca|detergente|sabao|amaciante|desinfetante|limpeza|essencia concentrada/.test(text)) return "🧼";
   if (/rodo/.test(text)) return "🧹";
   if (/ducha|chuveiro/.test(text)) return "🚿";
-  if (/panela|pote tramontina|talher/.test(text)) return "🍳";
+  if (/talher/.test(text)) return "🍴";
+  if (/panela/.test(text)) return "🍳";
   if (/sandalia|havaianas/.test(text)) return "🩴";
   if (/cola|super bonder/.test(text)) return "🛠️";
-  if (/orquidea|astromelia|flor|planta|vaso/.test(text)) return "🌸";
+  if (/orquidea|astromelia|maco de|flor/.test(text)) return "🌸";
+  if (/vaso/.test(text)) return "🪴";
   return null;
 };
 
@@ -1671,7 +1701,18 @@ function ProductThumb({
         aria-hidden="true"
         className={`${imageUrl ? "hidden" : "flex"} h-full w-full items-center justify-center`}
       >
-        {productEmoji(name, category) ? (
+        {productEmoji(name, category) === "__beet__" ? (
+          <svg
+            viewBox="0 0 48 48"
+            aria-hidden="true"
+            className="h-9 w-9"
+          >
+            <path d="M24 16c-8.2 0-14 5.7-14 13 0 8.8 9.1 14.1 14 17 4.9-2.9 14-8.2 14-17 0-7.3-5.8-13-14-13Z" fill="#8b3f8f" />
+            <path d="M23 17c-5.5-7-3.9-12.2 1.1-15.2 2.3 5.2 2.1 10.2-1.1 15.2Z" fill="#4f9d55" />
+            <path d="M27 17c2.3-7.1 7.1-9.6 12.6-8-2.3 5.3-6.4 8.1-12.6 8Z" fill="#68b66b" />
+            <path d="M20 18c-6-2.5-10.4-.8-13.1 3.4 5.2 1.5 9.5.4 13.1-3.4Z" fill="#5ba960" />
+          </svg>
+        ) : productEmoji(name, category) ? (
           <span className="text-3xl">{productEmoji(name, category)}</span>
         ) : (
           <Tags className="h-7 w-7 text-primary/70" />
