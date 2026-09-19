@@ -352,11 +352,13 @@ function scoreOffHit(item: OfferRow, hit: any): Candidate | null {
   const countries = Array.isArray(hit?.countries_tags) ? hit.countries_tags.join(" ") : "";
   const brazilBonus = /brazil|brasil/i.test(countries) ? 0.04 : 0;
 
-  const deterministicScore =
+  const deterministicScore = Math.min(
+    1,
     Math.min(1, brandScore) * 0.42 +
-    Math.min(1, packageScore) * 0.36 +
-    Math.min(1, nameScore) * 0.22 +
-    brazilBonus;
+      Math.min(1, packageScore) * 0.36 +
+      Math.min(1, nameScore) * 0.22 +
+      brazilBonus,
+  );
 
   return {
     source: "open_food_facts",
