@@ -639,7 +639,7 @@ async function processPage(jobId: string, requestedPage: number) {
       "\nAnalise SOMENTE a página física " + pageNo + " deste arquivo." +
       "\nIgnore completamente as demais páginas nesta execução." +
       "\nExtraia TODAS as ofertas visíveis da página alvo." +
-      "\nNesta primeira etapa NÃO localize imagens: use image_box zerado e image_box_confidence=0. A localização visual será feita em uma segunda etapa dedicada." +
+      "\nNÃO localize imagens nesta etapa: use image_box zerado e image_box_confidence=0. As miniaturas serão resolvidas depois pelo nome do produto." +
       "\nDefina source_page=" + pageNo + " em todos os registros retornados." +
       "\nNão omita ofertas só porque o mesmo produto pode aparecer em outra página." +
       "\nRetorne o mesmo formato JSON do schema principal.";
@@ -650,30 +650,13 @@ async function processPage(jobId: string, requestedPage: number) {
       job.result?.model,
     );
 
-    const extractedPageOffers = validOffers(parsed).map((offer: any) => ({
+    const pageOffers = validOffers(parsed).map((offer: any) => ({
       ...offer,
       source_page: pageNo,
-      // The extraction pass is not trusted for thumbnails. A dedicated second pass
-      // below remaps visual boxes against the already-known product list.
+      // Product images are resolved after saving from the normalized product identity.
       image_box: { x: 0, y: 0, width: 0, height: 0 },
       image_box_confidence: 0,
     }));
-
-    await updateJob(jobId, {
-      status: "processing",
-      progress_current: processedPages.length,
-      progress_total: total,
-      progress_label:
-        "Página " + pageNo + "/" + total + " lida. Localizando imagens dos produtos…",
-    });
-
-    const pageOffers = await locatePageImages(
-      file,
-      pageNo,
-      total,
-      extractedPageOffers,
-      model,
-    );
 
     const previousOffers = Array.isArray(job.result?.offers)
       ? job.result.offers
