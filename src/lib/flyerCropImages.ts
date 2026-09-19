@@ -298,16 +298,13 @@ function refineProductRect(
   pageCanvas: HTMLCanvasElement,
   rough: PixelRect,
 ): PixelRect | null {
-  // Expand the AI box before refinement. This recovers packages whose first bbox
-  // clipped an edge, while the component scorer prevents neighboring offers from
-  // becoming the final crop.
-  const expandX = Math.min(rough.width * 0.22, pageCanvas.width * 0.035);
-  const expandY = Math.min(rough.height * 0.22, pageCanvas.height * 0.035);
+  // Never leave the AI-localized cell. Earlier builds expanded around the box and
+  // could jump into the neighboring offer. Refinement may only shrink INSIDE it.
   const region = {
-    x: Math.max(0, rough.x - expandX),
-    y: Math.max(0, rough.y - expandY),
-    width: Math.min(pageCanvas.width - Math.max(0, rough.x - expandX), rough.width + expandX * 2),
-    height: Math.min(pageCanvas.height - Math.max(0, rough.y - expandY), rough.height + expandY * 2),
+    x: Math.max(0, rough.x),
+    y: Math.max(0, rough.y),
+    width: Math.min(pageCanvas.width - Math.max(0, rough.x), rough.width),
+    height: Math.min(pageCanvas.height - Math.max(0, rough.y), rough.height),
   };
 
   if (region.width < 20 || region.height < 20) return null;
@@ -360,10 +357,10 @@ function refineProductRect(
   // pulling the neighboring product, text block or price back into the thumbnail.
   const padX = Math.max(4, Math.min(sw * 0.055, pageCanvas.width * 0.008));
   const padY = Math.max(4, Math.min(sh * 0.055, pageCanvas.height * 0.008));
-  const x = Math.max(0, sx - padX);
-  const y = Math.max(0, sy - padY);
-  const right = Math.min(pageCanvas.width, sx + sw + padX);
-  const bottom = Math.min(pageCanvas.height, sy + sh + padY);
+  const x = Math.max(region.x, sx - padX);
+  const y = Math.max(region.y, sy - padY);
+  const right = Math.min(region.x + region.width, sx + sw + padX);
+  const bottom = Math.min(region.y + region.height, sy + sh + padY);
   const refined = { x, y, width: right - x, height: bottom - y };
 
   const aspect = refined.width / Math.max(1, refined.height);
@@ -387,23 +384,9 @@ function cropToSquare(
     height: (box.height / 1000) * pageCanvas.height,
   };
 
-  // The AI now runs a dedicated localization pass for product images. Keep the
-  // final crop anchored to that exact box; the previous connected-component
-  // refinement could drift into a neighboring offer when the page was dense.
-  const padX = Math.min(rough.width * 0.035, pageCanvas.width * 0.004);
-  const padY = Math.min(rough.height * 0.035, pageCanvas.height * 0.004);
-  const source = {
-    x: Math.max(0, rough.x - padX),
-    y: Math.max(0, rough.y - padY),
-    width: Math.min(
-      pageCanvas.width - Math.max(0, rough.x - padX),
-      rough.width + padX * 2,
-    ),
-    height: Math.min(
-      pageCanvas.height - Math.max(0, rough.y - padY),
-      rough.height + padY * 2,
-    ),
-  };
+  // Refine only inside the dedicated AI box. If no trustworthy visual component
+  // is found, keep the AI box itself instead of drifting into another offer.
+  const source = refineProductRect(pageCanvas, rough) ?? rough;
 
   const size = 320;
   const margin = 18;
