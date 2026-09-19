@@ -1085,22 +1085,22 @@ export default function FlyerPage() {
 
   return (
     <div className="page-container mx-auto w-full max-w-3xl">
-      <header className="mb-4 flex items-start justify-between gap-3">
+      <header className="mb-3 flex items-start justify-between gap-3 sm:mb-4">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Radar 360</p>
-          <h1 className="mt-1 text-[clamp(1.65rem,7vw,2rem)] font-extrabold tracking-tight">
+          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary sm:text-xs">Radar 360</p>
+          <h1 className="mt-0.5 text-[clamp(1.45rem,6vw,2rem)] font-extrabold leading-tight tracking-tight sm:mt-1">
             Ofertas que realmente valem
           </h1>
-          <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+          <p className="mt-1 max-w-xl text-xs leading-snug text-muted-foreground sm:text-sm">
             Compare preço ofertado com preço pago, normalizando kg, litro e embalagem.
           </p>
         </div>
-        <div className="rounded-2xl bg-primary/10 p-3 text-primary">
-          <Radar className="h-6 w-6" />
+        <div className="rounded-xl bg-primary/10 p-2.5 text-primary sm:rounded-2xl sm:p-3">
+          <Radar className="h-5 w-5 sm:h-6 sm:w-6" />
         </div>
       </header>
 
-      <div className="mb-3 grid grid-cols-3 gap-2 rounded-xl bg-muted p-1">
+      <div className="mb-2.5 grid grid-cols-3 gap-1.5 rounded-xl bg-muted p-1 sm:mb-3 sm:gap-2">
         {([
           ["radar", "Radar", Sparkles],
           ["import", "Importar", Upload],
@@ -1109,7 +1109,7 @@ export default function FlyerPage() {
           <button
             key={key}
             onClick={() => setView(key)}
-            className={`flex h-10 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold ${
+            className={`flex h-9 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold sm:h-10 ${
               view === key ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"
             }`}
           >
@@ -1122,7 +1122,7 @@ export default function FlyerPage() {
       <Button
         type="button"
         variant="outline"
-        className="mb-4 h-11 w-full justify-between border-primary/25 bg-primary/5"
+        className="mb-3 h-10 w-full justify-between border-primary/25 bg-primary/5 sm:mb-4 sm:h-11"
         onClick={() => navigate("/offers/basket")}
       >
         <span className="flex items-center gap-2">
@@ -1140,23 +1140,31 @@ export default function FlyerPage() {
       {view === "import" && (
         <div className="space-y-3">
           <Card className="border-primary/20">
-            <CardContent className="p-5">
+            <CardContent className="p-3.5 sm:p-5">
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
-                className="flex w-full flex-col items-center rounded-2xl border-2 border-dashed border-primary/30 bg-primary/5 px-5 py-8 text-center"
+                className={`flex w-full rounded-2xl border-2 border-dashed border-primary/30 bg-primary/5 text-center ${
+                  file
+                    ? "flex-row items-center gap-3 px-3 py-3 text-left sm:flex-col sm:px-5 sm:py-6 sm:text-center"
+                    : "flex-col items-center px-5 py-6 sm:py-8"
+                }`}
               >
-                <div className="mb-3 rounded-2xl bg-primary/15 p-3 text-primary">
+                <div className={`${file ? "mb-0 shrink-0" : "mb-3"} rounded-xl bg-primary/15 p-2.5 text-primary sm:rounded-2xl sm:p-3`}>
                   {file?.type === "application/pdf" ? (
-                    <FileText className="h-7 w-7" />
+                    <FileText className="h-6 w-6 sm:h-7 sm:w-7" />
                   ) : (
-                    <FileImage className="h-7 w-7" />
+                    <FileImage className="h-6 w-6 sm:h-7 sm:w-7" />
                   )}
                 </div>
-                <p className="font-bold">{file ? file.name : "Escolher PDF ou foto do tabloide"}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  O arquivo original fica guardado como evidência do preço ofertado.
-                </p>
+                <div className="min-w-0">
+                  <p className={`${file ? "truncate" : ""} font-bold`}>
+                    {file ? file.name : "Escolher PDF ou foto do tabloide"}
+                  </p>
+                  <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground sm:mt-1 sm:text-xs">
+                    O arquivo original fica guardado como evidência do preço ofertado.
+                  </p>
+                </div>
               </button>
 
               <input
@@ -1167,32 +1175,43 @@ export default function FlyerPage() {
                 onChange={(event) => void handleFileSelect(event.target.files?.[0] ?? null)}
               />
 
-              <div className="mt-4">
-                <p className="mb-2 text-xs text-muted-foreground">
-                  Opcional nesta etapa — a IA tenta identificar mercado e validade no tabloide.
+              <div className="mt-3 sm:mt-4">
+                <p className="mb-1.5 text-[11px] leading-snug text-muted-foreground sm:mb-2 sm:text-xs">
+                  Opcional — a IA tenta identificar mercado e validade no tabloide.
                 </p>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-muted-foreground">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
+                  <div className="col-span-2 sm:col-span-1">
+                    <label className="mb-1 block text-[11px] font-semibold text-muted-foreground sm:text-xs">
                       Mercado <span className="font-normal">(opcional)</span>
                     </label>
                     <Input
+                      className="h-10 sm:h-10"
                       value={retailer}
                       onChange={(event) => setRetailer(event.target.value)}
                       placeholder="A IA tenta identificar"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-muted-foreground">
-                      Válido de <span className="font-normal">(opcional)</span>
+                    <label className="mb-1 block text-[11px] font-semibold text-muted-foreground sm:text-xs">
+                      Válido de <span className="hidden font-normal sm:inline">(opcional)</span>
                     </label>
-                    <Input type="date" value={validFrom} onChange={(event) => setValidFrom(event.target.value)} />
+                    <Input
+                      className="h-10 px-2 text-xs sm:px-3 sm:text-sm"
+                      type="date"
+                      value={validFrom}
+                      onChange={(event) => setValidFrom(event.target.value)}
+                    />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-muted-foreground">
-                      Até <span className="font-normal">(opcional)</span>
+                    <label className="mb-1 block text-[11px] font-semibold text-muted-foreground sm:text-xs">
+                      Até <span className="hidden font-normal sm:inline">(opcional)</span>
                     </label>
-                    <Input type="date" value={validTo} onChange={(event) => setValidTo(event.target.value)} />
+                    <Input
+                      className="h-10 px-2 text-xs sm:px-3 sm:text-sm"
+                      type="date"
+                      value={validTo}
+                      onChange={(event) => setValidTo(event.target.value)}
+                    />
                   </div>
                 </div>
               </div>
@@ -1292,7 +1311,7 @@ export default function FlyerPage() {
                 </div>
               )}
 
-              <Button className="mt-4 h-11 w-full" disabled={!file || processing} onClick={() => void processFile()}>
+              <Button className="mt-3 h-10 w-full sm:mt-4 sm:h-11" disabled={!file || processing} onClick={() => void processFile()}>
                 {processing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
                 {processing ? "Importando no servidor…" : "Analisar tabloide"}
               </Button>
