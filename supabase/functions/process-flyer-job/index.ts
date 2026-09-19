@@ -349,20 +349,30 @@ async function runGemini(file: File, prompt: string, preferredModel?: string) {
       { text: prompt },
       { inlineData: { mimeType, data: base64 } },
     ] }],
-    generationConfig: { maxOutputTokens: 65536 },
+    generationConfig: { maxOutputTokens: 32768 },
   };
 
   let lastError = "Nenhum modelo Gemini gratuito disponível.";
   for (const model of Array.from(new Set([preferred, ...FREE_GEMINI_MODELS]))) {
-    const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/" +
-        encodeURIComponent(model) + ":generateContent",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify(body),
-      },
-    );
+    let response: Response;
+    try {
+      response = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/" +
+          encodeURIComponent(model) + ":generateContent",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(105000),
+        },
+      );
+    } catch (error) {
+      lastError =
+        error instanceof Error
+          ? "Gemini não respondeu dentro do tempo esperado: " + error.message
+          : "Gemini não respondeu dentro do tempo esperado.";
+      continue;
+    }
     const payload = await response.json().catch(async () => ({ message: await response.text() }));
     if (response.ok) {
       const text = geminiText(payload);
@@ -415,6 +425,184 @@ async function triggerRefine(jobId: string) {
     body: JSON.stringify({ job_id: jobId, mode: "refine" }),
   });
   if (!response.ok) throw new Error("Falha ao agendar refinamento (" + response.status + ").");
+}
+
+async function triggerPage(jobId: string, pageNo: number) {
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) throw new Error("Não foi possível continuar a importação.");
+
+  const response = await fetch(url + "/functions/v1/process-flyer-job", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + key,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      job_id: jobId,
+      mode: "page",
+      page_no: pageNo,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      "Falha ao iniciar a página " + pageNo + " (" + response.status + ").",
+    );
+  }
+}
+
+async function processPage(jobId: string, requestedPage: number) {
+  try {
+    const job = await fetchJob(jobId);
+    if (job.status === "completed") return;
+
+    const total = Math.max(1, Math.trunc(Number(job.page_count) || 1));
+    const pageNo = Math.max(1, Math.min(total, Math.trunc(Number(requestedPage) || 1)));
+    const processedPages = Array.isArray(job.result?.processed_pages)
+      ? job.result.processed_pages
+          .map((value: unknown) => Math.trunc(Number(value) || 0))
+          .filter((value: number) => value >= 1 && value <= total)
+      : [];
+
+    // Internal retries are idempotent. If this page was already persisted, continue
+    // from the first unfinished page instead of duplicating offers.
+    if (processedPages.includes(pageNo)) {
+      const next = Array.from({ length: total }, (_, index) => index + 1)
+        .find((value) => !processedPages.includes(value));
+      if (next) await triggerPage(jobId, next);
+      return;
+    }
+
+    await updateJob(jobId, {
+      status: "processing",
+      progress_current: processedPages.length,
+      progress_total: total,
+      progress_label:
+        "Lendo página " + pageNo + "/" + total + " com IA no servidor…",
+      error_message: null,
+      warning_message: null,
+    });
+
+    const file = await downloadJobFile(job);
+    const prompt =
+      EXTRACTION_PROMPT +
+      "\n\nEXECUÇÃO EM ETAPAS — PÁGINA ALVO " + pageNo + "/" + total +
+      "\nAnalise SOMENTE a página física " + pageNo + " deste arquivo." +
+      "\nIgnore completamente as demais páginas nesta execução." +
+      "\nExtraia TODAS as ofertas visíveis da página alvo, inclusive os image_box." +
+      "\nDefina source_page=" + pageNo + " em todos os registros retornados." +
+      "\nNão omita ofertas só porque o mesmo produto pode aparecer em outra página." +
+      "\nRetorne o mesmo formato JSON do schema principal.";
+
+    const { parsed, model } = await runGemini(
+      file,
+      prompt,
+      job.result?.model,
+    );
+
+    const pageOffers = validOffers(parsed).map((offer: any) => ({
+      ...offer,
+      source_page: pageNo,
+    }));
+
+    const previousOffers = Array.isArray(job.result?.offers)
+      ? job.result.offers
+      : [];
+    const rawOfferCount =
+      Math.max(
+        previousOffers.length,
+        Math.trunc(Number(job.result?.raw_offer_count) || 0),
+      ) + pageOffers.length;
+    const mergedRaw = [...previousOffers, ...pageOffers];
+    const offers = dedupeOffers(mergedRaw);
+    const completedPages = [...new Set([...processedPages, pageNo])].sort(
+      (a, b) => a - b,
+    );
+
+    const result = {
+      ...(job.result ?? {}),
+      ok: true,
+      engine: "gemini-vision",
+      model,
+      retailer:
+        parsed.retailer ??
+        job.result?.retailer ??
+        job.retailer ??
+        null,
+      valid_from:
+        parsed.valid_from ??
+        job.result?.valid_from ??
+        job.valid_from ??
+        null,
+      valid_to:
+        parsed.valid_to ??
+        job.result?.valid_to ??
+        job.valid_to ??
+        null,
+      page_count: total,
+      processed_pages: completedPages,
+      raw_offer_count: rawOfferCount,
+      deduplicated_count: Math.max(0, rawOfferCount - offers.length),
+      offers,
+    };
+
+    if (completedPages.length >= total) {
+      if (!offers.length) {
+        throw new Error(
+          "A leitura terminou, mas nenhuma oferta confiável foi encontrada.",
+        );
+      }
+
+      await updateJob(jobId, {
+        status: "completed",
+        progress_current: total,
+        progress_total: total,
+        progress_label:
+          offers.length + " ofertas importadas com sucesso." +
+          (result.deduplicated_count
+            ? " " + result.deduplicated_count + " repetição(ões) consolidada(s)."
+            : ""),
+        retailer: result.retailer,
+        valid_from: result.valid_from,
+        valid_to: result.valid_to,
+        result,
+        missing_pages: [],
+        completed_at: new Date().toISOString(),
+      });
+      return;
+    }
+
+    await updateJob(jobId, {
+      status: "processing",
+      progress_current: completedPages.length,
+      progress_total: total,
+      progress_label:
+        "Página " + pageNo + "/" + total +
+        " concluída · " + offers.length + " ofertas acumuladas. Continuando…",
+      retailer: result.retailer,
+      valid_from: result.valid_from,
+      valid_to: result.valid_to,
+      result,
+      completed_at: null,
+    });
+
+    const nextPage = Array.from({ length: total }, (_, index) => index + 1)
+      .find((value) => !completedPages.includes(value));
+    if (nextPage) await triggerPage(jobId, nextPage);
+  } catch (error) {
+    console.error("process-flyer-job page", requestedPage, error);
+    await updateJob(jobId, {
+      status: "failed",
+      progress_label:
+        "A importação parou na página " + requestedPage + ". Você pode tentar novamente.",
+      error_message:
+        error instanceof Error
+          ? error.message
+          : "Falha inesperada ao processar esta página.",
+      completed_at: new Date().toISOString(),
+    }).catch(() => {});
+  }
 }
 
 async function processInitial(jobId: string) {
@@ -601,22 +789,47 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json();
     const jobId = String(body?.job_id || "").trim();
-    const mode = body?.mode === "refine" ? "refine" : "start";
+    const mode = String(body?.mode || "start");
     if (!jobId) return json(400, { error: "JOB_ID_REQUIRED" });
 
     const caller = await callerIdentity(req);
     const job = await fetchJob(jobId);
     const isOwner = !!caller.userId && caller.userId === job.user_id;
     if (!caller.isService && !isOwner) return json(403, { error: "FORBIDDEN" });
-    if (job.status === "completed") return json(200, { ok: true, job_id: jobId, status: "completed" });
+    if (job.status === "completed") {
+      return json(200, { ok: true, job_id: jobId, status: "completed" });
+    }
 
-    if (mode === "refine") EdgeRuntime.waitUntil(processRefine(jobId));
-    else EdgeRuntime.waitUntil(processInitial(jobId));
+    const total = Math.max(1, Math.trunc(Number(job.page_count) || 1));
+    const processedPages = Array.isArray(job.result?.processed_pages)
+      ? job.result.processed_pages
+          .map((value: unknown) => Math.trunc(Number(value) || 0))
+          .filter((value: number) => value >= 1 && value <= total)
+      : [];
+
+    let pageNo = 1;
+    if (mode === "page") {
+      pageNo = Math.max(
+        1,
+        Math.min(total, Math.trunc(Number(body?.page_no) || 1)),
+      );
+    } else if (mode === "resume") {
+      pageNo =
+        Array.from({ length: total }, (_, index) => index + 1)
+          .find((value) => !processedPages.includes(value)) ?? total;
+    }
+
+    // New architecture: each invocation processes exactly one physical page,
+    // persists it, then starts the next page in a separate invocation.
+    EdgeRuntime.waitUntil(processPage(jobId, pageNo));
 
     return json(202, {
       ok: true,
       job_id: jobId,
-      status: mode === "refine" ? "refining" : "processing",
+      status: "processing",
+      page_no: pageNo,
+      progress_current: processedPages.length,
+      progress_total: total,
     });
   } catch (error) {
     console.error("process-flyer-job handler", error);
