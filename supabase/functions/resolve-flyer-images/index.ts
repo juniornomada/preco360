@@ -25,7 +25,7 @@ type OfferRow = {
 };
 
 type Candidate = {
-  source: "open_food_facts" | "google";
+  source: "open_food_facts" | "open_products_facts" | "open_beauty_facts" | "google";
   imageUrl: string;
   title: string;
   brandText: string;
@@ -340,9 +340,13 @@ function scoreOffHit(item: OfferRow, hit: any): Candidate | null {
   const brandScore = brandSimilarity(item, brands, title);
   const packageScore = packageSimilarity(item, quantity);
   const nameScore = nameSimilarity(item, title, brands);
+  const expectedPackage = packageBase(item.package_quantity, item.package_unit);
+  const candidatePackage = parseQuantity(quantity);
 
   if (item.brand && brandScore < 0.99) return null;
-  if (packageBase(item.package_quantity, item.package_unit) && packageScore < 0.72) return null;
+  // Missing quantity metadata is not a rejection by itself: the visual verifier can
+  // still confirm the package. A conflicting explicit quantity is rejected.
+  if (expectedPackage && candidatePackage && packageScore < 0.72) return null;
   if (nameScore < 0.34) return null;
 
   const countries = Array.isArray(hit?.countries_tags) ? hit.countries_tags.join(" ") : "";
@@ -368,33 +372,107 @@ function scoreOffHit(item: OfferRow, hit: any): Candidate | null {
   };
 }
 
+function searchQueryVariants(item: OfferRow, original: string) {
+  const brand = normalize(item.brand);
+  const core = canonicalName(item);
+  const packageText =
+    item.package_quantity && item.package_unit
+      ? `${item.package_quantity}${String(item.package_unit).toLowerCase()}`
+      : "";
+
+  return [...new Set([
+    original,
+    [brand, core, packageText].filter(Boolean).join(" "),
+    [brand, core].filter(Boolean).join(" "),
+  ].map((value) => value.trim()).filter(Boolean))];
+}
+
 async function searchOpenFoodFacts(item: OfferRow, query: string) {
-  const response = await fetch("https://search.openfoodfacts.org/search", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "User-Agent": "Preco360/1.0 (https://preco360.vercel.app)",
-    },
-    body: JSON.stringify({
-      q: query,
-      fields: [
-        "code","product_name","brands","quantity","countries_tags",
-        "image_front_small_url","image_front_url",
-      ],
-      page_size: 12,
-      page: 1,
-      boost_phrase: true,
-      langs: ["pt", "en"],
-    }),
+  const found = new Map<string, Candidate>();
+
+  for (const variant of searchQueryVariants(item, query)) {
+    const response = await fetch("https://search.openfoodfacts.org/search", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": "Preco360/1.0 (https://preco360.vercel.app)",
+      },
+      body: JSON.stringify({
+        q: variant,
+        fields: [
+          "code","product_name","brands","quantity","countries_tags",
+          "image_front_small_url","image_front_url",
+        ],
+        page_size: 12,
+        page: 1,
+        boost_phrase: true,
+        langs: ["pt", "en"],
+      }),
+      signal: AbortSignal.timeout(12000),
+    }).catch(() => null);
+
+    if (!response?.ok) continue;
+    const payload = await response.json().catch(() => null);
+    const hits = Array.isArray(payload?.hits) ? payload.hits : [];
+    for (const hit of hits) {
+      const scored = scoreOffHit(item, hit);
+      if (!scored) continue;
+      const key = scored.code || scored.imageUrl;
+      const previous = found.get(key);
+      if (!previous || scored.deterministicScore > previous.deterministicScore) {
+        found.set(key, scored);
+      }
+    }
+    if (found.size >= 5) break;
+  }
+
+  // Search-a-licious is preferred. The legacy full-text endpoint is a fallback for
+  // Brazilian products that are harder to retrieve by the newer search index.
+  if (!found.size) {
+    const legacy = await searchLegacyCatalog(
+      "world.openfoodfacts.org",
+      item,
+      query,
+      "open_food_facts",
+    );
+    for (const candidate of legacy) found.set(candidate.code || candidate.imageUrl, candidate);
+  }
+
+  return [...found.values()].sort(
+    (a, b) => b.deterministicScore - a.deterministicScore,
+  );
+}
+
+async function searchLegacyCatalog(
+  domain: string,
+  item: OfferRow,
+  query: string,
+  source: "open_food_facts" | "open_products_facts" | "open_beauty_facts",
+) {
+  const url = new URL(`https://${domain}/cgi/search.pl`);
+  url.searchParams.set("search_terms", searchQueryVariants(item, query)[1] || query);
+  url.searchParams.set("search_simple", "1");
+  url.searchParams.set("action", "process");
+  url.searchParams.set("json", "1");
+  url.searchParams.set("page_size", "12");
+  url.searchParams.set(
+    "fields",
+    "code,product_name,brands,quantity,countries_tags,image_front_small_url,image_front_url",
+  );
+
+  const response = await fetch(url, {
+    headers: { "User-Agent": "Preco360/1.0 (https://preco360.vercel.app)" },
     signal: AbortSignal.timeout(12000),
   }).catch(() => null);
-
   if (!response?.ok) return [] as Candidate[];
-  const payload = await response.json().catch(() => null);
-  const hits = Array.isArray(payload?.hits) ? payload.hits : [];
 
-  return hits
-    .map((hit: any) => scoreOffHit(item, hit))
+  const payload = await response.json().catch(() => null);
+  const products = Array.isArray(payload?.products) ? payload.products : [];
+  return products
+    .map((hit: any) => {
+      const scored = scoreOffHit(item, hit);
+      return scored ? { ...scored, source } : null;
+    })
     .filter((entry: Candidate | null): entry is Candidate => !!entry)
     .sort((a, b) => b.deterministicScore - a.deterministicScore);
 }
@@ -544,6 +622,23 @@ async function resolveExternal(item: OfferRow, query: string) {
   let candidates: Candidate[] = [];
   if (!offerLooksNonFood(item)) {
     candidates = await searchOpenFoodFacts(item, query);
+  } else {
+    const text = normalize(item.raw_name);
+    const beautyLike =
+      /\b(shampoo|condicionador|creme dental|escova dental|desodorante|sabonete|protetor solar|absorvente)\b/.test(text);
+    candidates = beautyLike
+      ? await searchLegacyCatalog(
+          "world.openbeautyfacts.org",
+          item,
+          query,
+          "open_beauty_facts",
+        )
+      : await searchLegacyCatalog(
+          "world.openproductsfacts.org",
+          item,
+          query,
+          "open_products_facts",
+        );
   }
 
   let best = candidates[0] ?? null;
@@ -557,7 +652,7 @@ async function resolveExternal(item: OfferRow, query: string) {
   if (!best) return { candidate: null, confidence: 0, status: "fallback" };
 
   if (
-    best.source === "open_food_facts" &&
+    best.source !== "google" &&
     best.deterministicScore >= 0.94 &&
     best.brandScore >= 0.99 &&
     best.packageScore >= 0.97 &&
