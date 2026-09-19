@@ -869,7 +869,7 @@ async function processBatch(flyerId: string) {
     .eq("flyer_id", flyerId)
     .is("image_match_status", null)
     .order("source_page", { ascending: true })
-    .limit(8);
+    .limit(12);
 
   if (error) throw error;
   const items = (rows ?? []) as OfferRow[];
@@ -887,25 +887,36 @@ async function processBatch(flyerId: string) {
     }
   }
 
-  for (const item of items) {
-    item.category = item.product_id
+  const prepared = items.map((item) => ({
+    ...item,
+    category: item.product_id
       ? categoryByProduct.get(item.product_id) ?? null
-      : null;
+      : null,
+  }));
 
-    try {
-      await resolveOne(supabase, item);
-    } catch (error) {
-      console.warn("resolve-flyer-images failed", item.id, error);
-      await applyImage(supabase, item, {
-        imageUrl: null,
-        source: "category_fallback",
-        confidence: 0,
-        status: "fallback",
-        query: buildSearchQuery(item),
-      });
+  // Resolve a few products concurrently so large flyers do not spend minutes showing
+  // placeholders. Keep concurrency modest to respect external catalog rate limits.
+  for (let index = 0; index < prepared.length; index += 3) {
+    const group = prepared.slice(index, index + 3);
+    await Promise.all(
+      group.map(async (item) => {
+        try {
+          await resolveOne(supabase, item);
+        } catch (error) {
+          console.warn("resolve-flyer-images failed", item.id, error);
+          await applyImage(supabase, item, {
+            imageUrl: null,
+            source: "category_fallback",
+            confidence: 0,
+            status: "fallback",
+            query: buildSearchQuery(item),
+          });
+        }
+      }),
+    );
+    if (index + 3 < prepared.length) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
-
-    await new Promise((resolve) => setTimeout(resolve, 120));
   }
 
   const { count } = await supabase
