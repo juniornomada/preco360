@@ -432,7 +432,15 @@ async function persistCrop(
   confidence: number,
 ) {
   const blob = await canvasJpeg(crop, 0.9);
-  const path = `${userId}/offer-crops/${flyerId}/${item.id}.jpg`;
+  const rawBox = item.image_bbox ?? {};
+  const boxVersion = [
+    Math.round(Number(rawBox.x) || 0),
+    Math.round(Number(rawBox.y) || 0),
+    Math.round(Number(rawBox.width) || 0),
+    Math.round(Number(rawBox.height) || 0),
+  ].join("-");
+  const path =
+    `${userId}/offer-crops/${flyerId}/${item.id}-${boxVersion}.jpg`;
   const { error: uploadError } = await supabase.storage
     .from("flyers")
     .upload(path, blob, {
