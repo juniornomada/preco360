@@ -324,8 +324,7 @@ export default function FlyerPage() {
     const saved = localStorage.getItem(IMPORT_JOB_KEY);
     if (saved) {
       setActiveJobId(saved);
-      setProcessing(true);
-      setProgress({ current: 1, total: 1, label: "Retomando importação no servidor…" });
+      setProgress({ current: 1, total: 1, label: "Recuperando importação…" });
     }
   }, [user?.id]);
 
@@ -486,7 +485,9 @@ export default function FlyerPage() {
       setItems(matched);
       setProcessing(false);
       setView("radar");
-      localStorage.removeItem(IMPORT_JOB_KEY);
+      // Keep the completed job id until the offers are actually saved. This makes
+      // an analyzed flyer recoverable after a browser refresh or Android tab suspension.
+      localStorage.setItem(IMPORT_JOB_KEY, activeJob.id);
 
       toast({
         title: `${result.candidates.length} ofertas importadas`,
@@ -1424,7 +1425,11 @@ export default function FlyerPage() {
                     <Input type="date" value={validTo} onChange={(event) => setValidTo(event.target.value)} />
                   </div>
                 </div>
-                <Button className="mt-3 h-11 w-full" disabled={saving || !file} onClick={() => void saveFlyer()}>
+                <Button
+                  className="mt-3 h-11 w-full"
+                  disabled={saving || (!file && !processedSource)}
+                  onClick={() => void saveFlyer()}
+                >
                   {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   {saving ? "Salvando histórico…" : "Salvar preços ofertados"}
                 </Button>
