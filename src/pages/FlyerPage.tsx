@@ -233,6 +233,42 @@ export default function FlyerPage() {
   const appliedJobRef = useRef<string | null>(null);
   const autoRetryJobRef = useRef<string | null>(null);
 
+  const resetImportForm = () => {
+    setFile(null);
+    setFiles([]);
+    setItems([]);
+    setRetailer("");
+    setValidFrom("");
+    setValidTo("");
+    setPageCount(null);
+    setProcessedSource(null);
+    setActiveJobId(null);
+    setProcessing(false);
+    setProgress({ current: 0, total: 0, label: "" });
+    appliedJobRef.current = null;
+    autoRetryJobRef.current = null;
+    localStorage.removeItem(IMPORT_JOB_KEY);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const changeView = (next: View) => {
+    // A completed/saved import must never leak into a new import form.
+    // The stale state from older builds is recognizable by files[] still being
+    // populated while the primary file/job/review have already been cleared.
+    if (
+      next === "import" &&
+      !file &&
+      files.length > 0 &&
+      !activeJobId &&
+      !processing &&
+      !processedSource &&
+      items.length === 0
+    ) {
+      resetImportForm();
+    }
+    setView(next);
+  };
+
   const { data: products = [] } = useQuery<ProductForMatch[]>({
     queryKey: ["flyer-products", user?.id],
     queryFn: async () => {
@@ -1195,13 +1231,7 @@ export default function FlyerPage() {
           ? `${validItems.length} ofertas substituíram a leitura anterior desse mesmo arquivo.`
           : `${validItems.length} ofertas agora fazem parte do histórico do Radar 360.`,
       });
-      setFile(null);
-      setItems([]);
-      setPageCount(null);
-      setProcessedSource(null);
-      setActiveJobId(null);
-      appliedJobRef.current = null;
-      localStorage.removeItem(IMPORT_JOB_KEY);
+      resetImportForm();
       setView("history");
     } catch (error: any) {
       toast({
@@ -1239,7 +1269,7 @@ export default function FlyerPage() {
         ] as const).map(([key, label, Icon]) => (
           <button
             key={key}
-            onClick={() => setView(key)}
+            onClick={() => changeView(key)}
             className={`flex h-9 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold sm:h-10 ${
               view === key ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"
             }`}
@@ -1533,7 +1563,7 @@ export default function FlyerPage() {
                 <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
                   Importe um tabloide para comparar preço ofertado com o que você já pagou.
                 </p>
-                <Button className="mt-4" onClick={() => setView("import")}>
+                <Button className="mt-4" onClick={() => changeView("import")}>
                   <Upload className="mr-2 h-4 w-4" />Importar tabloide
                 </Button>
               </CardContent>
