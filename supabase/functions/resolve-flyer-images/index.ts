@@ -627,7 +627,7 @@ async function searchMercadoLivre(item: OfferRow, query: string) {
     const payload = await response.json().catch(() => null);
     const results = Array.isArray(payload?.results) ? payload.results : [];
 
-    const scored = results
+    const scored: any[] = results
       .map((hit: any) => {
         const title = String(hit?.title ?? "");
         if (!title || !semanticCompatible(item.raw_name, title)) return null;
@@ -660,7 +660,7 @@ async function searchMercadoLivre(item: OfferRow, query: string) {
           packageScore,
         };
       })
-      .filter(Boolean)
+      .filter((entry: any) => !!entry)
       .sort((a: any, b: any) => b.score - a.score)
       .slice(0, 4);
 
@@ -910,6 +910,7 @@ async function resolveExternal(item: OfferRow, query: string) {
 
   if (
     best.source !== "google" &&
+    best.source !== "mercado_livre" &&
     best.deterministicScore >= 0.94 &&
     best.brandScore >= 0.99 &&
     best.packageScore >= 0.97 &&
