@@ -27,7 +27,7 @@ export default function FlyerHistoryPage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("flyers")
-        .select("id,retailer,valid_from,valid_to,source_file_name,source_file_path,created_at,flyer_items(count)")
+        .select("id,retailer,valid_from,valid_to,source_file_name,source_file_path,source_files,created_at,flyer_items(count)")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data ?? [];
@@ -39,9 +39,21 @@ export default function FlyerHistoryPage() {
     if (!window.confirm(`Excluir o tabloide de ${flyer.retailer}? Os preços ofertados dele também serão removidos.`)) return;
     setDeletingId(flyer.id);
     try {
-      if (flyer.source_file_path) {
-        const { error: storageError } = await supabase.storage.from("flyers").remove([flyer.source_file_path]);
-        if (storageError) console.warn("Não foi possível remover o arquivo do storage:", storageError.message);
+      const sourcePaths = Array.from(
+        new Set([
+          flyer.source_file_path,
+          ...((Array.isArray(flyer.source_files) ? flyer.source_files : [])
+            .map((entry: any) => entry?.path)),
+        ].filter(Boolean)),
+      ) as string[];
+
+      if (sourcePaths.length) {
+        const { error: storageError } = await supabase.storage
+          .from("flyers")
+          .remove(sourcePaths);
+        if (storageError) {
+          console.warn("Não foi possível remover todos os arquivos do storage:", storageError.message);
+        }
       }
 
       const { error } = await db.from("flyers").delete().eq("id", flyer.id);
@@ -63,8 +75,8 @@ export default function FlyerHistoryPage() {
   return (
     <div className="page-container mx-auto w-full max-w-3xl">
       <div className="mb-4 flex items-center gap-3">
-        <Button asChild size="icon" variant="outline" aria-label="Voltar para Ofertas">
-          <Link to="/offers"><ArrowLeft className="h-4 w-4" /></Link>
+        <Button asChild size="icon" variant="outline" aria-label="Voltar para Radar 360">
+          <Link to="/radar"><ArrowLeft className="h-4 w-4" /></Link>
         </Button>
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Radar 360</p>
