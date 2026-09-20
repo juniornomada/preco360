@@ -75,11 +75,11 @@ export default function FlyerHistoryPage() {
   return (
     <div className="page-container !pb-40 mx-auto w-full max-w-3xl">
       <div className="mb-4 flex items-center gap-3">
-        <Button asChild size="icon" variant="outline" aria-label="Voltar para Radar 360">
+        <Button asChild size="icon" variant="outline" aria-label="Voltar para Radar">
           <Link to="/radar"><ArrowLeft className="h-4 w-4" /></Link>
         </Button>
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Radar 360</p>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Radar</p>
           <h1 className="text-2xl font-extrabold tracking-tight">Gerenciar tabloides</h1>
           <p className="text-sm text-muted-foreground">Exclua importações de teste ou dados incorretos.</p>
         </div>
