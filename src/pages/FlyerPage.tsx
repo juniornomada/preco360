@@ -142,10 +142,11 @@ const normalizeProduceOcr = (value: string) =>
   value
     .replace(/\bbeteroba\b/gi, "beterraba")
     .replace(/\bbeterroba\b/gi, "beterraba")
-    .replace(/\babeterraba\b/gi, "beterraba")
-    .replace(/\bmamao formoso\b/gi, "mamão formosa");
+    .replace(/\babeterraba\b/gi, "beterraba");
 
-const displayProductName = (value: string) => normalizeProduceOcr(value);
+const displayProductName = (value: string) =>
+  normalizeProduceOcr(value)
+    .replace(/\bMamão Formoso\b/gi, "Mamão Formosa");
 
 const productEmoji = (name: string, category?: string | null) => {
   const text = normalizeProduceOcr(
@@ -184,7 +185,8 @@ const productEmoji = (name: string, category?: string | null) => {
   if (/strogonoff/.test(text)) return "🍲";
   if (/pudim/.test(text)) return "🍮";
   if (/sorvete|sobremesa/.test(text)) return "🍨";
-  if (/maionese|molho de tomate|extrato de tomate|molho de soja|shoyu/.test(text)) return "🥫";
+  if (/maionese/.test(text)) return "__mayo__";
+  if (/molho de tomate|extrato de tomate|molho de soja|shoyu/.test(text)) return "🥫";
 
   if (/batata.*airfryer|batata.*congel|batata mister|batata uni/.test(text)) return "🍟";
   if (/peixe|tilapia|pescado|salmao|sardinha|mapara|pangasius/.test(text)) return "🐟";
@@ -223,7 +225,8 @@ const productEmoji = (name: string, category?: string | null) => {
   if (/kiwi/.test(text)) return "🥝";
   if (/maca/.test(text)) return "🍎";
   if (/laranja|tangerina|mexerica|limao/.test(text)) return "🍊";
-  if (/mamao|maracuja|caju|goiaba|fruta/.test(text)) return "🍈";
+  if (/mamao/.test(text)) return "__papaya__";
+  if (/maracuja|caju|goiaba|fruta/.test(text)) return "🍈";
   if (/hortifruti|legume|verdura/.test(text)) return "🥬";
 
   if (/alimento.*cao|alimento.*gato|racao|whiskas|pedigree|qualidy/.test(text)) return "🐾";
@@ -1702,15 +1705,28 @@ function ProductThumb({
         className={`${imageUrl ? "hidden" : "flex"} h-full w-full items-center justify-center`}
       >
         {productEmoji(name, category) === "__beet__" ? (
-          <svg
-            viewBox="0 0 48 48"
-            aria-hidden="true"
-            className="h-9 w-9"
-          >
+          <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
             <path d="M24 16c-8.2 0-14 5.7-14 13 0 8.8 9.1 14.1 14 17 4.9-2.9 14-8.2 14-17 0-7.3-5.8-13-14-13Z" fill="#8b3f8f" />
             <path d="M23 17c-5.5-7-3.9-12.2 1.1-15.2 2.3 5.2 2.1 10.2-1.1 15.2Z" fill="#4f9d55" />
             <path d="M27 17c2.3-7.1 7.1-9.6 12.6-8-2.3 5.3-6.4 8.1-12.6 8Z" fill="#68b66b" />
             <path d="M20 18c-6-2.5-10.4-.8-13.1 3.4 5.2 1.5 9.5.4 13.1-3.4Z" fill="#5ba960" />
+          </svg>
+        ) : productEmoji(name, category) === "__mayo__" ? (
+          <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
+            <path d="M13 12h22l-2 30H15L13 12Z" fill="#f6f0cf" />
+            <path d="M12 8h24v7H12V8Z" rx="2" fill="#f2c84b" />
+            <path d="M17 19h14v14H17V19Z" rx="3" fill="#fff8e6" />
+            <path d="M20 24c3-3 5-3 8 0-2 5-6 5-8 0Z" fill="#f2c84b" />
+            <path d="M16 42h16" stroke="#c7b977" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        ) : productEmoji(name, category) === "__papaya__" ? (
+          <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
+            <path d="M10 26c2-10 12-18 23-15 8 2 9 10 4 17-7 10-21 11-27 4-2-2-2-4 0-6Z" fill="#f39a32" />
+            <path d="M14 27c4-7 12-11 19-9-1 7-8 13-17 13-2 0-3-2-2-4Z" fill="#ffbd4a" />
+            <ellipse cx="27" cy="23" rx="2.2" ry="1.5" fill="#463124" />
+            <ellipse cx="31" cy="22" rx="2.2" ry="1.5" fill="#463124" />
+            <ellipse cx="24" cy="27" rx="2.2" ry="1.5" fill="#463124" />
+            <path d="M34 11c2-5 5-7 9-6-1 4-4 7-9 8" fill="#4f9d55" />
           </svg>
         ) : productEmoji(name, category) ? (
           <span className="text-3xl">{productEmoji(name, category)}</span>
