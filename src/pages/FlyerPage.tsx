@@ -67,6 +67,12 @@ type FlyerImportJob = {
   source_file_path: string;
   source_file_name: string;
   mime_type: string | null;
+  source_files: Array<{
+    path: string;
+    name: string;
+    mime_type?: string | null;
+    size?: number | null;
+  }> | null;
   file_hash: string | null;
   page_count: number | null;
   retailer: string | null;
@@ -78,12 +84,20 @@ type FlyerImportJob = {
   error_message: string | null;
   updated_at: string | null;
 };
+type SourceFileEntry = {
+  path: string;
+  name: string;
+  mime_type?: string | null;
+  size?: number | null;
+};
+
 type ProcessedSource = {
   path: string;
   fileHash: string | null;
   fileName: string;
   mimeType: string | null;
   pageCount: number | null;
+  sourceFiles?: SourceFileEntry[];
 };
 const IMPORT_JOB_KEY = "preco360-active-flyer-import-job";
 
@@ -296,6 +310,28 @@ async function sha256(file: File) {
     .join("");
 }
 
+const sortFlyerImages = (selected: File[]) =>
+  [...selected].sort((a, b) =>
+    a.name.localeCompare(b.name, "pt-BR", {
+      numeric: true,
+      sensitivity: "base",
+    }),
+  );
+
+async function sha256Files(selected: File[]) {
+  if (selected.length === 1) return sha256(selected[0]);
+  const parts = await Promise.all(
+    selected.map(async (entry, index) =>
+      `${index}:${entry.name}:${entry.size}:${await sha256(entry)}`,
+    ),
+  );
+  const bytes = new TextEncoder().encode(parts.join("|"));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export default function FlyerPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -305,6 +341,7 @@ export default function FlyerPage() {
 
   const [view, setView] = useState<View>("radar");
   const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [retailer, setRetailer] = useState("");
   const [validFrom, setValidFrom] = useState("");
@@ -399,7 +436,7 @@ export default function FlyerPage() {
       if (!activeJobId) return null;
       const { data, error } = await db
         .from("flyer_import_jobs")
-        .select("id,status,progress_current,progress_total,progress_label,source_file_path,source_file_name,mime_type,file_hash,page_count,retailer,valid_from,valid_to,result,missing_pages,warning_message,error_message,updated_at")
+        .select("id,status,progress_current,progress_total,progress_label,source_file_path,source_file_name,mime_type,source_files,file_hash,page_count,retailer,valid_from,valid_to,result,missing_pages,warning_message,error_message,updated_at")
         .eq("id", activeJobId)
         .maybeSingle();
       if (error) throw error;
@@ -602,6 +639,9 @@ export default function FlyerPage() {
         fileName: activeJob.source_file_name,
         mimeType: activeJob.mime_type,
         pageCount: result.pageCount,
+        sourceFiles: Array.isArray(activeJob.source_files)
+          ? activeJob.source_files
+          : [],
       });
 
       const effectiveRetailer = detectedRetailer || retailer;
@@ -748,18 +788,35 @@ export default function FlyerPage() {
     setTimeout(() => fileRef.current?.click(), 0);
   };
 
-  const handleFileSelect = async (selected: File | null) => {
-    setFile(selected);
+  const handleFileSelect = async (selectedFiles: File[]) => {
+    const selected = sortFlyerImages(selectedFiles);
+    const pdfs = selected.filter(
+      (entry) => entry.type === "application/pdf" || entry.name.toLowerCase().endsWith(".pdf"),
+    );
+    const images = selected.filter((entry) => entry.type.startsWith("image/"));
+
+    if (selected.length > 1 && (pdfs.length || images.length !== selected.length)) {
+      toast({
+        title: "Seleção incompatível",
+        description: "Para várias páginas, selecione somente imagens PNG/JPG. PDF deve ser selecionado sozinho.",
+        variant: "destructive",
+      });
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
+
+    const primary = selected[0] ?? null;
+    setFiles(selected);
+    setFile(primary);
     setItems([]);
-    setPageCount(null);
+    setPageCount(selected.length > 1 ? selected.length : null);
     setProcessedSource(null);
     setActiveJobId(null);
     appliedJobRef.current = null;
     localStorage.removeItem(IMPORT_JOB_KEY);
 
-    if (!selected) return;
+    if (!primary) return;
 
-    // Avoid carrying metadata from a previously selected flyer.
     setRetailer("");
     setValidFrom("");
     setValidTo("");
@@ -767,7 +824,7 @@ export default function FlyerPage() {
     if (!user) return;
 
     try {
-      const fileHash = await sha256(selected);
+      const fileHash = await sha256Files(selected);
       const { data: knownFlyer, error } = await db
         .from("flyers")
         .select("retailer,valid_from,valid_to")
@@ -790,8 +847,21 @@ export default function FlyerPage() {
     }
   };
 
+  const moveSelectedPage = (from: number, to: number) => {
+    setFiles((current) => {
+      if (to < 0 || to >= current.length) return current;
+      const next = [...current];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      setFile(next[0] ?? null);
+      setPageCount(next.length || null);
+      return next;
+    });
+  };
+
   const processFile = async () => {
     if (!file || !user) return;
+    const selected = files.length ? files : [file];
     setProcessing(true);
     setItems([]);
     setProcessedSource(null);
@@ -799,27 +869,61 @@ export default function FlyerPage() {
 
     try {
       setProgress({ current: 1, total: 3, label: "Preparando arquivo…" });
+
+      const multiImage = selected.length > 1;
       const [fileHash, detectedPages] = await Promise.all([
-        sha256(file),
-        countFlyerPages(file),
+        sha256Files(selected),
+        multiImage ? Promise.resolve(selected.length) : countFlyerPages(file),
       ]);
       setPageCount(detectedPages);
 
       const jobId = crypto.randomUUID();
-      const path = `${user.id}/imports/${jobId}-${safeName(file.name || "tabloide")}`;
+      const sourceFiles: SourceFileEntry[] = [];
 
-      setProgress({ current: 2, total: 3, label: "Enviando o tabloide para o servidor…" });
-      const { error: uploadError } = await supabase.storage
-        .from("flyers")
-        .upload(path, file, { contentType: file.type || undefined, upsert: false });
-      if (uploadError) throw uploadError;
+      setProgress({
+        current: 2,
+        total: 3,
+        label: multiImage
+          ? `Enviando ${selected.length} páginas para o servidor…`
+          : "Enviando o tabloide para o servidor…",
+      });
+
+      for (let index = 0; index < selected.length; index += 1) {
+        const source = selected[index];
+        const pagePrefix = multiImage
+          ? `page-${String(index + 1).padStart(3, "0")}-`
+          : "";
+        const path =
+          `${user.id}/imports/${jobId}/${pagePrefix}${safeName(source.name || "tabloide")}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("flyers")
+          .upload(path, source, {
+            contentType: source.type || undefined,
+            upsert: false,
+          });
+        if (uploadError) throw uploadError;
+
+        sourceFiles.push({
+          path,
+          name: source.name || `pagina-${index + 1}`,
+          mime_type: source.type || null,
+          size: source.size,
+        });
+      }
+
+      const primarySource = sourceFiles[0];
+      const sourceFileName = multiImage
+        ? `Tabloide · ${selected.length} imagens`
+        : file.name || "tabloide";
 
       const { error: jobError } = await db.from("flyer_import_jobs").insert({
         id: jobId,
         user_id: user.id,
-        source_file_path: path,
-        source_file_name: file.name || "tabloide",
-        mime_type: file.type || null,
+        source_file_path: primarySource.path,
+        source_file_name: sourceFileName,
+        mime_type: multiImage ? "image/multi" : file.type || null,
+        source_files: sourceFiles,
         file_hash: fileHash,
         page_count: detectedPages,
         retailer: retailer.trim() || null,
@@ -855,7 +959,9 @@ export default function FlyerPage() {
       setProgress({
         current: 1,
         total: detectedPages,
-        label: "Arquivo enviado. A IA continua no servidor; você pode trocar de tela.",
+        label: multiImage
+          ? `${selected.length} páginas enviadas. A IA continua no servidor.`
+          : "Arquivo enviado. A IA continua no servidor; você pode trocar de tela.",
       });
     } catch (error: any) {
       setProcessing(false);
@@ -953,10 +1059,20 @@ export default function FlyerPage() {
 
     setSaving(true);
     try {
-      const fileHash = processedSource?.fileHash ?? (file ? await sha256(file) : null);
+      const selected = files.length ? files : file ? [file] : [];
+      const fileHash =
+        processedSource?.fileHash ??
+        (selected.length ? await sha256Files(selected) : null);
       if (!fileHash) throw new Error("Não foi possível identificar o arquivo importado.");
-      const sourceMime = processedSource?.mimeType ?? file?.type ?? "";
-      const sourceFileName = processedSource?.fileName ?? file?.name ?? "tabloide";
+      const sourceMime =
+        processedSource?.mimeType ??
+        (selected.length > 1 ? "image/multi" : file?.type ?? "");
+      const sourceFileName =
+        processedSource?.fileName ??
+        (selected.length > 1
+          ? `Tabloide · ${selected.length} imagens`
+          : file?.name ?? "tabloide");
+      const sourceFiles = processedSource?.sourceFiles ?? [];
       const sourceType = sourceMime === "application/pdf" || sourceFileName.toLowerCase().endsWith(".pdf")
         ? "pdf"
         : "image";
@@ -986,6 +1102,7 @@ export default function FlyerPage() {
             source_type: sourceType,
             source_file_name: sourceFileName,
             source_file_path: sourcePath ?? duplicate.source_file_path,
+            source_files: sourceFiles,
             page_count: pageCount,
           })
           .eq("id", duplicate.id);
@@ -1020,6 +1137,7 @@ export default function FlyerPage() {
             source_type: sourceType,
             source_file_name: sourceFileName,
             source_file_path: sourcePath,
+            source_files: sourceFiles,
             file_hash: fileHash,
             page_count: pageCount,
           })
@@ -1216,10 +1334,16 @@ export default function FlyerPage() {
                 </div>
                 <div className="min-w-0">
                   <p className={`${file ? "truncate" : ""} font-bold`}>
-                    {file ? file.name : "Escolher PDF ou foto do tabloide"}
+                    {files.length > 1
+                      ? `${files.length} imagens selecionadas`
+                      : file
+                        ? file.name
+                        : "Escolher PDF ou imagens do tabloide"}
                   </p>
                   <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground sm:mt-1 sm:text-xs">
-                    O arquivo original fica guardado como evidência do preço ofertado.
+                    {files.length > 1
+                      ? "As imagens serão tratadas como páginas de um único tabloide."
+                      : "O arquivo original fica guardado como evidência do preço ofertado."}
                   </p>
                 </div>
               </button>
@@ -1228,9 +1352,60 @@ export default function FlyerPage() {
                 ref={fileRef}
                 className="hidden"
                 type="file"
-                accept="application/pdf,image/*"
-                onChange={(event) => void handleFileSelect(event.target.files?.[0] ?? null)}
+                accept="application/pdf,image/png,image/jpeg,image/webp"
+                multiple
+                onChange={(event) =>
+                  void handleFileSelect(Array.from(event.target.files ?? []))
+                }
               />
+
+              {files.length > 1 && (
+                <div className="mt-3 rounded-xl border bg-background/60 p-2.5">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-xs font-bold">Ordem das páginas</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {files.length} imagens
+                    </p>
+                  </div>
+                  <div className="max-h-48 space-y-1.5 overflow-y-auto">
+                    {files.map((entry, index) => (
+                      <div
+                        key={`${entry.name}-${entry.lastModified}-${index}`}
+                        className="flex items-center gap-2 rounded-lg border bg-card px-2 py-1.5"
+                      >
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-[10px] font-extrabold text-primary">
+                          {index + 1}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
+                          {entry.name}
+                        </span>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          disabled={index === 0 || processing}
+                          onClick={() => moveSelectedPage(index, index - 1)}
+                          aria-label="Mover página para cima"
+                        >
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          disabled={index === files.length - 1 || processing}
+                          onClick={() => moveSelectedPage(index, index + 1)}
+                          aria-label="Mover página para baixo"
+                        >
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-3 sm:mt-4">
                 <p className="mb-1.5 text-[11px] leading-snug text-muted-foreground sm:mb-2 sm:text-xs">
