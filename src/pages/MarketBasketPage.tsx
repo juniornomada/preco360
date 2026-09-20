@@ -18,6 +18,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { genericBasketFamily } from "@/lib/flyerAnalysis";
 
 const db = supabase as any;
 const STORAGE_KEY = "preco360-basket-selection-v2";
@@ -55,6 +56,8 @@ type Group = {
   baseUnit: "kg" | "l" | "un";
   offers: OfferWithMarket[];
   markets: string[];
+  generic?: boolean;
+  optionCount?: number;
 };
 
 const brl = (value: number) =>
@@ -250,18 +253,38 @@ export default function MarketBasketPage() {
   });
 
   const groups = useMemo<Group[]>(() => {
-    const map = new Map<string, Group>();
+    const specificMap = new Map<string, Group>();
+    const genericMap = new Map<string, Group>();
+
+    const addOffer = (
+      map: Map<string, Group>,
+      key: string,
+      label: string,
+      offer: OfferWithMarket,
+      generic = false,
+    ) => {
+      const current = map.get(key);
+      if (current) {
+        current.offers.push(offer);
+        if (!current.markets.includes(offer.retailer)) {
+          current.markets.push(offer.retailer);
+        }
+        return;
+      }
+
+      map.set(key, {
+        key,
+        label,
+        baseUnit: offer.base_unit,
+        offers: [offer],
+        markets: [offer.retailer],
+        generic,
+      });
+    };
 
     for (const offer of offers) {
       const flyer = flyerMap.get(offer.flyer_id);
       if (!flyer?.retailer) continue;
-
-      const identityKey = offer.product_id
-        ? "p:" + offer.product_id
-        : "n:" + (offer.normalized_name || fallbackKey(offer.raw_name));
-      if (!identityKey || identityKey === "n:") continue;
-
-      const key = identityKey + "|u:" + offer.base_unit;
 
       const enriched: OfferWithMarket = {
         ...offer,
@@ -269,24 +292,48 @@ export default function MarketBasketPage() {
         validTo: flyer.valid_to,
       };
 
-      const current = map.get(key);
-      if (current) {
-        current.offers.push(enriched);
-        if (!current.markets.includes(flyer.retailer)) current.markets.push(flyer.retailer);
-      } else {
-        map.set(key, {
-          key,
-          label: offer.raw_name,
-          baseUnit: offer.base_unit,
-          offers: [enriched],
-          markets: [flyer.retailer],
-        });
+      const identityKey = offer.product_id
+        ? "p:" + offer.product_id
+        : "n:" + (offer.normalized_name || fallbackKey(offer.raw_name));
+
+      if (identityKey && identityKey !== "n:") {
+        addOffer(
+          specificMap,
+          identityKey + "|u:" + offer.base_unit,
+          offer.raw_name,
+          enriched,
+        );
+      }
+
+      // A generic family represents the need, not a specific SKU. All brands
+      // and package sizes from active flyers compete inside the same family.
+      const family = genericBasketFamily(offer.raw_name);
+      if (family) {
+        addOffer(
+          genericMap,
+          "g:" + family.key + "|u:" + offer.base_unit,
+          family.label,
+          enriched,
+          true,
+        );
       }
     }
 
-    return [...map.values()].sort((a, b) =>
-      a.label.localeCompare(b.label, "pt-BR", { sensitivity: "base" }),
-    );
+    const genericGroups = [...genericMap.values()].map((group) => ({
+      ...group,
+      optionCount: new Set(
+        group.offers.map((offer) => fallbackKey(offer.raw_name)),
+      ).size,
+    }));
+
+    const specificGroups = [...specificMap.values()];
+
+    return [...genericGroups, ...specificGroups].sort((a, b) => {
+      if (Boolean(a.generic) !== Boolean(b.generic)) {
+        return a.generic ? -1 : 1;
+      }
+      return a.label.localeCompare(b.label, "pt-BR", { sensitivity: "base" });
+    });
   }, [offers, flyerMap]);
 
   const visibleGroups = useMemo(() => {
@@ -298,6 +345,25 @@ export default function MarketBasketPage() {
       .filter((group) => {
         const haystack = fallbackKey(group.label);
         return tokens.every((token) => haystack.includes(token));
+      })
+      .sort((a, b) => {
+        const aLabel = fallbackKey(a.label);
+        const bLabel = fallbackKey(b.label);
+        const aExact = aLabel === q ? 1 : 0;
+        const bExact = bLabel === q ? 1 : 0;
+        if (aExact !== bExact) return bExact - aExact;
+
+        if (Boolean(a.generic) !== Boolean(b.generic)) {
+          return a.generic ? -1 : 1;
+        }
+
+        const aStarts = aLabel.startsWith(q) ? 1 : 0;
+        const bStarts = bLabel.startsWith(q) ? 1 : 0;
+        if (aStarts !== bStarts) return bStarts - aStarts;
+
+        return a.label.localeCompare(b.label, "pt-BR", {
+          sensitivity: "base",
+        });
       })
       .slice(0, 30);
   }, [groups, search]);
@@ -328,6 +394,14 @@ export default function MarketBasketPage() {
       let covered = 0;
       let bestComparableTotal = 0;
       let premiumVsBest = 0;
+      const rows: Array<{
+        key: string;
+        label: string;
+        generic: boolean;
+        quantity: number;
+        offer: OfferWithMarket;
+        subtotal: number;
+      }> = [];
 
       for (const group of selectedGroups) {
         const candidates = group.offers
@@ -340,6 +414,14 @@ export default function MarketBasketPage() {
           covered += 1;
           const offerCost = equivalentGroupCost(group, offer, group.quantity);
           total += offerCost;
+          rows.push({
+            key: group.key,
+            label: group.label,
+            generic: Boolean(group.generic),
+            quantity: group.quantity,
+            offer,
+            subtotal: offerCost,
+          });
           if (best) {
             const bestCost = equivalentGroupCost(group, best, group.quantity);
             bestComparableTotal += bestCost;
@@ -356,6 +438,7 @@ export default function MarketBasketPage() {
         complete: covered === selectedGroups.length,
         premiumVsBest,
         premiumPct: bestComparableTotal > 0 ? (premiumVsBest / bestComparableTotal) * 100 : 0,
+        rows,
       };
     });
 
@@ -445,7 +528,7 @@ export default function MarketBasketPage() {
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Cesta</p>
         <h1 className="mt-1 text-2xl font-extrabold tracking-tight">Qual mercado vale mais a pena?</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Monte sua lista e compare os tabloides que estão vigentes hoje.
+          Monte sua lista por necessidade — inclusive sem escolher marca — e compare os tabloides vigentes.
         </p>
       </header>
 
@@ -497,6 +580,22 @@ export default function MarketBasketPage() {
                       mas exigiria {split?.markets.length ?? 0} mercado(s).
                     </p>
                   )}
+
+                  {bestSingle.rows?.some((row: any) => row.generic) && (
+                    <div className="mt-3 space-y-1.5 rounded-lg border border-primary/15 bg-background/70 p-2.5">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                        O que comprar aqui
+                      </p>
+                      {bestSingle.rows
+                        .filter((row: any) => row.generic)
+                        .map((row: any) => (
+                          <div key={"best-" + row.key} className="text-xs">
+                            <span className="font-semibold">{row.label}:</span>{" "}
+                            <span className="text-muted-foreground">{row.offer.raw_name}</span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -519,6 +618,11 @@ export default function MarketBasketPage() {
                           ({row.quantity} pacote{row.quantity > 1 ? "s" : ""})
                         </span>
                       </p>
+                      {row.offer.raw_name !== row.label && (
+                        <p className="mt-0.5 text-xs font-medium text-primary">
+                          Comprar: {row.offer.raw_name}
+                        </p>
+                      )}
                       <p className="text-xs text-muted-foreground">
                         {row.offer.retailer} · válido até {dateBr(row.offer.validTo)}
                       </p>
@@ -584,7 +688,9 @@ export default function MarketBasketPage() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold">{group.label}</p>
                       <p className="text-[11px] text-muted-foreground">
-                        {qty} pacote{qty > 1 ? "s" : ""} · {reference ? packageLabel(reference) : "embalagem"}
+                        {group.generic
+                          ? `${qty}× referência de ${reference ? packageLabel(reference) : "embalagem"} · qualquer marca`
+                          : `${qty} pacote${qty > 1 ? "s" : ""} · ${reference ? packageLabel(reference) : "embalagem"}`}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1 rounded-lg border bg-background p-1">
@@ -625,10 +731,13 @@ export default function MarketBasketPage() {
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Arroz, leite, pão, carne..."
+              placeholder="Leite em pó, molho de tomate, farinha..."
               className="h-11 pl-9"
             />
           </div>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+            Procure pelo que você precisa, não pela marca. Ex.: “leite em pó” compara Ninho, Glória e outras marcas capturadas pelo Radar.
+          </p>
 
           <button
             type="button"
@@ -668,9 +777,19 @@ export default function MarketBasketPage() {
                       </span>
 
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold leading-snug">{group.label}</p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="font-semibold leading-snug">{group.label}</p>
+                          {group.generic && (
+                            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary">
+                              Qualquer marca
+                            </span>
+                          )}
+                        </div>
                         <p className="mt-0.5 text-xs text-muted-foreground">
-                          {group.markets.length} mercado(s) ·{" "}
+                          {group.generic
+                            ? `${group.optionCount ?? group.offers.length} opção(ões) em ${group.markets.length} mercado(s)`
+                            : `${group.markets.length} mercado(s)`}
+                          {" · "}
                           {best && normalizedPriceLabel(best)
                             ? "melhor custo " + normalizedPriceLabel(best) +
                               " · " +
@@ -682,7 +801,9 @@ export default function MarketBasketPage() {
                         </p>
                         {best && (
                           <p className="mt-1 text-[11px] text-muted-foreground">
-                            1 pacote = {packageLabel(best)}
+                            {group.generic
+                              ? `Melhor agora: ${best.raw_name} · ${best.retailer}`
+                              : `1 pacote = ${packageLabel(best)}`}
                           </p>
                         )}
                       </div>
@@ -692,7 +813,9 @@ export default function MarketBasketPage() {
                       {qty > 0 ? (
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-xs font-semibold text-primary">
-                            Na cesta · {qty} pacote{qty > 1 ? "s" : ""}
+                            Na cesta · {group.generic
+                              ? `${qty} referência${qty > 1 ? "s" : ""}`
+                              : `${qty} pacote${qty > 1 ? "s" : ""}`}
                           </span>
                           <button
                             type="button"
@@ -776,6 +899,36 @@ export default function MarketBasketPage() {
                       </p>
                     </div>
                   </div>
+
+                  {market.rows?.some((row: any) => row.generic) && (
+                    <div className="mt-3 space-y-1.5 border-t pt-2.5">
+                      {market.rows
+                        .filter((row: any) => row.generic)
+                        .map((row: any) => (
+                          <div
+                            key={market.retailer + "-" + row.key}
+                            className="flex items-start justify-between gap-3 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <span className="font-semibold">{row.label}</span>
+                              <p className="truncate text-[11px] text-muted-foreground">
+                                {row.offer.raw_name}
+                              </p>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <p className="font-semibold">
+                                {brl(effectiveAdvertisedPrice(row.offer))}
+                              </p>
+                              {normalizedPriceLabel(row.offer) && (
+                                <p className="text-[10px] text-muted-foreground">
+                                  {normalizedPriceLabel(row.offer)}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))}
@@ -783,9 +936,9 @@ export default function MarketBasketPage() {
       )}
 
       <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">
-        A quantidade da cesta representa número de embalagens. Por exemplo, arroz de 5 kg entra
-        como 1 pacote de 5 kg; dois pacotes representam 10 kg. Para comparar supermercados com
-        embalagens diferentes, a Cesta continua normalizando internamente por R$/kg ou R$/L.
+        Para produtos específicos, a quantidade representa número de embalagens. Para necessidades
+        genéricas (“leite em pó”, “molho de tomate”, etc.), a Cesta usa como referência o tamanho da
+        melhor oferta vigente e compara marcas e embalagens diferentes por R$/kg ou R$/L.
         Quando existe preço-clube válido, ele é usado como seu preço efetivo tanto na embalagem
         quanto no R$/kg ou R$/L. Itens por unidade usam o preço da própria embalagem. O comparador usa
         somente preços dos tabloides importados e ainda vigentes. Ausência de um item no tabloide
