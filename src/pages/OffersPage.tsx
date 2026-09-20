@@ -1128,9 +1128,23 @@ export default function OffersPage() {
                     </span>
                   </div>
 
-                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                    {verdict.message}
-                  </p>
+                  {verdict.deltaPct !== null && (
+                    <p
+                      className={`mt-2 text-sm font-extrabold ${
+                        verdict.deltaPct < 0
+                          ? "text-red-500"
+                          : verdict.deltaPct > 0
+                            ? "text-red-500"
+                            : "text-muted-foreground"
+                      }`}
+                    >
+                      {verdict.deltaPct < 0
+                        ? `↓ ${Math.abs(verdict.deltaPct).toFixed(0)}%`
+                        : verdict.deltaPct > 0
+                          ? `↑ ${Math.abs(verdict.deltaPct).toFixed(0)}%`
+                          : "0%"}
+                    </p>
+                  )}
 
                   {verdict.referencePrice && (
                     <div className="mt-3 rounded-xl bg-muted/55 px-3 py-2">
