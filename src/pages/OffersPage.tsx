@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -212,6 +212,9 @@ export default function OffersPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
+  const normalizedSearch = deferredSearch.trim();
+  const hasSearch = normalizedSearch.length >= 2;
   const today = useMemo(() => localDateKey(), []);
 
   const { data, isLoading, error } = useQuery({
@@ -260,7 +263,7 @@ export default function OffersPage() {
     },
   });
 
-  const analyzed = useMemo(() => {
+  const preparedOffers = useMemo(() => {
     if (!data) return [];
 
     const flyerById = new Map(data.flyers.map((flyer) => [flyer.id, flyer]));
@@ -279,6 +282,17 @@ export default function OffersPage() {
     );
     const productMap = new Map(data.products.map((product) => [product.id, product]));
 
+    const historicalItems = data.items.filter((item) =>
+      historicalIds.has(item.flyer_id),
+    );
+    const historyByProduct = new Map<string, FlyerItemRow[]>();
+    for (const previous of historicalItems) {
+      if (!previous.product_id) continue;
+      const rows = historyByProduct.get(previous.product_id) ?? [];
+      rows.push(previous);
+      historyByProduct.set(previous.product_id, rows);
+    }
+
     return data.items
       .filter((item) => activeIds.has(item.flyer_id))
       .map((item) => {
@@ -296,11 +310,15 @@ export default function OffersPage() {
         }
         const product = productId ? productMap.get(productId) ?? null : null;
 
-        const previousAdvertised = data.items.filter((previous) => {
-          if (!historicalIds.has(previous.flyer_id)) return false;
-          if (productId && previous.product_id === productId) return true;
-          return comparableOfferIdentity(item, previous);
-        });
+        const linkedHistory = productId
+          ? historyByProduct.get(productId) ?? []
+          : [];
+
+        const previousAdvertised = linkedHistory.length
+          ? linkedHistory
+          : historicalItems.filter((previous) =>
+              comparableOfferIdentity(item, previous),
+            );
 
         const verdict = evaluateFlyerOffer(
           candidate,
@@ -315,14 +333,9 @@ export default function OffersPage() {
           productId,
           candidate,
           verdict,
+          searchText: `${item.raw_name} ${product?.name ?? ""} ${product?.brand ?? ""}`,
         };
       })
-      .filter((entry) =>
-        matchesSearch(
-          `${entry.item.raw_name} ${entry.product?.name ?? ""} ${entry.product?.brand ?? ""}`,
-          search,
-        ),
-      )
       .sort((a, b) => {
         const verdictDiff =
           verdictOrder[a.verdict.key] - verdictOrder[b.verdict.key];
@@ -337,7 +350,16 @@ export default function OffersPage() {
         }
         return a.candidate.price - b.candidate.price;
       });
-  }, [data, search, today]);
+  }, [data, today]);
+
+  const analyzed = useMemo(() => {
+    if (!preparedOffers.length) return [];
+    if (!hasSearch) return search.trim() ? [] : preparedOffers.slice(0, 12);
+
+    return preparedOffers.filter((entry) =>
+      matchesSearch(entry.searchText, normalizedSearch),
+    );
+  }, [preparedOffers, hasSearch, normalizedSearch, search]);
 
   const activeFlyerCount = useMemo(() => {
     if (!data) return 0;
@@ -465,46 +487,67 @@ export default function OffersPage() {
         </Card>
       )}
 
-      {!isLoading && !error && activeFlyerCount > 0 && analyzed.length === 0 && (
-        <Card className="border-dashed">
-          <CardContent className="p-7 text-center">
-            <Tags className="mx-auto h-8 w-8 text-primary" />
-            <p className="mt-3 font-bold">
-              {search ? `Nenhuma oferta vigente para “${search}”` : "Nenhuma oferta disponível"}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {search
-                ? "Tente parte do nome, a marca ou uma descrição mais curta."
-                : "Os tabloides vigentes ainda não possuem ofertas consultáveis."}
-            </p>
-          </CardContent>
-        </Card>
-      )}
+      {!isLoading &&
+        !error &&
+        activeFlyerCount > 0 &&
+        search.trim().length === 1 && (
+          <Card className="border-dashed">
+            <CardContent className="p-5 text-center">
+              <Search className="mx-auto h-7 w-7 text-primary" />
+              <p className="mt-2 font-bold">Digite mais uma letra</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                A busca começa com 2 caracteres para manter a digitação rápida no celular.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+      {!isLoading &&
+        !error &&
+        activeFlyerCount > 0 &&
+        search.trim().length !== 1 &&
+        analyzed.length === 0 && (
+          <Card className="border-dashed">
+            <CardContent className="p-7 text-center">
+              <Tags className="mx-auto h-8 w-8 text-primary" />
+              <p className="mt-3 font-bold">
+                {hasSearch
+                  ? `Nenhuma oferta vigente para “${normalizedSearch}”`
+                  : "Nenhuma oferta disponível"}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {hasSearch
+                  ? "Tente parte do nome, a marca ou uma descrição mais curta."
+                  : "Os tabloides vigentes ainda não possuem ofertas consultáveis."}
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
       {!isLoading && !error && analyzed.length > 0 && (
         <div className="space-y-2.5">
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                {search ? "Resultado da busca" : "Melhores oportunidades vigentes"}
+                {hasSearch ? "Resultado da busca" : "Melhores oportunidades vigentes"}
               </p>
               <p className="text-sm font-bold">
                 {analyzed.length} oferta(s) encontrada(s)
               </p>
             </div>
-            {search && analyzed[0] && (
+            {hasSearch && analyzed[0] && (
               <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">
                 Melhor oportunidade primeiro
               </span>
             )}
           </div>
 
-          {analyzed.slice(0, search ? 100 : 24).map((entry, index) => {
+          {analyzed.slice(0, hasSearch ? 30 : 12).map((entry, index) => {
             const { item, flyer, candidate, verdict, productId } = entry;
             const ui = verdictUi[verdict.key];
             const VerdictIcon = ui.Icon;
             const clubPrice = Number(item.club_advertised_price) || null;
-            const isTopResult = Boolean(search) && index === 0;
+            const isTopResult = hasSearch && index === 0;
 
             return (
               <Card
