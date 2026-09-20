@@ -115,6 +115,10 @@ function dateBr(value?: string | null) {
   return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
 }
 
+const searchStopWords = new Set([
+  "de", "da", "do", "das", "dos", "em",
+]);
+
 function searchTokens(value: string) {
   return normalizeSearchText(value)
     .split(/\s+/)
@@ -124,7 +128,8 @@ function searchTokens(value: string) {
       if (["qj", "qjo"].includes(token)) return "queijo";
       if (["muss", "mussar", "mozzarella"].includes(token)) return "mussarela";
       return token;
-    });
+    })
+    .filter((token) => !searchStopWords.has(token));
 }
 
 function matchesProductIntent(value: string, query: string) {
@@ -132,35 +137,67 @@ function matchesProductIntent(value: string, query: string) {
   const source = normalizeSearchText(value).trim();
   if (!q || !source) return true;
 
+  const qTokens = new Set(searchTokens(q));
+  const sourceTokens = new Set(searchTokens(source));
+
+  const wantsDrink = qTokens.has("bebida") || qTokens.has("bebidas");
   const wantsDairyDrink =
-    /\bbebida\s+lactea\b/.test(q) ||
-    (/\bbebida\b/.test(q) && /\blactea\b/.test(q));
-  const sourceIsDairyDrink = /\bbebida\s+lactea\b/.test(source);
+    wantsDrink && (qTokens.has("lactea") || qTokens.has("lacteas"));
+  const wantsPowder = qTokens.has("po");
+  const wantsChocolateDrinkPowder =
+    (qTokens.has("achocolatado") || qTokens.has("achocolatada")) &&
+    !wantsDrink;
 
+  const sourceIsDrink =
+    sourceTokens.has("bebida") || sourceTokens.has("bebidas");
+  const sourceIsDairyDrink =
+    sourceIsDrink &&
+    (sourceTokens.has("lactea") || sourceTokens.has("lacteas"));
+  const sourceIsPowder = sourceTokens.has("po");
+
+  // Family words are order-independent:
+  // "bebida nescau" === "nescau bebida"
+  // "nescau em pó" === "pó nescau" === "nescau pó".
   if (wantsDairyDrink && !sourceIsDairyDrink) return false;
+  if (wantsDrink && !sourceIsDrink) return false;
+  if (wantsPowder && !sourceIsPowder) return false;
 
-  // "Achocolatado" by itself refers to the product family. A dairy drink with
-  // chocolate flavor should only enter when the user explicitly asks for it.
-  const wantsChocolatePowderFamily =
-    /\bachocolatad[oa]s?\b/.test(q) && !wantsDairyDrink;
-  if (wantsChocolatePowderFamily && sourceIsDairyDrink) return false;
+  // When the user asks for "achocolatado" without saying "bebida", interpret
+  // it as the shelf-stable/powder family and exclude dairy drinks.
+  if (wantsChocolateDrinkPowder && sourceIsDrink) return false;
 
-  const wantsPowder =
-    /\bem\s+po\b/.test(q) ||
-    (q.split(/\s+/).length >= 2 && /(?:^|\s)po(?:\s|$)/.test(q));
-  if (wantsPowder && !/(?:^|\s)po(?:\s|$)/.test(source)) return false;
+  const wantsCereal = qTokens.has("cereal") || qTokens.has("cereais");
+  if (
+    wantsCereal &&
+    !(sourceTokens.has("cereal") || sourceTokens.has("cereais"))
+  ) {
+    return false;
+  }
 
-  const wantsCereal = /\bcereais?\b/.test(q);
-  if (wantsCereal && !/\bcereais?\b/.test(source)) return false;
+  const wantsCapsule = qTokens.has("capsula") || qTokens.has("capsulas");
+  if (
+    wantsCapsule &&
+    !(sourceTokens.has("capsula") || sourceTokens.has("capsulas"))
+  ) {
+    return false;
+  }
 
-  const wantsCapsule = /\bcapsulas?\b/.test(q);
-  if (wantsCapsule && !/\bcapsulas?\b/.test(source)) return false;
+  const wantsRefrigerante =
+    qTokens.has("refrigerante") || qTokens.has("refrigerantes");
+  if (
+    wantsRefrigerante &&
+    !(sourceTokens.has("refrigerante") || sourceTokens.has("refrigerantes"))
+  ) {
+    return false;
+  }
 
-  const wantsRefrigerante = /\brefrigerantes?\b/.test(q);
-  if (wantsRefrigerante && !/\brefrigerantes?\b/.test(source)) return false;
-
-  const wantsJuice = /\bsucos?\b/.test(q);
-  if (wantsJuice && !/\bsucos?\b/.test(source)) return false;
+  const wantsJuice = qTokens.has("suco") || qTokens.has("sucos");
+  if (
+    wantsJuice &&
+    !(sourceTokens.has("suco") || sourceTokens.has("sucos"))
+  ) {
+    return false;
+  }
 
   return true;
 }
