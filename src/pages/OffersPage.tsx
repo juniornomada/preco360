@@ -394,14 +394,25 @@ export default function OffersPage() {
           searchRelevance(a, normalizedSearch);
         if (relevanceDiff) return relevanceDiff;
 
+        // For the same product/family, price is the primary decision signal.
+        // candidateFromItem already uses a valid club price when available,
+        // so this compares the amount the user can actually pay.
+        if (comparableOfferIdentity(a.item, b.item)) {
+          const priceDiff =
+            a.candidate.normalizedPrice - b.candidate.normalizedPrice;
+          if (Math.abs(priceDiff) > 0.0001) return priceDiff;
+
+          const packagePriceDiff = a.candidate.price - b.candidate.price;
+          if (Math.abs(packagePriceDiff) > 0.0001) return packagePriceDiff;
+        }
+
+        // Different families/units are not directly price-comparable
+        // (e.g. Nescau bebida 180ml vs Nescau em pó 350g).
         const verdictDiff =
           verdictOrder[a.verdict.key] - verdictOrder[b.verdict.key];
         if (verdictDiff) return verdictDiff;
 
-        if (a.candidate.baseUnit === b.candidate.baseUnit) {
-          return a.candidate.normalizedPrice - b.candidate.normalizedPrice;
-        }
-        return a.candidate.price - b.candidate.price;
+        return 0;
       });
   }, [preparedOffers, hasSearch, normalizedSearch, search]);
 
