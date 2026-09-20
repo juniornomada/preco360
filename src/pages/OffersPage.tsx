@@ -207,28 +207,35 @@ function comparableOfferIdentity(current: FlyerItemRow, previous: FlyerItemRow) 
   return true;
 }
 
+function validClubPrice(item: FlyerItemRow) {
+  const regular = Number(item.advertised_price);
+  const club = Number(item.club_advertised_price);
+  return Number.isFinite(club) &&
+    club > 0 &&
+    (!Number.isFinite(regular) || regular <= 0 || club <= regular)
+    ? club
+    : null;
+}
+
 function candidateFromItem(item: FlyerItemRow): FlyerCandidate {
   const packageInfo =
     item.package_quantity && item.package_unit
       ? inferPackage(`${item.package_quantity}${item.package_unit}`)
       : inferPackage(item.raw_name);
-  const advertisedPrice = Number(item.advertised_price) || 0;
-  const normalized =
-    Number(item.normalized_price) > 0
-      ? {
-          normalizedPrice: Number(item.normalized_price),
-          baseUnit: (item.base_unit || packageInfo?.baseUnit || "un") as "kg" | "l" | "un",
-        }
-      : normalizedUnitPrice(advertisedPrice, packageInfo);
+
+  const regularPrice = Number(item.advertised_price) || 0;
+  const clubPrice = validClubPrice(item);
+  const effectivePrice = clubPrice ?? regularPrice;
+  const normalized = normalizedUnitPrice(effectivePrice, packageInfo);
 
   return {
     rawName: item.raw_name,
     brand: item.brand ?? null,
-    price: advertisedPrice,
+    price: effectivePrice,
     packageInfo,
     normalizedPrice: normalized.normalizedPrice,
-    baseUnit: normalized.baseUnit,
-    clubPrice: Boolean(item.club_price),
+    baseUnit: (item.base_unit || normalized.baseUnit) as "kg" | "l" | "un",
+    clubPrice: clubPrice !== null,
     sourcePage: Number(item.source_page) || 1,
   };
 }
@@ -585,7 +592,16 @@ export default function OffersPage() {
             const { item, flyer, candidate, verdict, productId } = entry;
             const ui = verdictUi[verdict.key];
             const VerdictIcon = ui.Icon;
-            const clubPrice = Number(item.club_advertised_price) || null;
+            const regularPrice = Number(item.advertised_price) || 0;
+            const clubPrice = validClubPrice(item);
+            const regularPackage =
+              item.package_quantity && item.package_unit
+                ? inferPackage(`${item.package_quantity}${item.package_unit}`)
+                : inferPackage(item.raw_name);
+            const regularNormalized = normalizedUnitPrice(
+              regularPrice,
+              regularPackage,
+            );
             const isTopResult = hasSearch && index === 0;
 
             return (
@@ -617,17 +633,48 @@ export default function OffersPage() {
                         </div>
                       </div>
                       <div className="shrink-0 text-right">
-                      <p className="text-lg font-extrabold">{brl(candidate.price)}</p>
-                      {candidate.baseUnit !== "un" && (
-                        <p className="text-[11px] text-muted-foreground">
-                          {formatNormalizedPrice(candidate.normalizedPrice, candidate.baseUnit)}
-                        </p>
-                      )}
-                      {clubPrice && (
-                        <p className="mt-0.5 text-[11px] font-bold text-primary">
-                          Clube {brl(clubPrice)}
-                        </p>
-                      )}
+                        {clubPrice ? (
+                          <>
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
+                              Clube
+                            </p>
+                            <p className="text-lg font-extrabold text-primary">
+                              {brl(candidate.price)}
+                            </p>
+                            {candidate.baseUnit !== "un" && (
+                              <p className="text-[11px] font-semibold text-primary">
+                                {formatNormalizedPrice(
+                                  candidate.normalizedPrice,
+                                  candidate.baseUnit,
+                                )}
+                              </p>
+                            )}
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              Normal {brl(regularPrice)}
+                              {regularNormalized.baseUnit !== "un"
+                                ? " · " +
+                                  formatNormalizedPrice(
+                                    regularNormalized.normalizedPrice,
+                                    regularNormalized.baseUnit,
+                                  )
+                                : ""}
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-lg font-extrabold">
+                              {brl(candidate.price)}
+                            </p>
+                            {candidate.baseUnit !== "un" && (
+                              <p className="text-[11px] text-muted-foreground">
+                                {formatNormalizedPrice(
+                                  candidate.normalizedPrice,
+                                  candidate.baseUnit,
+                                )}
+                              </p>
+                            )}
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
