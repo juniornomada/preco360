@@ -212,6 +212,14 @@ function ProductVisualIcon({
     <rect x="14" y="15" width="20" height="19" rx="9" fill="#e7edf6" />
     <rect x="18" y="18" width="12" height="13" rx="6" fill="#ffffff" />
   </>);
+  if (visual === "__soapbar__") return simple(<>
+    <rect x="8" y="17" width="31" height="20" rx="8" fill="#82d6c9" />
+    <rect x="11" y="20" width="25" height="14" rx="6" fill="#b9efe7" />
+    <path d="M17 28c4-3 9-4 14-2" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" fill="none" opacity=".9" />
+    <circle cx="34" cy="11" r="4" fill="#dff8f4" stroke="#8fd8cf" strokeWidth="1.2" />
+    <circle cx="40" cy="16" r="2.7" fill="#eefcf9" stroke="#8fd8cf" strokeWidth="1.1" />
+    <circle cx="27" cy="9" r="2.5" fill="#eefcf9" stroke="#8fd8cf" strokeWidth="1.1" />
+  </>);
   if (visual === "__datefruit__") return simple(<>
     <ellipse cx="19" cy="27" rx="7" ry="12" transform="rotate(-18 19 27)" fill="#8a552e" />
     <ellipse cx="31" cy="24" rx="7" ry="12" transform="rotate(18 31 24)" fill="#9a6438" />
