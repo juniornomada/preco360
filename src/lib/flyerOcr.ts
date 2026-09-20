@@ -146,13 +146,28 @@ function normalizeOfferNameForDedupe(value: string) {
     .trim();
 }
 
-function offerIdentityKey(offer: VisionOffer) {
+function normalizedVisionPackage(offer: VisionOffer) {
   const quantity = Number(offer.package_quantity);
-  const quantityKey = Number.isFinite(quantity) && quantity > 0 ? String(quantity) : "";
+  const unit = normalizeIdentity(offer.package_unit || "");
+  if (!Number.isFinite(quantity) || quantity <= 0 || !unit) {
+    return { quantity: null as number | null, unit };
+  }
+  if (unit === "kg") return { quantity: quantity * 1000, unit: "g" };
+  if (unit === "g") return { quantity, unit: "g" };
+  if (unit === "l" || unit === "lt") return { quantity: quantity * 1000, unit: "ml" };
+  if (unit === "ml") return { quantity, unit: "ml" };
+  if (["un","und","unid","unidade"].includes(unit)) return { quantity, unit: "un" };
+  return { quantity, unit };
+}
+
+function offerIdentityKey(offer: VisionOffer) {
+  const pkg = normalizedVisionPackage(offer);
+  const quantityKey =
+    pkg.quantity !== null ? String(Math.round(pkg.quantity * 1000) / 1000) : "";
   return [
     normalizeOfferNameForDedupe(offer.product_name || ""),
     quantityKey,
-    normalizeIdentity(offer.package_unit || ""),
+    pkg.unit,
   ].join("|");
 }
 
@@ -184,17 +199,14 @@ function identityDice(a: string, b: string) {
 function sameVisionIdentity(a: VisionOffer, b: VisionOffer) {
   if (offerIdentityKey(a) === offerIdentityKey(b)) return true;
 
-  const aq = Number(a.package_quantity);
-  const bq = Number(b.package_quantity);
+  const ap = normalizedVisionPackage(a);
+  const bp = normalizedVisionPackage(b);
+  if (ap.unit && bp.unit && ap.unit !== bp.unit) return false;
   if (
-    Number.isFinite(aq) && aq > 0 &&
-    Number.isFinite(bq) && bq > 0 &&
-    Math.abs(aq - bq) > 0.001
+    ap.quantity !== null &&
+    bp.quantity !== null &&
+    Math.abs(ap.quantity - bp.quantity) >= 0.01
   ) return false;
-
-  const au = normalizeIdentity(a.package_unit || "");
-  const bu = normalizeIdentity(b.package_unit || "");
-  if (au && bu && au !== bu) return false;
 
   const ab = normalizeOfferNameForDedupe(a.brand || "");
   const bb = normalizeOfferNameForDedupe(b.brand || "");
@@ -211,7 +223,7 @@ function sameVisionIdentity(a: VisionOffer, b: VisionOffer) {
 
   const shorter = left.length <= right.length ? left : right;
   const longer = left.length <= right.length ? right : left;
-  if (shorter.length >= 8 && longer.includes(shorter)) return true;
+  if (shorter.split(" ").filter(Boolean).length >= 3 && longer.includes(shorter)) return true;
 
   return identityDice(left, right) >= 0.86;
 }
