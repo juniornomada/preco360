@@ -25,7 +25,7 @@ type OfferRow = {
 };
 
 type Candidate = {
-  source: "open_food_facts" | "open_products_facts" | "open_beauty_facts" | "mercado_livre" | "google";
+  source: "open_food_facts" | "open_products_facts" | "open_beauty_facts" | "bing" | "mercado_livre" | "google";
   imageUrl: string;
   title: string;
   brandText: string;
@@ -719,6 +719,119 @@ async function searchMercadoLivre(item: OfferRow, query: string) {
   );
 }
 
+function decodeHtmlAttribute(value: string) {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&#x27;/gi, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function targetLooksLikeMultipack(item: OfferRow) {
+  const text = normalize(item.raw_name);
+  if (/\bkit\b|\bpack\b/.test(text)) return true;
+  const count = text.match(/\b(\d+)\s*(?:un|und|unid|unidades)\b/);
+  if (count && Number(count[1]) > 1) return true;
+  return normalize(item.package_unit) === "un" && Number(item.package_quantity) > 1;
+}
+
+function candidateLooksLikeMultipack(title: string) {
+  const text = normalize(title);
+  if (/\bkit\b|\bpack\b|atacado/.test(text)) return true;
+  const count = text.match(/\b(\d+)\s*(?:un|und|unid|unidades)\b/);
+  return !!count && Number(count[1]) > 1;
+}
+
+function multipackCompatible(item: OfferRow, title: string) {
+  return targetLooksLikeMultipack(item) || !candidateLooksLikeMultipack(title);
+}
+
+async function searchBingImages(item: OfferRow, query: string) {
+  const found = new Map<string, Candidate>();
+
+  for (const variant of searchQueryVariants(item, query).slice(0, 2)) {
+    const url = new URL("https://www.bing.com/images/search");
+    url.searchParams.set("q", variant);
+    url.searchParams.set("form", "HDRSC3");
+    url.searchParams.set("first", "1");
+    url.searchParams.set("safeSearch", "Strict");
+    url.searchParams.set("setlang", "pt-br");
+
+    const response = await fetch(url, {
+      headers: {
+        "Accept": "text/html,application/xhtml+xml",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/123 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(12000),
+    }).catch(() => null);
+
+    if (!response?.ok) continue;
+    const html = await response.text().catch(() => "");
+    if (!html) continue;
+
+    const metadataPattern = /\sm="([^"]+)"/g;
+    for (const match of html.matchAll(metadataPattern)) {
+      let meta: any = null;
+      try {
+        meta = JSON.parse(decodeHtmlAttribute(match[1]));
+      } catch {
+        continue;
+      }
+
+      const imageUrl = String(meta?.murl ?? "").trim();
+      const title = String(meta?.t ?? "").trim();
+      const pageUrl = String(meta?.purl ?? "").trim();
+      if (!imageUrl || !title) continue;
+      if (!semanticCompatible(item.raw_name, title)) continue;
+      if (!multipackCompatible(item, title)) continue;
+
+      const brandScore = brandSimilarity(item, title, title);
+      const nameScore = nameSimilarity(item, title, title);
+      const explicitPackage = parseQuantity(title);
+      const packageScore = explicitPackage ? packageSimilarity(item, title) : 0.5;
+      const expectedPackage = packageBase(item.package_quantity, item.package_unit);
+
+      if (item.brand && brandScore < 0.99) continue;
+      if (expectedPackage && explicitPackage && packageScore < 0.72) continue;
+      if (nameScore < 0.34) continue;
+
+      const deterministicScore =
+        Math.min(1, brandScore) * 0.45 +
+        Math.min(1, packageScore) * 0.2 +
+        Math.min(1, nameScore) * 0.35;
+
+      const candidate: Candidate = {
+        source: "bing",
+        imageUrl,
+        title,
+        brandText: title,
+        quantityText: title,
+        code: pageUrl || imageUrl,
+        deterministicScore,
+        brandScore,
+        nameScore,
+        packageScore,
+      };
+
+      const key = candidate.code || candidate.imageUrl;
+      const previous = found.get(key);
+      if (!previous || candidate.deterministicScore > previous.deterministicScore) {
+        found.set(key, candidate);
+      }
+
+      if (found.size >= 8) break;
+    }
+
+    if (found.size >= 5) break;
+  }
+
+  return [...found.values()].sort(
+    (a, b) => b.deterministicScore - a.deterministicScore,
+  );
+}
+
 async function searchGoogleImages(item: OfferRow, query: string) {
   const key = Deno.env.get("GOOGLE_CSE_API_KEY") || "";
   const cx = Deno.env.get("GOOGLE_CSE_CX") || "";
@@ -886,16 +999,16 @@ async function resolveExternal(item: OfferRow, query: string) {
 
   let best = candidates[0] ?? null;
 
-  // Mercado Livre gives us a broad Brazilian catalog for non-food items such as
-  // soap, shampoo and household products. The same strict brand/package checks
-  // still apply before an image can be accepted.
-  if (offerLooksNonFood(item) && (!best || best.deterministicScore < 0.9)) {
-    const marketplace = await searchMercadoLivre(item, query);
+  // Bing is used only as a discovery source for non-food products. Every
+  // discovered image still goes through strict name/brand/package checks and,
+  // unlike catalog images, must pass visual verification before being stored.
+  if (offerLooksNonFood(item) && (!best || best.deterministicScore < 0.92)) {
+    const webImages = await searchBingImages(item, query);
     if (
-      marketplace[0] &&
-      (!best || marketplace[0].deterministicScore > best.deterministicScore)
+      webImages[0] &&
+      (!best || webImages[0].deterministicScore > best.deterministicScore)
     ) {
-      best = marketplace[0];
+      best = webImages[0];
     }
   }
 
@@ -911,6 +1024,7 @@ async function resolveExternal(item: OfferRow, query: string) {
   if (
     best.source !== "google" &&
     best.source !== "mercado_livre" &&
+    best.source !== "bing" &&
     best.deterministicScore >= 0.94 &&
     best.brandScore >= 0.99 &&
     best.packageScore >= 0.97 &&
