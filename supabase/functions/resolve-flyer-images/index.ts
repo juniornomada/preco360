@@ -427,13 +427,35 @@ async function findLibraryImage(
   const expectedFamily = semanticFamily(item.raw_name);
 
   if (expectedBrand && expectedFamily) {
+    const isSoapFamily =
+      expectedFamily === "soap_bar" || expectedFamily === "soap_liquid";
+    const expectedPkg = packageBase(item.package_quantity, item.package_unit);
+
     const familyMatches = libraryRows
-      .filter((row) =>
-        !!row.image_url &&
-        Number(row.confidence) >= 0.9 &&
-        normalize(row.brand) === expectedBrand &&
-        semanticFamily(row.normalized_name) === expectedFamily
-      )
+      .filter((row) => {
+        if (
+          !row.image_url ||
+          Number(row.confidence) < 0.9 ||
+          normalize(row.brand) !== expectedBrand ||
+          semanticFamily(row.normalized_name) !== expectedFamily
+        ) {
+          return false;
+        }
+
+        // Soap lines can look very different even within the same brand.
+        // Reuse only when the package is compatible; otherwise search the exact
+        // item instead of showing a misleading representative image.
+        if (isSoapFamily && expectedPkg) {
+          const cachedPkg = packageBase(row.package_quantity, row.package_unit);
+          if (!cachedPkg || cachedPkg.unit !== expectedPkg.unit) return false;
+          const ratio =
+            Math.min(expectedPkg.value, cachedPkg.value) /
+            Math.max(expectedPkg.value, cachedPkg.value);
+          if (ratio < 0.9) return false;
+        }
+
+        return true;
+      })
       .map((row) => {
         const overlap = overlapScore(
           tokens(canonicalName(item) || item.raw_name),
@@ -444,7 +466,9 @@ async function findLibraryImage(
           score: overlap.containment * 0.7 + overlap.jaccard * 0.3,
         };
       })
-      .filter((entry) => entry.score >= 0.34)
+      .filter((entry) =>
+        entry.score >= (isSoapFamily ? 0.6 : 0.34)
+      )
       .sort((a, b) => b.score - a.score);
 
     if (familyMatches[0]?.row) {
