@@ -1130,7 +1130,7 @@ export default function FlyerPage() {
   };
 
   return (
-    <div className="page-container mx-auto w-full max-w-3xl">
+    <div className="page-container !pb-40 mx-auto w-full max-w-3xl">
       <header className="mb-3 flex items-start justify-between gap-3 sm:mb-4">
         <div>
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary sm:text-xs">Radar 360</p>
