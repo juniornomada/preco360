@@ -41,6 +41,9 @@ REGRAS OBRIGATÓRIAS
 11. source_page é a página física do PDF, começando em 1.
 12. confidence vai de 0 a 1. Só devolva registros com confiança >= 0.72.
 13. Datas devem ser YYYY-MM-DD quando legíveis. Não deduza datas ausentes.
+13A. O campo retailer deve conter o NOME OFICIAL DA REDE/SUPERMERCADO, identificado principalmente pelo logotipo, assinatura institucional ou nome repetido como marca da loja. NÃO use como retailer o nome de campanha, slogan, evento promocional ou chamada publicitária.
+13B. Expressões como "Festival do...", "Semana...", "Mês...", "Real Gigante", "Ofertas Gigantes", "Aniversário", "Feirão" e semelhantes são campanhas/slogans quando aparecem destacadas junto da marca. Exemplo: se a peça mostra o logotipo "MAX Atacadista" e o título "Festival do REAL GIGANTE", retailer deve ser "Max Atacadista", nunca "Real Atacadista".
+13C. Quando houver dúvida entre um título promocional grande e uma marca/logotipo menor, prefira a marca/logotipo que identifica a rede. Antes de finalizar retailer, confira cabeçalho, rodapé, assinatura visual e outras páginas do mesmo tabloide.
 14. Preserve acentos e grafia do encarte quando legíveis.
 15. Examine TODAS as páginas e TODAS as regiões: grade central, colunas laterais, rodapés e faixas promocionais.
 16. Não pare após encontrar algumas dezenas de ofertas. Continue até o fim do documento.
