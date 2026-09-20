@@ -168,7 +168,9 @@ const specificRules: Rule[] = [
   { pattern: /absorvente/, visual: "__sanitary__", confidence: 0.98 },
   { pattern: /prestobarba|barbeador|aparelho gilette|gillette venus|aparelho de barbear/, visual: "🪒", confidence: 0.99 },
   { pattern: /escova dental|creme dental|gel dental/, visual: "🪥", confidence: 0.99 },
-  { pattern: /sabonete|sabonetes/, visual: "__soapbar__", forceIcon: true, confidence: 0.99 },
+  { pattern: /sabonete.*(?:liquido|intimo)|(?:liquido|intimo).*sabonete/, visual: "🧴", confidence: 0.99 },
+  // Real product photos are preferred for soap when available; this remains the fallback.
+  { pattern: /sabonete|sabonetes/, visual: "__soapbar__", confidence: 0.99 },
   { pattern: /shampoo|condicionador|kit jacques|desodorante|higiene|colonia|hidratante|protetor solar|tintura biocolor|creme de tratamento|lenco umedecido|toalha umed/, visual: "🧴", confidence: 0.96 },
 
   // Cleaning and household.
