@@ -102,6 +102,11 @@ type ProcessedSource = {
 };
 const IMPORT_JOB_KEY = "preco360-active-flyer-import-job";
 
+const isTransientImportError = (message?: string | null) =>
+  /timed out|timeout|429|resource exhausted|overloaded|temporar|502|503|504/i.test(
+    message ?? "",
+  );
+
 const rank = { exceptional: 0, good: 1, normal: 2, high: 3, unknown: 4 } as const;
 const cardTone = {
   exceptional: "border-emerald-500/40 bg-emerald-500/10",
@@ -226,6 +231,7 @@ export default function FlyerPage() {
   const [processedSource, setProcessedSource] = useState<ProcessedSource | null>(null);
   const [jobActioning, setJobActioning] = useState(false);
   const appliedJobRef = useRef<string | null>(null);
+  const autoRetryJobRef = useRef<string | null>(null);
 
   const { data: products = [] } = useQuery<ProductForMatch[]>({
     queryKey: ["flyer-products", user?.id],
@@ -332,6 +338,33 @@ export default function FlyerPage() {
           setActiveJobId(saved);
           setProgress({ current: 1, total: 1, label: "Recuperando importação…" });
         }
+        return;
+      }
+
+      // Recover a recent timeout job first. Older builds removed the local
+      // job id when a timeout marked the job as failed, even though completed
+      // pages and uploaded source files were still intact.
+      const failedCutoff = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const { data: failedJobs } = await db
+        .from("flyer_import_jobs")
+        .select("id,error_message,created_at")
+        .eq("status", "failed")
+        .gte("created_at", failedCutoff)
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      const recoverableFailure = (failedJobs ?? []).find((job: any) =>
+        isTransientImportError(job.error_message),
+      );
+
+      if (recoverableFailure && !cancelled) {
+        localStorage.setItem(IMPORT_JOB_KEY, recoverableFailure.id);
+        setActiveJobId(recoverableFailure.id);
+        setProgress({
+          current: 1,
+          total: 1,
+          label: "Recuperando importação interrompida…",
+        });
         return;
       }
 
@@ -469,6 +502,58 @@ export default function FlyerPage() {
     }
 
     if (activeJob.status === "failed") {
+      const transient = isTransientImportError(activeJob.error_message);
+
+      if (transient && autoRetryJobRef.current !== activeJob.id) {
+        autoRetryJobRef.current = activeJob.id;
+        setProcessing(true);
+        localStorage.setItem(IMPORT_JOB_KEY, activeJob.id);
+
+        void (async () => {
+          try {
+            const { error: resetError } = await db
+              .from("flyer_import_jobs")
+              .update({
+                status: "queued",
+                error_message: null,
+                warning_message:
+                  "Retomada automática após uma resposta lenta da IA.",
+                completed_at: null,
+                progress_label:
+                  "Retomando automaticamente da primeira página pendente…",
+              })
+              .eq("id", activeJob.id);
+            if (resetError) throw resetError;
+
+            const { error: invokeError } = await supabase.functions.invoke(
+              "process-flyer-job",
+              { body: { job_id: activeJob.id, mode: "resume" } },
+            );
+            if (invokeError) throw invokeError;
+
+            await queryClient.invalidateQueries({
+              queryKey: ["flyer-import-job", user?.id, activeJob.id],
+            });
+
+            toast({
+              title: "Importação retomada automaticamente",
+              description:
+                "As páginas já concluídas foram preservadas. O Radar 360 continuará da página pendente.",
+            });
+          } catch (error: any) {
+            setProcessing(false);
+            localStorage.removeItem(IMPORT_JOB_KEY);
+            toast({
+              title: "A retomada automática não concluiu",
+              description: error?.message ?? "O processamento continua disponível para nova tentativa.",
+              variant: "destructive",
+            });
+          }
+        })();
+
+        return;
+      }
+
       setProcessing(false);
       localStorage.removeItem(IMPORT_JOB_KEY);
       if (appliedJobRef.current !== activeJob.id) {
