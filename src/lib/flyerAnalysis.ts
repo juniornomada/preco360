@@ -319,14 +319,55 @@ function normalizedHistorical(product: ProductForMatch, rawPrice: number | strin
 }
 
 export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductForMatch | null,
-  previousAdvertised: Array<{ normalized_price: number | string | null; base_unit?: string | null }> = []): OfferVerdict {
+  previousAdvertised: Array<{
+    normalized_price: number | string | null;
+    advertised_price?: number | string | null;
+    club_advertised_price?: number | string | null;
+    package_quantity?: number | string | null;
+    package_unit?: string | null;
+    raw_name?: string | null;
+    base_unit?: string | null;
+  }> = []): OfferVerdict {
   const purchases = product
     ? (product.prices ?? []).map((entry) => normalizedHistorical(product, entry.price))
         .filter((entry) => entry?.baseUnit === candidate.baseUnit)
         .map((entry) => entry!.normalizedPrice)
     : [];
-  const advertised = previousAdvertised.filter((entry) => entry.base_unit === candidate.baseUnit)
-    .map((entry) => Number(entry.normalized_price)).filter((value) => Number.isFinite(value) && value > 0);
+  const advertised = previousAdvertised
+    .filter((entry) => entry.base_unit === candidate.baseUnit)
+    .map((entry) => {
+      const regularPrice = Number(entry.advertised_price);
+      const clubPrice = Number(entry.club_advertised_price);
+      const hasValidClub =
+        Number.isFinite(clubPrice) &&
+        clubPrice > 0 &&
+        (!Number.isFinite(regularPrice) || regularPrice <= 0 || clubPrice <= regularPrice);
+
+      if (hasValidClub) {
+        const pkg =
+          entry.package_quantity && entry.package_unit
+            ? inferPackage(`${entry.package_quantity}${entry.package_unit}`)
+            : entry.raw_name
+              ? inferPackage(entry.raw_name)
+              : null;
+        if (pkg) {
+          return normalizedUnitPrice(clubPrice, pkg).normalizedPrice;
+        }
+
+        const storedNormalized = Number(entry.normalized_price);
+        if (
+          Number.isFinite(storedNormalized) &&
+          storedNormalized > 0 &&
+          Number.isFinite(regularPrice) &&
+          regularPrice > 0
+        ) {
+          return storedNormalized * (clubPrice / regularPrice);
+        }
+      }
+
+      return Number(entry.normalized_price);
+    })
+    .filter((value) => Number.isFinite(value) && value > 0);
   // Build one market reference from both kinds of evidence:
   // what the user actually paid and previous advertised prices.
   // Current live offers must be excluded by the caller from previousAdvertised,
