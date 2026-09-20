@@ -54,6 +54,11 @@ type LibraryImage = {
   search_query: string | null;
 };
 
+type LibraryMatch = {
+  row: LibraryImage;
+  familyReuse: boolean;
+};
+
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
@@ -375,7 +380,7 @@ function cacheScore(item: OfferRow, cached: LibraryImage) {
 async function findLibraryImage(
   supabase: ReturnType<typeof serviceClient>,
   item: OfferRow,
-) {
+): Promise<LibraryMatch | null> {
   const key = productKey(item);
 
   const { data: exact } = await supabase
@@ -390,7 +395,7 @@ async function findLibraryImage(
     Number(exact.confidence) >= 0.85 &&
     semanticCompatible(item.raw_name, exact.normalized_name)
   ) {
-    return exact as LibraryImage;
+    return { row: exact as LibraryImage, familyReuse: false };
   }
 
   const { data: rows } = await supabase
@@ -399,14 +404,53 @@ async function findLibraryImage(
     .eq("user_id", item.user_id)
     .gte("confidence", 0.85)
     .order("updated_at", { ascending: false })
-    .limit(120);
+    .limit(160);
 
-  const ranked = ((rows ?? []) as LibraryImage[])
+  const libraryRows = (rows ?? []) as LibraryImage[];
+
+  const ranked = libraryRows
     .map((row) => ({ row, score: cacheScore(item, row) }))
     .filter((entry) => entry.score >= 0.74)
     .sort((a, b) => b.score - a.score);
 
-  return ranked[0]?.row ?? null;
+  if (ranked[0]?.row) {
+    return { row: ranked[0].row, familyReuse: false };
+  }
+
+  // If the exact package is not in the library, reuse a verified image from the
+  // same brand + semantic product family. This is intentionally less strict on
+  // package size, but never crosses product families (e.g. Nescau cereal cannot
+  // inherit the image of Nescau achocolatado).
+  const expectedBrand = normalize(item.brand);
+  const expectedFamily = semanticFamily(item.raw_name);
+
+  if (expectedBrand && expectedFamily) {
+    const familyMatches = libraryRows
+      .filter((row) =>
+        !!row.image_url &&
+        Number(row.confidence) >= 0.9 &&
+        normalize(row.brand) === expectedBrand &&
+        semanticFamily(row.normalized_name) === expectedFamily
+      )
+      .map((row) => {
+        const overlap = overlapScore(
+          tokens(canonicalName(item) || item.raw_name),
+          tokens(row.normalized_name),
+        );
+        return {
+          row,
+          score: overlap.containment * 0.7 + overlap.jaccard * 0.3,
+        };
+      })
+      .filter((entry) => entry.score >= 0.34)
+      .sort((a, b) => b.score - a.score);
+
+    if (familyMatches[0]?.row) {
+      return { row: familyMatches[0].row, familyReuse: true };
+    }
+  }
+
+  return null;
 }
 
 function scoreOffHit(item: OfferRow, hit: any): Candidate | null {
@@ -901,13 +945,17 @@ async function resolveOne(
   }
 
   const cached = await findLibraryImage(supabase, item);
-  if (cached?.image_url) {
+  if (cached?.row.image_url) {
     await applyImage(supabase, item, {
-      imageUrl: cached.image_url,
-      source: "product_library",
-      confidence: Number(cached.confidence) || 0.9,
+      imageUrl: cached.row.image_url,
+      source: cached.familyReuse ? "product_library_family" : "product_library",
+      confidence: cached.familyReuse
+        ? Math.min(0.9, Number(cached.row.confidence) || 0.9)
+        : Number(cached.row.confidence) || 0.9,
       status: "verified",
-      query: cached.search_query || query,
+      query: cached.familyReuse
+        ? "reuso por marca + família: " + buildSearchQuery(item)
+        : cached.row.search_query || query,
     });
     return;
   }
