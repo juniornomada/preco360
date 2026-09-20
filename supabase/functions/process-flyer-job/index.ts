@@ -101,6 +101,12 @@ type JobRow = {
   source_file_path: string;
   source_file_name: string;
   mime_type: string | null;
+  source_files?: Array<{
+    path: string;
+    name: string;
+    mime_type?: string | null;
+    size?: number | null;
+  }> | null;
   file_hash: string | null;
   page_count: number | null;
   status: string;
@@ -643,13 +649,27 @@ async function updateJob(jobId: string, values: Record<string, unknown>) {
   if (error) throw error;
 }
 
-async function downloadJobFile(job: JobRow) {
+async function downloadJobFile(job: JobRow, pageNo?: number) {
+  const orderedSources = Array.isArray(job.source_files)
+    ? job.source_files.filter((source) => source?.path && source?.name)
+    : [];
+
+  const source =
+    orderedSources.length > 1 && pageNo
+      ? orderedSources[Math.max(0, Math.min(orderedSources.length - 1, pageNo - 1))]
+      : null;
+
+  const path = source?.path || job.source_file_path;
+  const name = source?.name || job.source_file_name;
+  const mimeType = source?.mime_type || job.mime_type;
+
   const { data, error } = await serviceClient().storage
-    .from("flyers").download(job.source_file_path);
+    .from("flyers").download(path);
   if (error || !data) throw error || new Error("Arquivo do tabloide não encontrado.");
-  return new File([data], job.source_file_name, {
-    type: job.mime_type || data.type ||
-      (job.source_file_name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg"),
+
+  return new File([data], name, {
+    type: mimeType || data.type ||
+      (name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg"),
   });
 }
 
@@ -722,12 +742,17 @@ async function processPage(jobId: string, requestedPage: number) {
       warning_message: null,
     });
 
-    const file = await downloadJobFile(job);
+    const file = await downloadJobFile(job, pageNo);
+    const multiImagePages = Array.isArray(job.source_files) && job.source_files.length > 1;
     const prompt =
       EXTRACTION_PROMPT +
       "\n\nEXECUÇÃO EM ETAPAS — PÁGINA ALVO " + pageNo + "/" + total +
-      "\nAnalise SOMENTE a página física " + pageNo + " deste arquivo." +
-      "\nIgnore completamente as demais páginas nesta execução." +
+      (multiImagePages
+        ? "\nEsta imagem corresponde à página física " + pageNo + " do tabloide."
+        : "\nAnalise SOMENTE a página física " + pageNo + " deste arquivo.") +
+      (multiImagePages
+        ? "\nAnalise integralmente esta imagem e extraia todas as ofertas visíveis."
+        : "\nIgnore completamente as demais páginas nesta execução.") +
       "\nExtraia TODAS as ofertas visíveis da página alvo." +
       "\nNÃO localize imagens nesta etapa: use image_box zerado e image_box_confidence=0. As miniaturas serão resolvidas depois pelo nome do produto." +
       "\nDefina source_page=" + pageNo + " em todos os registros retornados." +
