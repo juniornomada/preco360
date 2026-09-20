@@ -1016,7 +1016,7 @@ export default function OffersPage() {
               Importe os tabloides atuais no Radar para liberar a consulta.
             </p>
             <Button className="mt-4" onClick={() => navigate("/radar")}>
-              Abrir Radar 360
+              Abrir Radar
             </Button>
           </CardContent>
         </Card>
