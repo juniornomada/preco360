@@ -966,7 +966,7 @@ export default function OffersPage() {
           onClick={() => navigate("/radar")}
         >
           <Radar className="h-3.5 w-3.5 text-primary" />
-          Radar 360
+          Radar
         </Button>
         <Button
           type="button"
@@ -975,7 +975,7 @@ export default function OffersPage() {
           onClick={() => navigate("/offers/basket")}
         >
           <ShoppingBasket className="h-3.5 w-3.5 text-primary" />
-          Cesta 360
+          Cesta
         </Button>
       </div>
 
