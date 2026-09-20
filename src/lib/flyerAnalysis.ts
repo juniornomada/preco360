@@ -335,6 +335,129 @@ function startsComparison(tokens: string[], ...wanted: string[]) {
   return wanted.every((token, index) => tokens[index] === token);
 }
 
+export type GenericBasketFamily = {
+  key: string;
+  label: string;
+};
+
+export function genericBasketFamily(value: string): GenericBasketFamily | null {
+  const t = comparisonTokens(value);
+  if (!t.length) return null;
+
+  // Dairy: keep derivatives separate, but ignore brand and package size.
+  if (startsComparison(t, "creme", "leite")) {
+    return { key: "leite:creme", label: "Creme de leite" };
+  }
+  if (startsComparison(t, "doce", "leite")) {
+    return { key: "leite:doce", label: "Doce de leite" };
+  }
+  if (startsComparison(t, "leite")) {
+    if (hasComparisonToken(t, "condensado")) {
+      return { key: "leite:condensado", label: "Leite condensado" };
+    }
+    if (hasComparisonToken(t, "fermentado")) {
+      return { key: "leite:fermentado", label: "Leite fermentado" };
+    }
+    if (hasComparisonToken(t, "coco")) {
+      return { key: "leite:coco", label: "Leite de coco" };
+    }
+    if (hasComparisonToken(t, "po")) {
+      return { key: "leite:po", label: "Leite em pó" };
+    }
+    return { key: "leite:liquido", label: "Leite" };
+  }
+
+  // Tomato products must begin with the product family. This avoids grouping
+  // things such as sardines "ao molho de tomate" with tomato sauce itself.
+  if (startsComparison(t, "molho", "tomate")) {
+    return { key: "tomate:molho", label: "Molho de tomate" };
+  }
+  if (startsComparison(t, "extrato", "tomate")) {
+    return { key: "tomate:extrato", label: "Extrato de tomate" };
+  }
+  if (startsComparison(t, "passata")) {
+    return { key: "tomate:passata", label: "Passata de tomate" };
+  }
+  if (
+    startsComparison(t, "tomate") &&
+    hasComparisonToken(t, "pelado", "pelados", "pelada", "peladas")
+  ) {
+    return { key: "tomate:pelado", label: "Tomate pelado" };
+  }
+
+  if (
+    startsComparison(t, "farinha") &&
+    hasComparisonToken(t, "trigo")
+  ) {
+    return { key: "farinha:trigo", label: "Farinha de trigo" };
+  }
+
+  if (startsComparison(t, "arroz")) {
+    return { key: "graos:arroz", label: "Arroz" };
+  }
+
+  if (startsComparison(t, "feijao")) {
+    if (hasComparisonToken(t, "preto")) {
+      return { key: "graos:feijao-preto", label: "Feijão preto" };
+    }
+    if (hasComparisonToken(t, "carioca")) {
+      return { key: "graos:feijao-carioca", label: "Feijão carioca" };
+    }
+    return { key: "graos:feijao", label: "Feijão" };
+  }
+
+  if (startsComparison(t, "acucar")) {
+    if (hasComparisonToken(t, "mascavo")) {
+      return { key: "mercearia:acucar-mascavo", label: "Açúcar mascavo" };
+    }
+    if (hasComparisonToken(t, "demerara")) {
+      return { key: "mercearia:acucar-demerara", label: "Açúcar demerara" };
+    }
+    return { key: "mercearia:acucar", label: "Açúcar" };
+  }
+
+  if (
+    startsComparison(t, "oleo") &&
+    hasComparisonToken(t, "soja")
+  ) {
+    return { key: "mercearia:oleo-soja", label: "Óleo de soja" };
+  }
+
+  if (startsComparison(t, "cafe")) {
+    if (hasComparisonToken(t, "capsula", "capsulas")) return null;
+    if (hasComparisonToken(t, "soluvel")) {
+      return { key: "mercearia:cafe-soluvel", label: "Café solúvel" };
+    }
+    if (hasComparisonToken(t, "grao", "graos")) {
+      return { key: "mercearia:cafe-graos", label: "Café em grãos" };
+    }
+    return { key: "mercearia:cafe", label: "Café" };
+  }
+
+  if (startsComparison(t, "manteiga")) {
+    return { key: "laticinio:manteiga", label: "Manteiga" };
+  }
+  if (startsComparison(t, "margarina")) {
+    return { key: "laticinio:margarina", label: "Margarina" };
+  }
+
+  if (
+    startsComparison(t, "macarrao") ||
+    startsComparison(t, "massa")
+  ) {
+    return { key: "mercearia:macarrao", label: "Macarrão" };
+  }
+
+  if (startsComparison(t, "refrigerante")) {
+    return { key: "bebida:refrigerante", label: "Refrigerante" };
+  }
+  if (startsComparison(t, "suco")) {
+    return { key: "bebida:suco", label: "Suco" };
+  }
+
+  return null;
+}
+
 function milkVariant(tokens: string[]) {
   if (
     hasComparisonToken(tokens, "zero") &&
