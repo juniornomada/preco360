@@ -61,10 +61,14 @@ export type OfferVerdict = {
 
 const aliases: Record<string, string> = {
   bisc: "biscoito", biscoitos: "biscoito", fgo: "frango", fr: "frango",
-  qj: "queijo", qjo: "queijo", muss: "mussarela", mussar: "mussarela",
-  mozzarella: "mussarela", ling: "linguica", lingui: "linguica", tosc: "toscana",
-  sobrec: "sobrecoxa", sobrecxa: "sobrecoxa", refri: "refrigerante", refr: "refrigerante",
-  resf: "resfriado", cong: "congelado", bov: "bovina", suin: "suina",
+  qj: "queijo", qjo: "queijo", mus: "mussarela", muss: "mussarela",
+  mussar: "mussarela", mozzarella: "mussarela", ling: "linguica",
+  lingui: "linguica", tosc: "toscana", sobrec: "sobrecoxa",
+  sobrecxa: "sobrecoxa", refri: "refrigerante", resf: "resfriado",
+  cong: "congelado", bov: "bovina", suin: "suina", mort: "mortadela",
+  mant: "manteiga", int: "integral", def: "defumada", fat: "fatiada",
+  far: "farinha", mand: "mandioca", ferm: "fermento", desinf: "desinfetante",
+  alum: "aluminio", pim: "pimenta", refin: "refinado", vd: "verde",
 };
 
 const stop = new Set([
@@ -305,6 +309,236 @@ export function matchFlyerItem(candidate: FlyerCandidate, products: ProductForMa
   return { productId: best.id, confidence: best.score, type: "equivalent" as const };
 }
 
+function comparisonTokens(value: string) {
+  return normalizeSearchText(value)
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => aliases[token] ?? token)
+    .filter((token) =>
+      token &&
+      !stop.has(token) &&
+      !/^\d+(?:[.,]\d+)?$/.test(token) &&
+      !packageTokenRe.test(token)
+    );
+}
+
+function hasComparisonToken(tokens: string[], ...wanted: string[]) {
+  const set = new Set(tokens);
+  return wanted.some((token) => set.has(token));
+}
+
+function startsComparison(tokens: string[], ...wanted: string[]) {
+  if (!wanted.length || tokens.length < wanted.length) return false;
+  return wanted.every((token, index) => tokens[index] === token);
+}
+
+function milkVariant(tokens: string[]) {
+  if (
+    hasComparisonToken(tokens, "zero") &&
+    hasComparisonToken(tokens, "lactose")
+  ) {
+    if (hasComparisonToken(tokens, "desnatado")) return "zero-desnatado";
+    if (hasComparisonToken(tokens, "semidesnatado")) return "zero-semi";
+    return "zero-lactose";
+  }
+  if (hasComparisonToken(tokens, "desnatado")) return "desnatado";
+  if (hasComparisonToken(tokens, "semidesnatado")) return "semidesnatado";
+  if (hasComparisonToken(tokens, "integral")) return "integral";
+  return "generico";
+}
+
+function purchaseComparisonKey(value: string) {
+  const t = comparisonTokens(value);
+  if (!t.length) return null;
+
+  if (startsComparison(t, "leite")) {
+    if (hasComparisonToken(t, "condensado")) return "leite:condensado";
+    if (hasComparisonToken(t, "fermentado")) return "leite:fermentado";
+    if (hasComparisonToken(t, "coco")) return "leite:coco";
+    if (hasComparisonToken(t, "po")) return "leite:po";
+    return `leite:liquido:${milkVariant(t)}`;
+  }
+
+  if (startsComparison(t, "creme", "leite")) return "leite:creme";
+  if (startsComparison(t, "doce", "leite")) return "leite:doce";
+
+  if (startsComparison(t, "milho")) {
+    if (hasComparisonToken(t, "pipoca")) return "milho:pipoca";
+    if (hasComparisonToken(t, "verde")) return "milho:verde";
+  }
+
+  if (startsComparison(t, "cafe")) {
+    if (hasComparisonToken(t, "capsula", "capsulas")) return "cafe:capsula";
+    if (hasComparisonToken(t, "soluvel")) return "cafe:soluvel";
+    if (hasComparisonToken(t, "grao", "graos")) return "cafe:grao";
+    return "cafe:po";
+  }
+  if (
+    hasComparisonToken(t, "cafe") &&
+    hasComparisonToken(t, "capsula", "capsulas")
+  ) {
+    return "cafe:capsula";
+  }
+
+  if (startsComparison(t, "tomate")) return "hortifruti:tomate";
+  if (startsComparison(t, "cebola")) return "hortifruti:cebola";
+  if (startsComparison(t, "cenoura")) return "hortifruti:cenoura";
+  if (startsComparison(t, "chuchu")) return "hortifruti:chuchu";
+  if (startsComparison(t, "maca")) return "hortifruti:maca";
+  if (startsComparison(t, "manga")) return "hortifruti:manga";
+  if (startsComparison(t, "maracuja")) return "hortifruti:maracuja";
+  if (startsComparison(t, "tangerina")) return "hortifruti:tangerina";
+  if (startsComparison(t, "uva") && hasComparisonToken(t, "verde")) {
+    return "hortifruti:uva-verde";
+  }
+
+  if (startsComparison(t, "batata")) {
+    if (hasComparisonToken(t, "palha")) return "batata:palha";
+    if (hasComparisonToken(t, "palito")) return "batata:palito";
+  }
+
+  if (
+    hasComparisonToken(t, "carne") &&
+    hasComparisonToken(t, "moida")
+  ) {
+    return "carne:bovina-moida";
+  }
+  if (hasComparisonToken(t, "coxao") && hasComparisonToken(t, "duro")) {
+    return "carne:coxao-duro";
+  }
+  if (hasComparisonToken(t, "miolo") && hasComparisonToken(t, "acem")) {
+    return "carne:miolo-acem";
+  }
+  if (
+    hasComparisonToken(t, "coxa") &&
+    hasComparisonToken(t, "sobrecoxa") &&
+    hasComparisonToken(t, "frango")
+  ) {
+    return "frango:coxa-sobrecoxa";
+  }
+  if (
+    hasComparisonToken(t, "linguica") &&
+    hasComparisonToken(t, "toscana")
+  ) {
+    return "linguica:toscana";
+  }
+
+  if (startsComparison(t, "manteiga")) return "laticinio:manteiga";
+  if (startsComparison(t, "ervilha")) return "legume:ervilha";
+  if (startsComparison(t, "fuba")) return "farinha:fuba";
+  if (
+    startsComparison(t, "farinha") &&
+    hasComparisonToken(t, "mandioca")
+  ) {
+    return "farinha:mandioca";
+  }
+  if (startsComparison(t, "goiabada")) return "doce:goiabada";
+
+  if (startsComparison(t, "pao") && hasComparisonToken(t, "forma")) {
+    return "pao:forma";
+  }
+  if (startsComparison(t, "pao") && hasComparisonToken(t, "frances")) {
+    return "pao:frances";
+  }
+
+  if (startsComparison(t, "mortadela")) {
+    if (hasComparisonToken(t, "defumada")) return "mortadela:defumada";
+    if (hasComparisonToken(t, "ouro")) return "mortadela:ouro";
+    return "mortadela:generica";
+  }
+
+  if (
+    hasComparisonToken(t, "queijo") &&
+    hasComparisonToken(t, "mussarela")
+  ) {
+    return "queijo:mussarela";
+  }
+
+  if (
+    startsComparison(t, "oleo") &&
+    hasComparisonToken(t, "soja")
+  ) {
+    return "oleo:soja";
+  }
+  if (
+    startsComparison(t, "sal") &&
+    hasComparisonToken(t, "refinado")
+  ) {
+    return "sal:refinado";
+  }
+  if (startsComparison(t, "acucar")) {
+    if (hasComparisonToken(t, "mascavo")) return "acucar:mascavo";
+    if (hasComparisonToken(t, "demerara")) return "acucar:demerara";
+    if (hasComparisonToken(t, "refinado")) return "acucar:refinado";
+    if (hasComparisonToken(t, "cristal")) return "acucar:cristal";
+    return "acucar:generico";
+  }
+
+  if (
+    startsComparison(t, "lava", "louca") ||
+    startsComparison(t, "lava", "loucas")
+  ) {
+    return "limpeza:lava-louca";
+  }
+  if (startsComparison(t, "filme", "pvc")) return "casa:filme-pvc";
+  if (startsComparison(t, "papel", "aluminio")) return "casa:papel-aluminio";
+
+  return null;
+}
+
+function purchaseKeysCompatible(left: string, right: string) {
+  if (left === right) return true;
+
+  // Generic liquid milk can use a specific regular-milk purchase as reference,
+  // but explicit variants (zero lactose, desnatado, etc.) never cross-match.
+  if (left.startsWith("leite:liquido:") && right.startsWith("leite:liquido:")) {
+    const a = left.split(":")[2];
+    const b = right.split(":")[2];
+    return a === b || a === "generico" || b === "generico";
+  }
+
+  // A receipt may omit the sugar subtype. Generic sugar is safe only against
+  // ordinary refined/crystal sugar, never mascavo/demerara.
+  if (left.startsWith("acucar:") && right.startsWith("acucar:")) {
+    const safe = new Set(["generico", "refinado", "cristal"]);
+    return safe.has(left.split(":")[1]) && safe.has(right.split(":")[1]);
+  }
+
+  return false;
+}
+
+function historicalPackage(product: ProductForMatch) {
+  return product.package_size && product.unit
+    ? inferPackage(`${product.package_size}${product.unit}`)
+    : inferPackage(product.name);
+}
+
+export function findComparablePurchaseProducts(
+  candidate: FlyerCandidate,
+  products: ProductForMatch[],
+) {
+  const candidateKey = purchaseComparisonKey(candidate.rawName);
+  if (!candidateKey || !candidate.packageInfo) return [];
+
+  return products.filter((product) => {
+    if (!(product.prices ?? []).length) return false;
+
+    const productKey = purchaseComparisonKey(product.name);
+    if (!productKey || !purchaseKeysCompatible(candidateKey, productKey)) {
+      return false;
+    }
+
+    const pkg = historicalPackage(product);
+    if (!pkg || pkg.baseUnit !== candidate.baseUnit) return false;
+
+    if (candidate.baseUnit === "un") {
+      return Math.abs(pkg.baseQuantity - candidate.packageInfo!.baseQuantity) < 0.01;
+    }
+
+    return true;
+  });
+}
+
 function median(values: number[]) {
   if (!values.length) return null;
   const ordered = [...values].sort((a, b) => a - b), mid = Math.floor(ordered.length / 2);
@@ -327,12 +561,21 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
     package_unit?: string | null;
     raw_name?: string | null;
     base_unit?: string | null;
-  }> = []): OfferVerdict {
-  const purchases = product
-    ? (product.prices ?? []).map((entry) => normalizedHistorical(product, entry.price))
-        .filter((entry) => entry?.baseUnit === candidate.baseUnit)
-        .map((entry) => entry!.normalizedPrice)
-    : [];
+  }> = [],
+  comparablePurchaseProducts: ProductForMatch[] = [],
+): OfferVerdict {
+  const purchaseSources = new Map<string, ProductForMatch>();
+  if (product) purchaseSources.set(product.id, product);
+  for (const comparable of comparablePurchaseProducts) {
+    purchaseSources.set(comparable.id, comparable);
+  }
+
+  const purchases = [...purchaseSources.values()].flatMap((source) =>
+    (source.prices ?? [])
+      .map((entry) => normalizedHistorical(source, entry.price))
+      .filter((entry) => entry?.baseUnit === candidate.baseUnit)
+      .map((entry) => entry!.normalizedPrice),
+  );
   const advertised = previousAdvertised
     .filter((entry) => entry.base_unit === candidate.baseUnit)
     .map((entry) => {
