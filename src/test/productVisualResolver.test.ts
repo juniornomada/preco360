@@ -28,6 +28,7 @@ describe("product visual resolver", () => {
     expect(productVisual("Ketchup Heinz 397g")).toBe("__ketchup__");
     expect(productVisual("Molho Barbecue Elefante 190g")).toBe("__bbq__");
     expect(productVisual("Molho de Tomate Quero Tradicional 240g")).toBe("__tomatosauce__");
+    expect(productVisual("Sabonete Dove Original 90g")).toBe("__soapbar__");
     expect(productVisual("Bacon em Fatias Seara Gourmet 250g")).toBe("__baconslices__");
     expect(productVisual("Jerked Beef Cubos Light Paineira 500g")).toBe("__jerkedbeef__");
     expect(productVisual("Mousse de Chocolate Confiança")).toBe("__mousse__");
@@ -36,6 +37,7 @@ describe("product visual resolver", () => {
   it("forces safe icons only for high-risk families", () => {
     expect(forceProductVisual("Antisséptico Listerine Tipos 500ml")).toBe(true);
     expect(forceProductVisual("Cápsulas de Bebida Dolce Gusto")).toBe(true);
+    expect(forceProductVisual("Sabonete Dove Original 90g")).toBe(true);
     expect(forceProductVisual("Uva Verde sem Semente 500g")).toBe(true);
     expect(forceProductVisual("Café em Pó Pilão 500g")).toBe(false);
   });
