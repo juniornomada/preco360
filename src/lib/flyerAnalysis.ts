@@ -320,11 +320,11 @@ function normalizedHistorical(product: ProductForMatch, rawPrice: number | strin
 
 export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductForMatch | null,
   previousAdvertised: Array<{ normalized_price: number | string | null; base_unit?: string | null }> = []): OfferVerdict {
-  if (!product) return { key: "unknown", label: "Novo no radar", message: "Ainda não encontrei um produto equivalente no seu histórico.",
-    deltaPct: null, referencePrice: null, bestPurchase: null, bestAdvertised: null, purchaseCount: 0, advertisedCount: 0, confidence: "baixa" };
-
-  const purchases = (product.prices ?? []).map((entry) => normalizedHistorical(product, entry.price))
-    .filter((entry) => entry?.baseUnit === candidate.baseUnit).map((entry) => entry!.normalizedPrice);
+  const purchases = product
+    ? (product.prices ?? []).map((entry) => normalizedHistorical(product, entry.price))
+        .filter((entry) => entry?.baseUnit === candidate.baseUnit)
+        .map((entry) => entry!.normalizedPrice)
+    : [];
   const advertised = previousAdvertised.filter((entry) => entry.base_unit === candidate.baseUnit)
     .map((entry) => Number(entry.normalized_price)).filter((value) => Number.isFinite(value) && value > 0);
   // Build one market reference from both kinds of evidence:
@@ -332,10 +332,20 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
   // Current live offers must be excluded by the caller from previousAdvertised,
   // otherwise an offer would influence the reference used to judge itself.
   const reference = median([...purchases, ...advertised]);
-  if (!reference) return { key: "unknown", label: "Pouco histórico", message: "O item foi relacionado, mas ainda não há uma referência comparável por unidade.",
-    deltaPct: null, referencePrice: null, bestPurchase: purchases.length ? Math.min(...purchases) : null,
-    bestAdvertised: advertised.length ? Math.min(...advertised) : null, purchaseCount: purchases.length,
-    advertisedCount: advertised.length, confidence: "baixa" };
+  if (!reference) return {
+    key: "unknown",
+    label: product ? "Pouco histórico" : "Novo no radar",
+    message: product
+      ? "O item foi relacionado, mas ainda não há uma referência comparável por unidade."
+      : "Ainda não há preços anteriores comparáveis para este produto.",
+    deltaPct: null,
+    referencePrice: null,
+    bestPurchase: purchases.length ? Math.min(...purchases) : null,
+    bestAdvertised: advertised.length ? Math.min(...advertised) : null,
+    purchaseCount: purchases.length,
+    advertisedCount: advertised.length,
+    confidence: "baixa",
+  };
 
   const deltaPct = ((candidate.normalizedPrice - reference) / reference) * 100;
   const total = purchases.length + advertised.length;
