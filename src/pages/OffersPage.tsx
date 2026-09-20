@@ -135,11 +135,36 @@ function matchesSearch(value: string, query: string) {
   const source = searchTokens(value);
   return wanted.every((needle) =>
     source.some((token) =>
+      token === needle ||
       token.includes(needle) ||
-      needle.includes(token) ||
       (needle.length >= 4 && token.length >= 3 && needle.startsWith(token)),
     ),
   );
+}
+
+function searchRelevance(
+  entry: {
+    item: FlyerItemRow;
+    product: ProductForMatch | null;
+    searchText: string;
+  },
+  query: string,
+) {
+  const normalizedQuery = normalizeSearchText(query).trim();
+  if (!normalizedQuery) return 0;
+
+  const itemBrand = normalizeSearchText(entry.item.brand ?? "").trim();
+  const productBrand = normalizeSearchText(entry.product?.brand ?? "").trim();
+  const rawName = normalizeSearchText(entry.item.raw_name);
+  const productName = normalizeSearchText(entry.product?.name ?? "");
+
+  if (itemBrand === normalizedQuery || productBrand === normalizedQuery) return 100;
+  if (rawName.split(/\s+/).includes(normalizedQuery)) return 90;
+  if (productName.split(/\s+/).includes(normalizedQuery)) return 85;
+  if (rawName.includes(normalizedQuery)) return 80;
+  if (productName.includes(normalizedQuery)) return 75;
+  if (itemBrand.includes(normalizedQuery) || productBrand.includes(normalizedQuery)) return 70;
+  return 50;
 }
 
 const identityStop = new Set([
@@ -333,7 +358,7 @@ export default function OffersPage() {
           productId,
           candidate,
           verdict,
-          searchText: `${item.raw_name} ${product?.name ?? ""} ${product?.brand ?? ""}`,
+          searchText: `${item.raw_name} ${item.brand ?? ""} ${product?.name ?? ""} ${product?.brand ?? ""}`,
         };
       })
       .sort((a, b) => {
@@ -356,9 +381,23 @@ export default function OffersPage() {
     if (!preparedOffers.length) return [];
     if (!hasSearch) return search.trim() ? [] : preparedOffers.slice(0, 12);
 
-    return preparedOffers.filter((entry) =>
-      matchesSearch(entry.searchText, normalizedSearch),
-    );
+    return preparedOffers
+      .filter((entry) => matchesSearch(entry.searchText, normalizedSearch))
+      .sort((a, b) => {
+        const relevanceDiff =
+          searchRelevance(b, normalizedSearch) -
+          searchRelevance(a, normalizedSearch);
+        if (relevanceDiff) return relevanceDiff;
+
+        const verdictDiff =
+          verdictOrder[a.verdict.key] - verdictOrder[b.verdict.key];
+        if (verdictDiff) return verdictDiff;
+
+        if (a.candidate.baseUnit === b.candidate.baseUnit) {
+          return a.candidate.normalizedPrice - b.candidate.normalizedPrice;
+        }
+        return a.candidate.price - b.candidate.price;
+      });
   }, [preparedOffers, hasSearch, normalizedSearch, search]);
 
   const activeFlyerCount = useMemo(() => {
