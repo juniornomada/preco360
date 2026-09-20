@@ -165,18 +165,37 @@ function geminiText(payload: any) {
 }
 
 function parseJsonResponse(text: string) {
-  const unfenced = text.trim()
+  const cleaned = text.trim()
+    .replace(/^\uFEFF/, "")
     .replace(/^\`\`\`(?:json)?\s*/i, "")
     .replace(/\s*\`\`\`$/i, "")
     .trim();
-  try {
-    return JSON.parse(unfenced);
-  } catch {
-    const start = unfenced.indexOf("{");
-    const end = unfenced.lastIndexOf("}");
-    if (start >= 0 && end > start) return JSON.parse(unfenced.slice(start, end + 1));
-    throw new Error("Gemini returned invalid JSON.");
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  const candidate =
+    start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned;
+
+  const attempts = [
+    cleaned,
+    candidate,
+    candidate
+      .replace(/,\s*([}\]])/g, "$1")
+      .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3')
+      .replace(/[“”]/g, '"'),
+  ];
+
+  let lastError: unknown = null;
+  for (const attempt of attempts) {
+    try {
+      return JSON.parse(attempt);
+    } catch (error) {
+      lastError = error;
+    }
   }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("A IA retornou JSON inválido.");
 }
 
 function validOffers(parsed: any) {
@@ -413,7 +432,11 @@ async function runGemini(file: File, prompt: string, preferredModel?: string) {
       { text: prompt },
       { inlineData: { mimeType, data: base64 } },
     ] }],
-    generationConfig: { maxOutputTokens: 32768 },
+    generationConfig: {
+      responseMimeType: "application/json",
+      maxOutputTokens: 32768,
+      temperature: 0,
+    },
   };
 
   let lastError = "Nenhum modelo Gemini gratuito disponível.";
@@ -440,8 +463,18 @@ async function runGemini(file: File, prompt: string, preferredModel?: string) {
     const payload = await response.json().catch(async () => ({ message: await response.text() }));
     if (response.ok) {
       const text = geminiText(payload);
-      if (!text) throw new Error("Gemini não retornou conteúdo estruturado.");
-      return { parsed: parseJsonResponse(text), model };
+      if (!text) {
+        lastError = "Gemini não retornou conteúdo estruturado.";
+        continue;
+      }
+      try {
+        return { parsed: parseJsonResponse(text), model };
+      } catch (parseError) {
+        lastError =
+          "JSON inválido no modelo " + model + ": " +
+          (parseError instanceof Error ? parseError.message : String(parseError));
+        continue;
+      }
     }
     const message =
       payload?.error?.message || payload?.message || "Falha ao analisar o tabloide.";
