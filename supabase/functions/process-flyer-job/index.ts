@@ -290,10 +290,12 @@ function normalizeOfferIdentity(value: unknown) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/\bresf\.?\b/g, "resfriado")
+    .replace(/\bc\/?\b/g, "com")
     .replace(/(\d)\s*[,\.]\s*(\d)/g, "$1.$2")
     .replace(/\b\d+(?:\.\d+)?\s*(?:kg|g|ml|l|lt|un|und|unid|unidade)\b/g, " ")
     .replace(
-      /\b(?:de|da|do|das|dos|tipo|tipos|sabor|sabores|pacote|embalagem|unidade|unidades|un|und|kg|g|ml|l|lt|lata|sache|garrafa|bandeja|fardo|fresco|fresca|congelado|congelada)\b/g,
+      /\b(?:de|da|do|das|dos|e|ou|com|tipo|tipos|sabor|sabores|pacote|embalagem|unidade|unidades|un|und|kg|g|ml|l|lt|lata|sache|garrafa|bandeja|fardo|fresco|fresca|resfriado|resfriada|congelado|congelada)\b/g,
       " ",
     )
     .replace(/[^a-z0-9]+/g, " ")
@@ -389,36 +391,58 @@ function coverRepeatIdentity(a: any, b: any) {
   const pageA = Math.max(1, Math.trunc(Number(a?.source_page) || 1));
   const pageB = Math.max(1, Math.trunc(Number(b?.source_page) || 1));
 
-  // Relax fuzzy identity only for the common flyer pattern where the cover
-  // repeats a promotion that later appears in its category page.
+  // Covers commonly use a shortened title and can omit weight/details that
+  // appear later in the flyer. Only relax identity across cover -> inner page,
+  // while price matching is still enforced by mergeableDuplicate().
   if (!((pageA === 1 && pageB > 1) || (pageB === 1 && pageA > 1))) {
     return false;
   }
   if (!packageCompatible(a, b) || !brandCompatible(a, b)) return false;
 
-  const left = stripKnownBrandsFromIdentity(
-    normalizeOfferIdentity(a?.product_name),
-    a,
-    b,
-  );
-  const right = stripKnownBrandsFromIdentity(
-    normalizeOfferIdentity(b?.product_name),
-    a,
-    b,
-  );
+  const fullLeft = normalizeOfferIdentity(a?.product_name);
+  const fullRight = normalizeOfferIdentity(b?.product_name);
+  if (!fullLeft || !fullRight) return false;
+
+  const fullShorter =
+    fullLeft.length <= fullRight.length ? fullLeft : fullRight;
+  const fullLonger =
+    fullLeft.length <= fullRight.length ? fullRight : fullLeft;
+  if (
+    fullShorter.split(/\s+/).filter(Boolean).length >= 2 &&
+    fullLonger.includes(fullShorter)
+  ) {
+    return true;
+  }
+
+  const left = stripKnownBrandsFromIdentity(fullLeft, a, b);
+  const right = stripKnownBrandsFromIdentity(fullRight, a, b);
   if (!left || !right) return false;
   if (left === right) return true;
 
   const leftTokens = [...new Set(left.split(/\s+/).filter(Boolean))];
   const rightTokens = [...new Set(right.split(/\s+/).filter(Boolean))];
-  if (Math.min(leftTokens.length, rightTokens.length) < 2) return false;
+  if (!leftTokens.length || !rightTokens.length) return false;
 
   const rightSet = new Set(rightTokens);
   const common = leftTokens.filter((token) => rightSet.has(token)).length;
   const coverage = common / Math.min(leftTokens.length, rightTokens.length);
-  const sizeGap = Math.abs(leftTokens.length - rightTokens.length);
+  const sameHead = leftTokens[0] === rightTokens[0];
 
-  return coverage >= 0.9 && sizeGap <= 1;
+  const leftBrand = normalizeOfferIdentity(a?.brand);
+  const rightBrand = normalizeOfferIdentity(b?.brand);
+  const sameExplicitBrand =
+    !!leftBrand && !!rightBrand && brandCompatible(a, b);
+
+  if (Math.min(leftTokens.length, rightTokens.length) === 1) {
+    return sameHead && sameExplicitBrand;
+  }
+
+  if (sameHead && coverage >= 0.8) return true;
+
+  // A shared explicit brand + same product head is strong evidence for cover
+  // wording such as "Macarrão Cortes Basilar..." vs
+  // "Macarrão Sêmola Basilar Cortes...".
+  return sameHead && sameExplicitBrand && coverage >= 0.65;
 }
 
 function sameOfferIdentity(a: any, b: any) {
@@ -432,7 +456,7 @@ function sameOfferIdentity(a: any, b: any) {
 
   const shorter = left.length <= right.length ? left : right;
   const longer = left.length <= right.length ? right : left;
-  if (shorter.split(" ").filter(Boolean).length >= 3 && longer.includes(shorter)) return true;
+  if (shorter.split(" ").filter(Boolean).length >= 2 && longer.includes(shorter)) return true;
 
   if (identityDice(left, right) >= 0.86) return true;
 
