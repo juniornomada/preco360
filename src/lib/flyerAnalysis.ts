@@ -327,7 +327,11 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
     .filter((entry) => entry?.baseUnit === candidate.baseUnit).map((entry) => entry!.normalizedPrice);
   const advertised = previousAdvertised.filter((entry) => entry.base_unit === candidate.baseUnit)
     .map((entry) => Number(entry.normalized_price)).filter((value) => Number.isFinite(value) && value > 0);
-  const reference = median(purchases) ?? median(advertised);
+  // Build one market reference from both kinds of evidence:
+  // what the user actually paid and previous advertised prices.
+  // Current live offers must be excluded by the caller from previousAdvertised,
+  // otherwise an offer would influence the reference used to judge itself.
+  const reference = median([...purchases, ...advertised]);
   if (!reference) return { key: "unknown", label: "Pouco histórico", message: "O item foi relacionado, mas ainda não há uma referência comparável por unidade.",
     deltaPct: null, referencePrice: null, bestPurchase: purchases.length ? Math.min(...purchases) : null,
     bestAdvertised: advertised.length ? Math.min(...advertised) : null, purchaseCount: purchases.length,
