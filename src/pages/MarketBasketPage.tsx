@@ -111,6 +111,7 @@ export default function MarketBasketPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Record<string, number>>({});
+  const [selectionHydrated, setSelectionHydrated] = useState(false);
   const [showItems, setShowItems] = useState(true);
 
   useEffect(() => {
@@ -119,16 +120,19 @@ export default function MarketBasketPage() {
       if (saved) setSelected(JSON.parse(saved));
     } catch {
       // Optional convenience only.
+    } finally {
+      setSelectionHydrated(true);
     }
   }, []);
 
   useEffect(() => {
+    if (!selectionHydrated) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(selected));
     } catch {
       // Optional convenience only.
     }
-  }, [selected]);
+  }, [selected, selectionHydrated]);
 
   const today = todayLocal();
 
@@ -489,17 +493,41 @@ export default function MarketBasketPage() {
                 return (
                   <div
                     key={group.key}
-                    className={"rounded-xl border p-3 " + (qty ? "border-primary/40 bg-primary/5" : "bg-card")}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={qty > 0}
+                    aria-label={
+                      qty
+                        ? "Remover " + group.label + " da lista"
+                        : "Adicionar " + group.label + " à lista"
+                    }
+                    onClick={() => toggle(group.key)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        toggle(group.key);
+                      }
+                    }}
+                    className={
+                      "cursor-pointer select-none rounded-xl border p-3 transition active:scale-[0.995] " +
+                      (qty
+                        ? "border-primary/50 bg-primary/10 ring-1 ring-primary/20"
+                        : "bg-card hover:border-primary/25")
+                    }
                   >
                     <div className="flex items-start gap-3">
-                      <button
-                        type="button"
-                        aria-label={qty ? "Remover da lista" : "Adicionar à lista"}
-                        onClick={() => toggle(group.key)}
-                        className={"mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border " + (qty ? "border-primary bg-primary text-primary-foreground" : "bg-background")}
+                      <span
+                        aria-hidden="true"
+                        className={
+                          "mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition " +
+                          (qty
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "bg-background text-muted-foreground")
+                        }
                       >
-                        {qty ? <Check className="h-4 w-4" /> : null}
-                      </button>
+                        {qty ? <Check className="h-5 w-5" /> : null}
+                      </span>
+
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold leading-snug">{group.label}</p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
@@ -509,22 +537,36 @@ export default function MarketBasketPage() {
                               " · embalagem " + brl(Number(best.advertised_price))
                             : "melhor oferta " + brl(Number(best?.advertised_price ?? 0))}
                         </p>
+                        <p className="mt-1 text-[11px] font-medium text-primary">
+                          {qty ? "Selecionado" : "Toque no produto para adicionar"}
+                        </p>
                       </div>
 
                       {qty > 0 && (
-                        <div className="flex shrink-0 items-center gap-1 rounded-lg border bg-background p-1">
+                        <div
+                          className="flex shrink-0 items-center gap-1 rounded-lg border bg-background p-1"
+                          onClick={(event) => event.stopPropagation()}
+                        >
                           <button
                             type="button"
-                            className="h-7 w-7 rounded-md text-lg"
-                            onClick={() => changeQty(group.key, -1)}
+                            aria-label={"Diminuir quantidade de " + group.label}
+                            className="flex h-9 w-9 items-center justify-center rounded-md text-lg active:bg-muted"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              changeQty(group.key, -1);
+                            }}
                           >−</button>
                           <span className="min-w-8 text-center text-sm font-bold">
                             {qty}{group.baseUnit === "un" ? "" : " " + unitLabel(group.baseUnit)}
                           </span>
                           <button
                             type="button"
-                            className="h-7 w-7 rounded-md text-lg"
-                            onClick={() => changeQty(group.key, 1)}
+                            aria-label={"Aumentar quantidade de " + group.label}
+                            className="flex h-9 w-9 items-center justify-center rounded-md text-lg active:bg-muted"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              changeQty(group.key, 1);
+                            }}
                           >+</button>
                         </div>
                       )}
