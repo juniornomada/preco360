@@ -634,11 +634,13 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
       return Number(entry.normalized_price);
     })
     .filter((value) => Number.isFinite(value) && value > 0);
-  // Build one market reference from both kinds of evidence:
-  // what the user actually paid and previous advertised prices.
-  // Current live offers must be excluded by the caller from previousAdvertised,
-  // otherwise an offer would influence the reference used to judge itself.
-  const reference = median([...purchases, ...advertised]);
+  // A price the user actually paid is stronger evidence than an advertised
+  // price. Use paid history first; fall back to older flyer offers only when
+  // there is no comparable purchase history.
+  // Current live offers must be excluded by the caller from previousAdvertised.
+  const reference = purchases.length
+    ? median(purchases)
+    : median(advertised);
   if (!reference) return {
     key: "unknown",
     label: product ? "Pouco histórico" : "Novo no radar",
