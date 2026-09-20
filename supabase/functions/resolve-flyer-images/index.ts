@@ -25,7 +25,7 @@ type OfferRow = {
 };
 
 type Candidate = {
-  source: "open_food_facts" | "open_products_facts" | "open_beauty_facts" | "google";
+  source: "open_food_facts" | "open_products_facts" | "open_beauty_facts" | "mercado_livre" | "google";
   imageUrl: string;
   title: string;
   brandText: string;
@@ -193,7 +193,9 @@ function semanticFamily(value: unknown) {
     ["tomato", /tomate/],
     ["fruit", /uva|manga|banana|abacaxi|caju|melao|melancia|maca|pera|laranja|tangerina|maracuja|goiaba|mirtilo|mamao/],
     ["cleaning", /deterg|desengordurante|limpador|desinfetante|sabao|amaciante|tira manchas|agua sanitaria|cloro/],
-    ["personal_care", /shampoo|condicionador|sabonete|desodorante|protetor solar|hidratante|tintura/],
+    ["soap_liquid", /sabonete.*(?:liquido|intimo)|(?:liquido|intimo).*sabonete/],
+    ["soap_bar", /\bsabonete\b/],
+    ["personal_care", /shampoo|condicionador|desodorante|protetor solar|hidratante|tintura/],
   ];
 
   for (const [family, pattern] of rules) {
@@ -605,6 +607,118 @@ async function searchLegacyCatalog(
     .sort((a, b) => b.deterministicScore - a.deterministicScore);
 }
 
+async function searchMercadoLivre(item: OfferRow, query: string) {
+  const found = new Map<string, Candidate>();
+
+  for (const variant of searchQueryVariants(item, query).slice(0, 2)) {
+    const url = new URL("https://api.mercadolibre.com/sites/MLB/search");
+    url.searchParams.set("q", variant);
+    url.searchParams.set("limit", "12");
+
+    const response = await fetch(url, {
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "Preco360/1.0 (https://preco360.vercel.app)",
+      },
+      signal: AbortSignal.timeout(12000),
+    }).catch(() => null);
+    if (!response?.ok) continue;
+
+    const payload = await response.json().catch(() => null);
+    const results = Array.isArray(payload?.results) ? payload.results : [];
+
+    const scored = results
+      .map((hit: any) => {
+        const title = String(hit?.title ?? "");
+        if (!title || !semanticCompatible(item.raw_name, title)) return null;
+
+        const brandScore = brandSimilarity(item, title, title);
+        const nameScore = nameSimilarity(item, title, title);
+        const explicitPackage = parseQuantity(title);
+        const packageScore = explicitPackage ? packageSimilarity(item, title) : 0.5;
+
+        if (item.brand && brandScore < 0.99) return null;
+        if (
+          packageBase(item.package_quantity, item.package_unit) &&
+          explicitPackage &&
+          packageScore < 0.72
+        ) {
+          return null;
+        }
+        if (nameScore < 0.34) return null;
+
+        return {
+          id: String(hit?.id ?? ""),
+          title,
+          thumbnail: String(hit?.thumbnail ?? hit?.secure_thumbnail ?? ""),
+          score:
+            Math.min(1, brandScore) * 0.45 +
+            Math.min(1, packageScore) * 0.25 +
+            Math.min(1, nameScore) * 0.3,
+          brandScore,
+          nameScore,
+          packageScore,
+        };
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => b.score - a.score)
+      .slice(0, 4);
+
+    for (const hit of scored) {
+      let imageUrl = hit.thumbnail;
+      if (hit.id) {
+        const detail = await fetch(
+          "https://api.mercadolibre.com/items/" + encodeURIComponent(hit.id),
+          {
+            headers: {
+              "Accept": "application/json",
+              "User-Agent": "Preco360/1.0 (https://preco360.vercel.app)",
+            },
+            signal: AbortSignal.timeout(8000),
+          },
+        ).catch(() => null);
+
+        if (detail?.ok) {
+          const detailPayload = await detail.json().catch(() => null);
+          const picture = Array.isArray(detailPayload?.pictures)
+            ? detailPayload.pictures[0]
+            : null;
+          imageUrl = String(
+            picture?.secure_url ??
+              picture?.url ??
+              detailPayload?.secure_thumbnail ??
+              imageUrl,
+          );
+        }
+      }
+
+      if (!imageUrl) continue;
+      const candidate: Candidate = {
+        source: "mercado_livre",
+        imageUrl,
+        title: hit.title,
+        brandText: hit.title,
+        quantityText: hit.title,
+        code: hit.id,
+        deterministicScore: hit.score,
+        brandScore: hit.brandScore,
+        nameScore: hit.nameScore,
+        packageScore: hit.packageScore,
+      };
+      const previous = found.get(candidate.code || candidate.imageUrl);
+      if (!previous || candidate.deterministicScore > previous.deterministicScore) {
+        found.set(candidate.code || candidate.imageUrl, candidate);
+      }
+    }
+
+    if (found.size >= 4) break;
+  }
+
+  return [...found.values()].sort(
+    (a, b) => b.deterministicScore - a.deterministicScore,
+  );
+}
+
 async function searchGoogleImages(item: OfferRow, query: string) {
   const key = Deno.env.get("GOOGLE_CSE_API_KEY") || "";
   const cx = Deno.env.get("GOOGLE_CSE_CX") || "";
@@ -771,6 +885,20 @@ async function resolveExternal(item: OfferRow, query: string) {
   }
 
   let best = candidates[0] ?? null;
+
+  // Mercado Livre gives us a broad Brazilian catalog for non-food items such as
+  // soap, shampoo and household products. The same strict brand/package checks
+  // still apply before an image can be accepted.
+  if (offerLooksNonFood(item) && (!best || best.deterministicScore < 0.9)) {
+    const marketplace = await searchMercadoLivre(item, query);
+    if (
+      marketplace[0] &&
+      (!best || marketplace[0].deterministicScore > best.deterministicScore)
+    ) {
+      best = marketplace[0];
+    }
+  }
+
   if (!best || best.deterministicScore < 0.9) {
     const google = await searchGoogleImages(item, query);
     if (google[0] && (!best || google[0].deterministicScore > best.deterministicScore)) {
