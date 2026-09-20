@@ -211,7 +211,10 @@ function queryOfferFamily(query: string): SearchFamilyIntent | null {
     if (tokens.has("coco")) return "milkCoconut";
     if (hasAny(tokens, ["doce", "doces"])) return "milkSweet";
     if (tokens.has("po")) return "milkPowder";
-    return "milk";
+
+    // Plain "leite" means liquid milk. Derived dairy products have their
+    // own explicit intents (leite em pó, condensado, creme de leite, etc.).
+    return "milkLiquid";
   }
 
   if (hasTomato) {
