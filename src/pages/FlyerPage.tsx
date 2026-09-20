@@ -1898,6 +1898,70 @@ function ProductVisualIcon({
     <path d="M14 18c3-10 17-12 20 0Z" fill="#69402f" />
     <path d="M18 16c2-5 10-6 13 0Z" fill="#8a5a44" />
   </>);
+  if (visual === "__supplement__") return simple(<>
+    <ellipse cx="24" cy="10" rx="13" ry="5" fill="#252a31" />
+    <path d="M11 10h26l-2 31H13L11 10Z" fill="#3d4652" />
+    <rect x="15" y="19" width="18" height="12" rx="3" fill="#eef1f5" />
+    <path d="M18 25h12" stroke="#3d4652" strokeWidth="2.5" strokeLinecap="round" />
+  </>);
+  if (visual === "__sugarbag__") return simple(<>
+    <path d="M13 8h22l3 33H10L13 8Z" fill="#f7f4e8" />
+    <path d="M15 12h18" stroke="#d9caa1" strokeWidth="2" />
+    <rect x="15" y="19" width="18" height="13" rx="3" fill="#fff" />
+    <circle cx="24" cy="25.5" r="4" fill="#d8e9f5" />
+  </>);
+  if (visual === "__milkpowder__") return simple(<>
+    <rect x="11" y="8" width="26" height="33" rx="5" fill="#f2f4f7" />
+    <rect x="14" y="14" width="20" height="16" rx="3" fill="#d7e8ff" />
+    <path d="M19 25c4-7 8-7 12 0" stroke="#ffffff" strokeWidth="3" fill="none" strokeLinecap="round" />
+  </>);
+  if (visual === "__plantmilk__") return simple(<>
+    <path d="M13 8h19l4 6v28H13V8Z" fill="#edf3e6" />
+    <path d="M32 8v7h4" fill="#d1e5c3" />
+    <path d="M19 27c5-9 10-10 14-5-3 7-8 10-14 5Z" fill="#6fa95e" />
+  </>);
+  if (visual === "__wrap__") return simple(<>
+    <rect x="8" y="13" width="32" height="22" rx="4" fill="#cbd2d9" />
+    <ellipse cx="12" cy="24" rx="4" ry="9" fill="#eef1f4" />
+    <path d="M16 17h20M16 22h20M16 27h20M16 32h20" stroke="#aeb7c1" strokeWidth="1.5" />
+  </>);
+  if (visual === "__sparkling__") return simple(<>
+    <path d="M18 6h12v7l3 5v24H15V18l3-5V6Z" fill="#7fc8e8" />
+    <circle cx="21" cy="25" r="2" fill="#fff" /><circle cx="27" cy="20" r="1.6" fill="#fff" /><circle cx="29" cy="30" r="2.2" fill="#fff" />
+  </>);
+  if (visual === "__tapioca__") return simple(<>
+    <path d="M8 22h32c-1 12-7 19-16 19S9 34 8 22Z" fill="#f1e4c8" />
+    <ellipse cx="24" cy="22" rx="16" ry="6" fill="#fafafa" />
+    <circle cx="19" cy="21" r="2" fill="#e7e7e7" /><circle cx="26" cy="23" r="2" fill="#e7e7e7" /><circle cx="31" cy="20" r="1.5" fill="#e7e7e7" />
+  </>);
+  if (visual === "__baking__") return simple(<>
+    <rect x="12" y="9" width="24" height="32" rx="4" fill="#f5efe6" />
+    <rect x="16" y="17" width="16" height="13" rx="3" fill="#fff" />
+    <path d="M20 28c1-6 7-6 8 0" stroke="#d8a85b" strokeWidth="2.5" fill="none" />
+  </>);
+  if (visual === "__mustard__") return simple(<>
+    <path d="M18 6h12v7l4 8-3 21H17l-3-21 4-8V6Z" fill="#e4b927" />
+    <rect x="17" y="23" width="14" height="8" rx="2" fill="#fff7cf" />
+  </>);
+  if (visual === "__onionrings__") return simple(<>
+    <ellipse cx="17" cy="23" rx="9" ry="7" fill="none" stroke="#d8a348" strokeWidth="5" />
+    <ellipse cx="31" cy="27" rx="9" ry="7" fill="none" stroke="#e3b45d" strokeWidth="5" />
+  </>);
+  if (visual === "__potatosnack__") return simple(<>
+    <path d="M11 8h26l-3 34H14L11 8Z" fill="#d6b246" />
+    <path d="M16 18h16v14H16Z" fill="#f6e0a0" />
+    <path d="M19 28c3-7 7-9 11-6-2 6-6 9-11 6Z" fill="#c79631" />
+  </>);
+  if (visual === "__sanitary__") return simple(<>
+    <rect x="8" y="19" width="32" height="11" rx="5.5" fill="#f8f8fb" />
+    <rect x="14" y="15" width="20" height="19" rx="9" fill="#e7edf6" />
+    <rect x="18" y="18" width="12" height="13" rx="6" fill="#ffffff" />
+  </>);
+  if (visual === "__datefruit__") return simple(<>
+    <ellipse cx="19" cy="27" rx="7" ry="12" transform="rotate(-18 19 27)" fill="#8a552e" />
+    <ellipse cx="31" cy="24" rx="7" ry="12" transform="rotate(18 31 24)" fill="#9a6438" />
+    <path d="M24 10c4-5 9-6 13-3-3 5-8 7-13 6Z" fill="#5f9f55" />
+  </>);
 
   return visual ? <span className="text-3xl">{visual}</span> : <Tags className="h-7 w-7 text-primary/70" />;
 }
