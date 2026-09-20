@@ -171,7 +171,7 @@ function semanticFamily(value: unknown) {
     ["dessert", /mousse|pudim|sobremesa|sorvete|torta|panettone|waffle/],
     ["ketchup", /ketchup/],
     ["mustard", /mostarda/],
-    ["tomato_sauce", /molho de tomate|extrato de tomate/],
+    ["tomato_sauce", /molho (?:de )?tomate|extrato (?:de )?tomate/],
     ["mayonnaise", /maionese/],
     ["peas", /ervilha/],
     ["bacon", /bacon/],
