@@ -963,21 +963,36 @@ export default function MarketBasketPage() {
             <Sparkles className="h-4 w-4 text-primary" />
             <h2 className="font-bold">Comparação por supermercado</h2>
           </div>
-          {rankedMarkets.map((market) => (
-              <Card key={market.retailer}>
+          {rankedMarkets.map((market) => {
+            const isBestMarket = market.retailer === bestSingle?.retailer;
+
+            return (
+              <Card
+                key={market.retailer}
+                className={isBestMarket ? "border-primary/40 bg-primary/[0.03]" : ""}
+              >
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-bold">{market.retailer}</p>
-                      <p className="text-xs text-muted-foreground">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-lg font-extrabold leading-tight text-primary">
+                          {market.retailer}
+                        </p>
+                        {isBestMarket && (
+                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary">
+                            Melhor opção
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
                         {market.covered}/{selectedGroups.length} itens encontrados
                       </p>
                     </div>
-                    <div className="text-right">
-                      <p className="font-extrabold">
+                    <div className="shrink-0 text-right">
+                      <p className="inline-block rounded-lg bg-primary/10 px-2.5 py-1 text-lg font-extrabold leading-none text-primary">
                         {brl(market.total)}
                       </p>
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="mt-1 text-[11px] text-muted-foreground">
                         {market.complete
                           ? selectedGroups.some((group) => group.baseUnit !== "un")
                             ? "cesta equivalente por kg/L"
@@ -1034,7 +1049,8 @@ export default function MarketBasketPage() {
                   )}
                 </CardContent>
               </Card>
-            ))}
+            );
+          })}
         </div>
       )}
 
