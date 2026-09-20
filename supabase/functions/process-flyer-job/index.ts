@@ -30,6 +30,8 @@ REGRAS OBRIGATÓRIAS
 3. Variações do MESMO produto (sabores, cores, tipos) permanecem em um registro. Preencha included_types quando os tipos estiverem legíveis.
 4. Se houver "tipos, exceto X/Y", mantenha o produto em um registro e coloque X/Y em excluded_types. Não misture a exceção no nome do produto.
 5. Preço Clube/Vantagens deve ficar em club_price. O preço normal fica em price. Não substitua o preço normal pelo Clube.
+5A. NUNCA coloque em club_price valores meramente equivalentes de quantidade, como "nesta embalagem 350g saem por R$ 7,67", "1 unidade sai por R$ 1,25", "cada 100g sai por..." ou divisão de pack/fardo. Esses valores vão apenas em notes; club_price deve ser null se não houver selo/texto explícito de Clube/Vantagens/CPF/app associado ao preço.
+5B. Mecânicas de quantidade como "a partir de 2 unidades", "20% na segunda unidade", "leve X pague Y" também NÃO são club_price, salvo se o encarte identificar explicitamente aquele valor como Clube/Vantagens.
 6. Preserve a base original do anúncio em price_basis_quantity e price_basis_unit. Exemplos:
    - R$ 1,85/kg => 1 + kg
    - R$ 2,75 a cada 100g => 100 + g
@@ -228,14 +230,57 @@ function alignDateYearToSource(value: unknown, sourceFileName: string) {
   return date;
 }
 
+function sanitizeOfferPricing(offer: any) {
+  const price = Number(offer?.price);
+  const club = Number(offer?.club_price);
+  const notes = Array.isArray(offer?.notes)
+    ? offer.notes.map((value: unknown) => String(value ?? ""))
+    : [];
+
+  let keepClub = Number.isFinite(club) && club > 0;
+
+  if (keepClub && Number.isFinite(price) && price > 0 && club > price) {
+    keepClub = false;
+  }
+
+  if (keepClub) {
+    const equivalentNotes = notes.filter((note: string) =>
+      /nesta embalagem|unidade sai|un saem por|cada\s+\d+(?:[.,]\d+)?\s*(?:g|kg|ml|l|un)/i.test(note)
+    );
+
+    for (const note of equivalentNotes) {
+      const values = [...note.matchAll(/R\$\s*(\d+(?:[.,]\d{1,2})?)/gi)]
+        .map((match) => Number(match[1].replace(",", ".")))
+        .filter((value) => Number.isFinite(value));
+      if (values.some((value) => Math.abs(value - club) < 0.011)) {
+        keepClub = false;
+        break;
+      }
+    }
+  }
+
+  if (keepClub && notes.some((note: string) => /com\s+2\s+(?:latas|unidades|un\b)/i.test(note))) {
+    if (Number.isFinite(price) && price > 0 && Math.abs(club - price / 2) < 0.02) {
+      keepClub = false;
+    }
+  }
+
+  return {
+    ...offer,
+    club_price: keepClub ? club : null,
+  };
+}
+
 function validOffers(parsed: any) {
   return Array.isArray(parsed?.offers)
-    ? parsed.offers.filter((offer: any) =>
-        Number(offer?.confidence ?? 0) >= 0.72 &&
-        Number.isFinite(Number(offer?.price)) &&
-        Number(offer.price) > 0 &&
-        typeof offer?.product_name === "string" &&
-        offer.product_name.trim())
+    ? parsed.offers
+        .map((offer: any) => sanitizeOfferPricing(offer))
+        .filter((offer: any) =>
+          Number(offer?.confidence ?? 0) >= 0.72 &&
+          Number.isFinite(Number(offer?.price)) &&
+          Number(offer.price) > 0 &&
+          typeof offer?.product_name === "string" &&
+          offer.product_name.trim())
     : [];
 }
 
