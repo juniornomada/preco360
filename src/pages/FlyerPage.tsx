@@ -48,6 +48,10 @@ import {
   visionResponseToFlyerResult,
   type VisionResponse,
 } from "@/lib/flyerOcr";
+import {
+  forceProductVisual,
+  productVisual,
+} from "@/lib/productVisualResolver";
 
 const db = supabase as any;
 type MatchType = "exact" | "equivalent" | "suggested" | "manual" | "unmatched";
@@ -165,136 +169,6 @@ const displayProductName = (value: string) =>
       /Arroz Riviera ou Patéko Riviera\s*\/\s*Patéko\s*5kg/gi,
       "Arroz Riviera ou Patéko 5kg",
     );
-
-const productEmoji = (name: string, category?: string | null) => {
-  const text = normalizeProduceOcr(
-    normalizeSearchText(`${category ?? ""} ${name}`),
-  );
-
-  // Regras específicas: o tipo principal sempre vence sabor ou palavras genéricas.
-  if (/barra de proteina|protein bar|suplemento.*proteina|suplemento.*whey/.test(text)) return "__proteinbar__";
-  if (/capsulas?.*dolce gusto|bebida.*dolce gusto|dolce gusto/.test(text)) return "__dolcegusto__";
-  if (/toddynho/.test(text)) return "__toddynho__";
-  if (/listerine|antisseptico bucal/.test(text)) return "__mouthwash__";
-  if (/iogurte|probio2/.test(text)) return "__yogurt__";
-
-  if (/file de merluza|merluza/.test(text)) return "__fishfillet__";
-  if (/peixe|tilapia|pescado|salmao|sardinha|mapara|pangasius/.test(text)) return "🐟";
-
-  if (/papel toalha/.test(text)) return "__papertowel__";
-  if (/papel higienico/.test(text)) return "🧻";
-
-  if (/refrigerante|sukita|guarana|fanta|sprite/.test(text)) return "__soda__";
-  if (/bebida lactea/.test(text)) return "🥛";
-  if (/vinho|frisante|chopp de vinho/.test(text)) return "🍷";
-  if (/aperitivo campari/.test(text)) return "🍹";
-  if (/cerveja/.test(text)) return "🍺";
-  if (/agua de coco/.test(text)) return "🥥";
-  if (/agua mineral/.test(text)) return "💧";
-  if (/suco|refresco|bebida/.test(text)) return "🧃";
-  if (/achocolatado/.test(text)) return "🍫";
-  if (/cafe|cappuccino|capsula/.test(text)) return "☕";
-
-  if (/biscoito|cookie|bolacha|wafer|rosquinha|polvilho/.test(text)) return "🍪";
-  if (/bala|gelatina|doce|chocolate/.test(text)) return "🍫";
-  if (/amendoim/.test(text)) return "🥜";
-  if (/arroz/.test(text)) return "🍚";
-  if (/feijao/.test(text)) return "🫘";
-  if (/farinha de trigo/.test(text)) return "__flourbag__";
-  if (/farinha de milho|flocao/.test(text)) return "🌽";
-  if (/azeite|oleo/.test(text)) return "🫒";
-  if (/macarrao|nhoque|massa/.test(text)) return "🍝";
-  if (/pipoca/.test(text)) return "🍿";
-  if (/farofa/.test(text)) return "🥣";
-  if (/bolo|churros/.test(text)) return "🍰";
-  if (/pao/.test(text)) return "🍞";
-  if (/pizza/.test(text)) return "🍕";
-  if (/temaki|sushi/.test(text)) return "🍣";
-  if (/sanduiche/.test(text)) return "🥪";
-  if (/kibe/.test(text)) return "🧆";
-  if (/strogonoff/.test(text)) return "🍲";
-  if (/mousse de chocolate/.test(text)) return "__mousse__";
-  if (/pudim/.test(text)) return "🍮";
-  if (/sorvete|sobremesa/.test(text)) return "🍨";
-
-  if (/ketchup/.test(text)) return "__ketchup__";
-  if (/molho barbecue|barbecue/.test(text)) return "__bbq__";
-  if (/molho de tomate|extrato de tomate/.test(text)) return "__tomatosauce__";
-  if (/maionese/.test(text)) return "__mayo__";
-  if (/molho de soja|shoyu/.test(text)) return "🥫";
-
-  if (/batata doce rosada/.test(text)) return "__sweetpotato__";
-  if (/batata.*airfryer|batata.*congel|batata mister|batata uni/.test(text)) return "🍟";
-  if (/ervilhas? finas|ervilhas? congel/.test(text)) return "__peas__";
-  if (/jardineira de legumes/.test(text)) return "__vegetablemix__";
-
-  if (/bacon.*fatias|bacon em fatias/.test(text)) return "__baconslices__";
-  if (/bacon.*pedaco|bacon.*fracionado|bacon.*peca/.test(text)) return "__baconchunk__";
-  if (/jerked beef|carne seca|charque/.test(text)) return "__jerkedbeef__";
-  if (/linguica calabresa|calabresa defumada/.test(text)) return "__calabresa__";
-  if (/salsicha|hot dog/.test(text)) return "🌭";
-  if (/costela suina|costela de porco/.test(text)) return "__porkribs__";
-  if (/hamburguer/.test(text)) return "🍔";
-  if (/frango|sobrecoxa|filezinho|steak de frango/.test(text)) return "🍗";
-  if (/bovino|bovina|carne|lagarto|suino|pernil|lombo|paleta|ponta de peito/.test(text)) return "🥩";
-
-  if (/manteiga|margarina/.test(text)) return "🧈";
-  if (/queijo|cream cheese|requeijao|ricota|quark/.test(text)) return "🧀";
-  if (/leite|batavinho/.test(text)) return "🥛";
-  if (/ovo/.test(text)) return "🥚";
-  if (/mel\b/.test(text)) return "🍯";
-  if (/granola|cereal/.test(text)) return "🥣";
-
-  if (/champignon|cogumelo|shimeji/.test(text)) return "🍄";
-  if (/pickles|pepino/.test(text)) return "🥒";
-  if (/alho/.test(text)) return "🧄";
-  if (/brocolis/.test(text)) return "🥦";
-
-  if (/berinjela/.test(text)) return "🍆";
-  if (/tomate/.test(text)) return "🍅";
-  if (/milho/.test(text)) return "🌽";
-  if (/pimenta/.test(text)) return "🌶️";
-  if (/alface|repolho|couve|acelga/.test(text)) return "🥬";
-  if (/cenoura/.test(text)) return "🥕";
-  if (/beterraba/.test(text)) return "__beet__";
-  if (/abobora|moranga/.test(text)) return "🎃";
-  if (/mandioquinha|mandioca/.test(text)) return "🍠";
-  if (/uva verde/.test(text)) return "__greengrapes__";
-  if (/uva/.test(text)) return "🍇";
-  if (/caju/.test(text)) return "__cashew__";
-  if (/melao/.test(text)) return "__melon__";
-  if (/abacaxi/.test(text)) return "🍍";
-  if (/melancia/.test(text)) return "🍉";
-  if (/manga/.test(text)) return "🥭";
-  if (/banana/.test(text)) return "🍌";
-  if (/kiwi/.test(text)) return "🥝";
-  if (/maca/.test(text)) return "🍎";
-  if (/laranja|tangerina|mexerica|limao/.test(text)) return "🍊";
-  if (/mamao/.test(text)) return "__papaya__";
-  if (/maracuja|goiaba|fruta/.test(text)) return "🍈";
-  if (/hortifruti|legume|verdura/.test(text)) return "🥬";
-
-  if (/alimento.*cao|alimento.*gato|racao|whiskas|pedigree|qualidy/.test(text)) return "🐾";
-  if (/fralda/.test(text)) return "👶";
-  if (/prestobarba|barbeador|aparelho de barbear/.test(text)) return "🪒";
-  if (/creme dental/.test(text)) return "🪥";
-  if (/shampoo|condicionador|sabonete|desodorante|higiene/.test(text)) return "🧴";
-  if (/agua sanitaria|tira manchas|lava roupa|lava louca|detergente|sabao|amaciante|desinfetante|limpeza|essencia concentrada/.test(text)) return "🧼";
-  if (/rodo/.test(text)) return "🧹";
-  if (/ducha|chuveiro/.test(text)) return "🚿";
-  if (/talher/.test(text)) return "🍴";
-  if (/panela/.test(text)) return "🍳";
-  if (/sandalia|havaianas/.test(text)) return "🩴";
-  if (/cola|super bonder/.test(text)) return "🛠️";
-  if (/orquidea|astromelia|maco de|flor/.test(text)) return "🌸";
-  if (/vaso/.test(text)) return "🪴";
-  return null;
-};
-
-const forceVisualRule = (name: string, category?: string | null) => {
-  const text = normalizeSearchText(`${category ?? ""} ${name}`);
-  return /barra de proteina|protein bar|dolce gusto|toddynho|listerine|antisseptico bucal|probio2|file de merluza|merluza|papel toalha|refrigerante|sukita|farinha de trigo|ketchup|molho barbecue|barbecue|molho de tomate|extrato de tomate|batata doce rosada|ervilhas? finas|jardineira de legumes|bacon|jerked beef|carne seca|charque|linguica calabresa|calabresa defumada|costela suina|uva verde|\bcaju\b|\bmelao\b|mousse de chocolate/.test(text);
-};
 
 const safeName = (value: string) =>
   value
@@ -2037,8 +1911,8 @@ function ProductThumb({
   category?: string | null;
   imageUrl?: string | null;
 }) {
-  const visual = productEmoji(name, category);
-  const useRuleIcon = forceVisualRule(name, category);
+  const visual = productVisual(name, category);
+  const useRuleIcon = forceProductVisual(name, category);
   const safeImageUrl = useRuleIcon ? null : imageUrl;
 
   return (
