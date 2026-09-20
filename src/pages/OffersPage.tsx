@@ -139,30 +139,40 @@ type OfferFamily =
   | "capsule"
   | "refrigerante"
   | "juice"
+  | "milkLiquid"
+  | "milkPowder"
+  | "milkCream"
+  | "milkCondensed"
+  | "milkFermented"
+  | "milkCoconut"
+  | "milkSweet"
+  | "cake"
   | "other";
 
-const familyQueryTokens = new Set([
-  "po",
-  "achocolatado",
-  "achocolatada",
-  "achocolatados",
-  "achocolatadas",
-  "bebida",
-  "bebidas",
-  "lactea",
-  "lacteas",
-  "cereal",
-  "cereais",
-  "capsula",
-  "capsulas",
-  "refrigerante",
-  "refrigerantes",
-  "suco",
-  "sucos",
-]);
+type SearchFamilyIntent = OfferFamily | "milk";
 
-function queryOfferFamily(query: string): OfferFamily | null {
+function queryOfferFamily(query: string): SearchFamilyIntent | null {
   const tokens = new Set(searchTokens(query));
+  const hasMilk = tokens.has("leite") || tokens.has("leites");
+
+  if (hasMilk) {
+    if (tokens.has("creme") || tokens.has("cremes")) return "milkCream";
+    if (tokens.has("condensado") || tokens.has("condensados")) {
+      return "milkCondensed";
+    }
+    if (tokens.has("fermentado") || tokens.has("fermentados")) {
+      return "milkFermented";
+    }
+    if (tokens.has("coco")) return "milkCoconut";
+    if (tokens.has("doce") || tokens.has("doces")) return "milkSweet";
+    if (tokens.has("bolo") || tokens.has("bolos")) return "cake";
+    if (tokens.has("po")) return "milkPowder";
+
+    // "leite" by itself means actual milk, not every product whose name
+    // happens to contain the word leite. It intentionally covers both
+    // liquid milk and powdered milk.
+    return "milk";
+  }
 
   if (tokens.has("bebida") || tokens.has("bebidas")) return "drink";
   if (
@@ -194,6 +204,46 @@ function inferOfferFamily(
   const tokens = new Set(searchTokens(text));
   const packageUnit = normalizeSearchText(item.package_unit ?? "");
   const baseUnit = item.base_unit ?? null;
+  const hasMilk = tokens.has("leite") || tokens.has("leites");
+
+  // Specific milk-derived products must be classified before generic milk.
+  if (tokens.has("bolo") || tokens.has("bolos")) return "cake";
+  if (
+    hasMilk &&
+    (tokens.has("creme") || tokens.has("cremes") || tokens.has("culinario"))
+  ) {
+    return "milkCream";
+  }
+  if (
+    hasMilk &&
+    (tokens.has("condensado") || tokens.has("condensados"))
+  ) {
+    return "milkCondensed";
+  }
+  if (
+    hasMilk &&
+    (tokens.has("fermentado") || tokens.has("fermentados"))
+  ) {
+    return "milkFermented";
+  }
+  if (hasMilk && tokens.has("coco")) return "milkCoconut";
+  if (hasMilk && (tokens.has("doce") || tokens.has("doces"))) {
+    return "milkSweet";
+  }
+
+  if (hasMilk && tokens.has("po")) return "milkPowder";
+
+  // Plain milk sold by volume is liquid milk. This covers longa vida/UHT,
+  // integral, desnatado, semidesnatado and zero lactose.
+  if (hasMilk && (baseUnit === "l" || packageUnit === "ml" || packageUnit === "l")) {
+    return "milkLiquid";
+  }
+
+  // Some milk-powder OCR names may omit "em pó". Weight-based plain milk is
+  // treated as powdered milk unless another specific milk family matched above.
+  if (hasMilk && (baseUnit === "kg" || packageUnit === "g" || packageUnit === "kg")) {
+    return "milkPowder";
+  }
 
   if (tokens.has("bebida") || tokens.has("bebidas")) return "drink";
   if (tokens.has("cereal") || tokens.has("cereais")) return "cereal";
@@ -230,7 +280,53 @@ function familyLabel(family: OfferFamily) {
   if (family === "capsule") return "Cápsulas";
   if (family === "refrigerante") return "Refrigerante";
   if (family === "juice") return "Suco";
+  if (family === "milkLiquid") return "Leite";
+  if (family === "milkPowder") return "Leite em pó";
+  if (family === "milkCream") return "Creme de leite";
+  if (family === "milkCondensed") return "Leite condensado";
+  if (family === "milkFermented") return "Leite fermentado";
+  if (family === "milkCoconut") return "Leite de coco";
+  if (family === "milkSweet") return "Doce de leite";
+  if (family === "cake") return "Bolo";
   return "Produto";
+}
+
+function familySemanticTokens(intent: SearchFamilyIntent | null) {
+  if (!intent) return new Set<string>();
+
+  const common = new Set<string>();
+  const add = (...tokens: string[]) => tokens.forEach((token) => common.add(token));
+
+  if (intent === "milk") add("leite", "leites");
+  if (intent === "milkLiquid") add("leite", "leites");
+  if (intent === "milkPowder") add("leite", "leites", "po");
+  if (intent === "milkCream") add("creme", "cremes", "leite", "leites");
+  if (intent === "milkCondensed") {
+    add("leite", "leites", "condensado", "condensados");
+  }
+  if (intent === "milkFermented") {
+    add("leite", "leites", "fermentado", "fermentados");
+  }
+  if (intent === "milkCoconut") add("leite", "leites", "coco");
+  if (intent === "milkSweet") add("doce", "doces", "leite", "leites");
+  if (intent === "cake") add("bolo", "bolos", "leite", "leites");
+
+  if (intent === "powder") {
+    add(
+      "po",
+      "achocolatado",
+      "achocolatada",
+      "achocolatados",
+      "achocolatadas",
+    );
+  }
+  if (intent === "drink") add("bebida", "bebidas", "lactea", "lacteas");
+  if (intent === "cereal") add("cereal", "cereais");
+  if (intent === "capsule") add("capsula", "capsulas");
+  if (intent === "refrigerante") add("refrigerante", "refrigerantes");
+  if (intent === "juice") add("suco", "sucos");
+
+  return common;
 }
 
 function matchesSearch(
@@ -239,12 +335,20 @@ function matchesSearch(
   family: OfferFamily,
 ) {
   const queryFamily = queryOfferFamily(query);
-  if (queryFamily && family !== queryFamily) return false;
 
-  // Product-family terms are semantic filters, not mandatory literal words.
-  // This lets "nescau pó" match "Achocolatado Nescau 350g".
+  if (queryFamily === "milk") {
+    if (family !== "milkLiquid" && family !== "milkPowder") return false;
+  } else if (queryFamily && family !== queryFamily) {
+    return false;
+  }
+
+  // Product-family terms are semantic filters rather than mandatory literal
+  // words. Brand/model tokens remain mandatory. This lets "leite ninho"
+  // match Ninho milk but not "Bolo de Leite Ninho", and lets "nescau pó"
+  // match an OCR name that omitted the word "pó".
+  const semanticTokens = familySemanticTokens(queryFamily);
   const wanted = searchTokens(query).filter(
-    (token) => !familyQueryTokens.has(token),
+    (token) => !semanticTokens.has(token),
   );
   if (!wanted.length) return true;
 
@@ -626,6 +730,8 @@ export default function OffersPage() {
     () => queryOfferFamily(normalizedSearch),
     [normalizedSearch],
   );
+  const isBroadFamilySearch =
+    explicitSearchFamily === null || explicitSearchFamily === "milk";
 
   const bestOfferByFamily = useMemo(() => {
     const best = new Map<OfferFamily, string>();
@@ -779,9 +885,9 @@ export default function OffersPage() {
             </div>
             {hasSearch && analyzed[0] && (
               <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">
-                {explicitSearchFamily
-                  ? "Melhor oportunidade primeiro"
-                  : "Melhor por tipo de produto"}
+                {isBroadFamilySearch
+                  ? "Melhor por tipo de produto"
+                  : "Melhor oportunidade primeiro"}
               </span>
             )}
           </div>
@@ -802,12 +908,12 @@ export default function OffersPage() {
             );
             const isFamilyBest =
               bestOfferByFamily.get(entry.family) === item.id;
-            const isTopResult = explicitSearchFamily
-              ? hasSearch && index === 0
-              : hasSearch && isFamilyBest;
-            const bestLabel = explicitSearchFamily
-              ? "Melhor oportunidade encontrada"
-              : `Melhor oportunidade · ${familyLabel(entry.family)}`;
+            const isTopResult = isBroadFamilySearch
+              ? hasSearch && isFamilyBest
+              : hasSearch && index === 0;
+            const bestLabel = isBroadFamilySearch
+              ? `Melhor oportunidade · ${familyLabel(entry.family)}`
+              : "Melhor oportunidade encontrada";
 
             return (
               <Card
