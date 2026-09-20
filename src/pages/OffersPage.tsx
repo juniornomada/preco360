@@ -1119,7 +1119,7 @@ export default function OffersPage() {
                     </p>
                   )}
 
-                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 sm:gap-x-3">
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-1.5 sm:gap-x-3">
                     <ProductVisual
                       name={item.raw_name}
                       category={entry.product?.category}
@@ -1127,7 +1127,7 @@ export default function OffersPage() {
                     />
 
                     <div className="min-w-0">
-                      <h2 className="font-bold leading-snug">{item.raw_name}</h2>
+                      <h2 className="text-[15px] font-bold leading-[1.22] sm:text-base sm:leading-snug">{item.raw_name}</h2>
 
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-bold">
