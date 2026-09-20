@@ -686,6 +686,29 @@ async function updateJob(jobId: string, values: Record<string, unknown>) {
   if (error) throw error;
 }
 
+async function knownRetailerNames(userId: string) {
+  const { data, error } = await serviceClient()
+    .from("flyers")
+    .select("retailer,created_at")
+    .eq("user_id", userId)
+    .not("retailer", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(40);
+
+  if (error) {
+    console.warn("Não foi possível carregar redes conhecidas:", error.message);
+    return [] as string[];
+  }
+
+  return Array.from(
+    new Set(
+      (data ?? [])
+        .map((row: any) => String(row.retailer ?? "").trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 20);
+}
+
 async function downloadJobFile(job: JobRow, pageNo?: number) {
   const orderedSources = Array.isArray(job.source_files)
     ? job.source_files.filter((source) => source?.path && source?.name)
@@ -756,6 +779,7 @@ async function extractPhysicalPage(
   job: JobRow,
   total: number,
   pageNo: number,
+  knownRetailers: string[] = [],
 ) {
   const file = await downloadJobFile(job, pageNo);
   const multiImagePages =
@@ -773,6 +797,11 @@ async function extractPhysicalPage(
     "\nNÃO localize imagens nesta etapa: use image_box zerado e image_box_confidence=0. As miniaturas serão resolvidas depois pelo nome do produto." +
     "\nDefina source_page=" + pageNo + " em todos os registros retornados." +
     "\nNão omita ofertas só porque o mesmo produto pode aparecer em outra página." +
+    (knownRetailers.length
+      ? "\nREDES JÁ CONHECIDAS NO HISTÓRICO DESTE USUÁRIO: " +
+        knownRetailers.join(", ") +
+        ". Use estes nomes apenas como referência quando a identidade visual/logotipo da página for compatível. Não force uma rede conhecida se o tabloide for de uma rede nova."
+      : "") +
     "\nRetorne o mesmo formato JSON do schema principal.";
 
   const { parsed, model } = await runGemini(
@@ -848,9 +877,11 @@ async function processPage(jobId: string, requestedPage: number) {
       warning_message: null,
     });
 
+    const knownRetailers = await knownRetailerNames(job.user_id);
+
     const settled = await Promise.allSettled(
       pagesToProcess.map((pageNo) =>
-        extractPhysicalPage(job, total, pageNo),
+        extractPhysicalPage(job, total, pageNo, knownRetailers),
       ),
     );
 
