@@ -493,6 +493,17 @@ export default function MarketBasketPage() {
       ? Math.max(0, bestSingle.total - split.total)
       : null;
 
+  const rankedMarkets = useMemo(
+    () =>
+      [...comparison.markets].sort(
+        (a, b) =>
+          Number(b.complete) - Number(a.complete) ||
+          b.covered - a.covered ||
+          a.total - b.total,
+      ),
+    [comparison.markets],
+  );
+
   const toggle = (key: string) =>
     setSelected((current) => {
       const next = { ...current };
@@ -606,6 +617,74 @@ export default function MarketBasketPage() {
                             <span className="text-muted-foreground">{row.offer.raw_name}</span>
                           </div>
                         ))}
+                    </div>
+                  )}
+
+                  {rankedMarkets.length > 1 && (
+                    <div className="mt-3 rounded-lg border border-primary/15 bg-background/70 p-2.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                          Comparação rápida
+                        </p>
+                        <span className="text-[10px] text-muted-foreground">
+                          valor + cobertura
+                        </span>
+                      </div>
+                      <div className="mt-1.5 divide-y divide-border/60">
+                        {rankedMarkets.map((market) => {
+                          const completeDifference =
+                            bestSingle.complete && market.complete
+                              ? Math.max(0, market.total - bestSingle.total)
+                              : null;
+                          const completeDifferencePct =
+                            completeDifference !== null && bestSingle.total > 0
+                              ? (completeDifference / bestSingle.total) * 100
+                              : null;
+
+                          return (
+                            <div
+                              key={"quick-" + market.retailer}
+                              className="flex items-center justify-between gap-3 py-1.5 text-xs"
+                            >
+                              <div className="min-w-0">
+                                <p className={
+                                  "truncate font-semibold " +
+                                  (market.retailer === bestSingle.retailer ? "text-primary" : "")
+                                }>
+                                  {market.retailer}
+                                </p>
+                                <p className="text-[10px] text-muted-foreground">
+                                  {market.covered}/{selectedGroups.length} itens com preço vigente
+                                </p>
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <p className="font-bold">{brl(market.total)}</p>
+                                {market.complete ? (
+                                  completeDifference !== null && completeDifference > 0 ? (
+                                    <p className="text-[10px] text-muted-foreground">
+                                      +{brl(completeDifference)}
+                                      {completeDifferencePct !== null
+                                        ? " · +" + completeDifferencePct.toFixed(1).replace(".", ",") + "%"
+                                        : ""}
+                                    </p>
+                                  ) : (
+                                    <p className="text-[10px] font-medium text-primary">
+                                      cesta completa
+                                    </p>
+                                  )
+                                ) : (
+                                  <p className="text-[10px] text-muted-foreground">
+                                    total parcial
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+                        Se a diferença for pequena, distância, combustível e tempo podem tornar outro mercado mais conveniente.
+                      </p>
                     </div>
                   )}
                 </div>
@@ -884,13 +963,7 @@ export default function MarketBasketPage() {
             <Sparkles className="h-4 w-4 text-primary" />
             <h2 className="font-bold">Comparação por supermercado</h2>
           </div>
-          {[...comparison.markets]
-            .sort((a, b) =>
-              Number(b.complete) - Number(a.complete) ||
-              b.covered - a.covered ||
-              a.total - b.total,
-            )
-            .map((market) => (
+          {rankedMarkets.map((market) => (
               <Card key={market.retailer}>
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between gap-3">
@@ -902,15 +975,22 @@ export default function MarketBasketPage() {
                     </div>
                     <div className="text-right">
                       <p className="font-extrabold">
-                        {market.complete ? brl(market.total) : market.covered + " itens"}
+                        {brl(market.total)}
                       </p>
                       <p className="text-[11px] text-muted-foreground">
                         {market.complete
                           ? selectedGroups.some((group) => group.baseUnit !== "un")
                             ? "cesta equivalente por kg/L"
                             : "cesta promocional completa"
-                          : market.missing + " sem preço no tabloide"}
+                          : `parcial · ${market.covered}/${selectedGroups.length} itens · ${market.missing} sem preço`}
                       </p>
+                      {bestSingle?.complete &&
+                        market.complete &&
+                        market.retailer !== bestSingle.retailer && (
+                          <p className="text-[10px] font-medium text-muted-foreground">
+                            +{brl(Math.max(0, market.total - bestSingle.total))} vs. melhor cesta
+                          </p>
+                        )}
                     </div>
                   </div>
 
