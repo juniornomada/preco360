@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import ProductVisual from "@/components/ProductVisual";
 import {
   BadgeCheck,
   ChevronRight,
@@ -55,6 +56,7 @@ type FlyerItemRow = {
   club_price?: boolean | null;
   club_advertised_price?: number | string | null;
   source_page?: number | null;
+  image_url?: string | null;
 };
 
 type AliasRow = {
@@ -229,7 +231,7 @@ export default function OffersPage() {
         db
           .from("flyer_items")
           .select(
-            "id,flyer_id,product_id,raw_name,brand,package_quantity,package_unit,advertised_price,normalized_price,base_unit,club_price,club_advertised_price,source_page",
+            "id,flyer_id,product_id,raw_name,brand,package_quantity,package_unit,advertised_price,normalized_price,base_unit,club_price,club_advertised_price,source_page,image_url",
           )
           .order("created_at", { ascending: false })
           .limit(5000),
@@ -516,17 +518,23 @@ export default function OffersPage() {
                     </p>
                   )}
 
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <h2 className="font-bold leading-snug">{item.raw_name}</h2>
-                      <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Store className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate font-semibold text-foreground/80">
-                          {flyer?.retailer ?? "Supermercado"}
-                        </span>
+                  <div className="flex items-start gap-3">
+                    <ProductVisual
+                      name={item.raw_name}
+                      category={entry.product?.category}
+                      imageUrl={item.image_url}
+                    />
+                    <div className="min-w-0 flex flex-1 items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <h2 className="font-bold leading-snug">{item.raw_name}</h2>
+                        <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <Store className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate font-semibold text-foreground/80">
+                            {flyer?.retailer ?? "Supermercado"}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                    <div className="shrink-0 text-right">
+                      <div className="shrink-0 text-right">
                       <p className="text-lg font-extrabold">{brl(candidate.price)}</p>
                       {candidate.baseUnit !== "un" && (
                         <p className="text-[11px] text-muted-foreground">
@@ -538,6 +546,7 @@ export default function OffersPage() {
                           Clube {brl(clubPrice)}
                         </p>
                       )}
+                      </div>
                     </div>
                   </div>
 
