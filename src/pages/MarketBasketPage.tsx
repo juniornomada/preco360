@@ -442,7 +442,7 @@ export default function MarketBasketPage() {
         >
           <ArrowLeft className="h-4 w-4" /> Voltar para Ofertas
         </button>
-        <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Cesta 360</p>
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Cesta</p>
         <h1 className="mt-1 text-2xl font-extrabold tracking-tight">Qual mercado vale mais a pena?</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Monte sua lista e compare os tabloides que estão vigentes hoje.
@@ -724,7 +724,7 @@ export default function MarketBasketPage() {
                     Digite pelo menos 2 letras
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Assim a Cesta 360 mostra somente os produtos relevantes e continua rápida no celular.
+                    Assim a Cesta mostra somente os produtos relevantes e continua rápida no celular.
                   </p>
                 </div>
               )}
@@ -785,7 +785,7 @@ export default function MarketBasketPage() {
       <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">
         A quantidade da cesta representa número de embalagens. Por exemplo, arroz de 5 kg entra
         como 1 pacote de 5 kg; dois pacotes representam 10 kg. Para comparar supermercados com
-        embalagens diferentes, a Cesta 360 continua normalizando internamente por R$/kg ou R$/L.
+        embalagens diferentes, a Cesta continua normalizando internamente por R$/kg ou R$/L.
         Quando existe preço-clube válido, ele é usado como seu preço efetivo tanto na embalagem
         quanto no R$/kg ou R$/L. Itens por unidade usam o preço da própria embalagem. O comparador usa
         somente preços dos tabloides importados e ainda vigentes. Ausência de um item no tabloide
