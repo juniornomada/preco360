@@ -37,6 +37,8 @@ type Offer = {
   normalized_name: string | null;
   advertised_price: number;
   normalized_price: number;
+  club_price?: boolean | null;
+  club_advertised_price?: number | null;
   base_unit: "kg" | "l" | "un";
   package_quantity: number | null;
   package_unit: string | null;
@@ -82,22 +84,49 @@ function fallbackKey(value: string) {
     .trim();
 }
 
+function validClubPrice(offer: OfferWithMarket) {
+  const regular = Number(offer.advertised_price);
+  const club = Number(offer.club_advertised_price);
+  return Number.isFinite(club) &&
+    club > 0 &&
+    (!Number.isFinite(regular) || regular <= 0 || club <= regular)
+    ? club
+    : null;
+}
+
+function effectiveAdvertisedPrice(offer: OfferWithMarket) {
+  return validClubPrice(offer) ?? Number(offer.advertised_price);
+}
+
 function normalizedPriceLabel(offer: OfferWithMarket) {
-  if (!offer.normalized_price || offer.base_unit === "un") return null;
-  return brl(Number(offer.normalized_price)) + "/" + unitLabel(offer.base_unit);
+  if (offer.base_unit === "un") return null;
+  const comparable = comparablePrice(offer);
+  if (!Number.isFinite(comparable) || comparable <= 0) return null;
+  return brl(comparable) + "/" + unitLabel(offer.base_unit);
 }
 
 function comparablePrice(offer: OfferWithMarket) {
-  const advertised = Number(offer.advertised_price);
-  const normalized = Number(offer.normalized_price);
-  if (
-    (offer.base_unit === "kg" || offer.base_unit === "l") &&
-    Number.isFinite(normalized) &&
-    normalized > 0
-  ) {
-    return normalized;
+  const effective = effectiveAdvertisedPrice(offer);
+
+  if (offer.base_unit === "kg" || offer.base_unit === "l") {
+    const baseQuantity = packageBaseQuantity(offer);
+    if (Number.isFinite(baseQuantity) && baseQuantity > 0) {
+      return effective / baseQuantity;
+    }
+
+    const regular = Number(offer.advertised_price);
+    const normalized = Number(offer.normalized_price);
+    if (
+      Number.isFinite(normalized) &&
+      normalized > 0 &&
+      Number.isFinite(regular) &&
+      regular > 0
+    ) {
+      return normalized * (effective / regular);
+    }
   }
-  return advertised;
+
+  return effective;
 }
 
 function packageBaseQuantity(offer: OfferWithMarket) {
@@ -144,7 +173,7 @@ function equivalentGroupCost(
   if (offer.base_unit === "kg" || offer.base_unit === "l") {
     return comparablePrice(offer) * desiredBaseQuantity(group, packageCount);
   }
-  return Number(offer.advertised_price) * packageCount;
+  return effectiveAdvertisedPrice(offer) * packageCount;
 }
 
 function compareOfferValue(a: OfferWithMarket, b: OfferWithMarket) {
@@ -211,7 +240,7 @@ export default function MarketBasketPage() {
       if (!ids.length) return [];
       const { data, error } = await db
         .from("flyer_items")
-        .select("id,flyer_id,product_id,raw_name,normalized_name,advertised_price,normalized_price,base_unit,package_quantity,package_unit")
+        .select("id,flyer_id,product_id,raw_name,normalized_name,advertised_price,normalized_price,club_price,club_advertised_price,base_unit,package_quantity,package_unit")
         .in("flyer_id", ids)
         .gt("advertised_price", 0);
       if (error) throw error;
@@ -502,7 +531,13 @@ export default function MarketBasketPage() {
                             equivalente · {normalizedPriceLabel(row.offer)}
                           </p>
                           <p className="text-[11px] text-muted-foreground">
-                            embalagem {brl(Number(row.offer.advertised_price))}
+                            {validClubPrice(row.offer)
+                              ? "clube " +
+                                brl(effectiveAdvertisedPrice(row.offer)) +
+                                " · normal " +
+                                brl(Number(row.offer.advertised_price))
+                              : "embalagem " +
+                                brl(Number(row.offer.advertised_price))}
                           </p>
                         </>
                       ) : null}
@@ -638,8 +673,12 @@ export default function MarketBasketPage() {
                           {group.markets.length} mercado(s) ·{" "}
                           {best && normalizedPriceLabel(best)
                             ? "melhor custo " + normalizedPriceLabel(best) +
-                              " · embalagem " + brl(Number(best.advertised_price))
-                            : "melhor oferta " + brl(Number(best?.advertised_price ?? 0))}
+                              " · " +
+                              (validClubPrice(best)
+                                ? "clube " + brl(effectiveAdvertisedPrice(best))
+                                : "embalagem " + brl(Number(best.advertised_price)))
+                            : "melhor oferta " +
+                              (best ? brl(effectiveAdvertisedPrice(best)) : brl(0))}
                         </p>
                         {best && (
                           <p className="mt-1 text-[11px] text-muted-foreground">
@@ -747,7 +786,8 @@ export default function MarketBasketPage() {
         A quantidade da cesta representa número de embalagens. Por exemplo, arroz de 5 kg entra
         como 1 pacote de 5 kg; dois pacotes representam 10 kg. Para comparar supermercados com
         embalagens diferentes, a Cesta 360 continua normalizando internamente por R$/kg ou R$/L.
-        Itens por unidade usam o preço da própria embalagem. O comparador usa
+        Quando existe preço-clube válido, ele é usado como seu preço efetivo tanto na embalagem
+        quanto no R$/kg ou R$/L. Itens por unidade usam o preço da própria embalagem. O comparador usa
         somente preços dos tabloides importados e ainda vigentes. Ausência de um item no tabloide
         não significa que o mercado não venda o produto — apenas que não temos um preço promocional
         válido para ele.
