@@ -99,12 +99,17 @@ function displayName(offer: VisionOffer) {
   let identity = offer.product_name.trim();
   const brand = offer.brand?.trim() ?? "";
 
-  // Gemini sometimes separates the brand from product_name. The Radar name shown to
-  // the user must preserve the complete commercial identity.
-  if (
-    brand &&
-    !normalizeIdentity(identity).includes(normalizeIdentity(brand))
-  ) {
+  // Gemini sometimes separates the brand from product_name. For multi-brand offers,
+  // do not append "Riviera / Patéko" again when both brand names are already present.
+  const identityKey = normalizeIdentity(identity);
+  const brandParts = brand
+    .split(/[\/|,]/)
+    .map((part) => normalizeIdentity(part))
+    .filter(Boolean);
+  const brandAlreadyPresent =
+    brandParts.length > 0 && brandParts.every((part) => identityKey.includes(part));
+
+  if (brand && !brandAlreadyPresent && !identityKey.includes(normalizeIdentity(brand))) {
     identity = `${identity} ${brand}`;
   }
 
