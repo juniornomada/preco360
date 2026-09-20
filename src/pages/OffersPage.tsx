@@ -12,9 +12,7 @@ import {
   ChevronRight,
   Clock3,
   History,
-  Radar,
   Search,
-  ShoppingBasket,
   Sparkles,
   Store,
   Tags,
@@ -435,49 +433,18 @@ export default function OffersPage() {
   }, [data, today]);
 
   return (
-    <div className="page-container mx-auto w-full max-w-3xl">
+    <div className="page-container !pb-40 mx-auto w-full max-w-3xl">
       <header className="mb-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary">
-              Preço 360 · Ofertas
-            </p>
-            <h1 className="mt-1 text-[clamp(1.55rem,6vw,2.05rem)] font-extrabold leading-tight tracking-tight">
-              Onde vale a pena comprar agora?
-            </h1>
-            <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground sm:text-sm">
-              Consulte ofertas vigentes e compare com o que você já pagou e com tabloides anteriores.
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0 gap-1.5"
-            onClick={() => navigate("/radar")}
-          >
-            <Radar className="h-4 w-4" />
-            Radar 360
-          </Button>
-        </div>
+        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary">
+          Preço 360 · Ofertas
+        </p>
+        <h1 className="mt-1 text-[clamp(1.55rem,6vw,2.05rem)] font-extrabold leading-tight tracking-tight">
+          Onde vale a pena comprar agora?
+        </h1>
+        <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground sm:text-sm">
+          Consulte ofertas vigentes e compare com o que você já pagou e com tabloides anteriores.
+        </p>
       </header>
-
-      <Button
-        type="button"
-        variant="outline"
-        className="mb-3 h-11 w-full justify-between border-primary/25 bg-primary/5"
-        onClick={() => navigate("/offers/basket")}
-      >
-        <span className="flex items-center gap-2">
-          <ShoppingBasket className="h-4 w-4 text-primary" />
-          <span className="text-left">
-            <span className="block text-sm font-bold">Cesta 360</span>
-            <span className="block text-[11px] font-normal text-muted-foreground">
-              Compare onde sua lista inteira sai mais em conta
-            </span>
-          </span>
-        </span>
-        <ChevronRight className="h-4 w-4 text-primary" />
-      </Button>
 
       <div className="relative mb-2">
         <Search className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
