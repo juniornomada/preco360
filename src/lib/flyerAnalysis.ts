@@ -385,11 +385,68 @@ export function genericBasketFamily(value: string): GenericBasketFamily | null {
     return { key: "tomate:pelado", label: "Tomate pelado" };
   }
 
+  if (startsComparison(t, "papel", "higienico")) {
+    return { key: "higiene:papel-higienico", label: "Papel higiênico" };
+  }
+
+  if (startsComparison(t, "papel", "toalha")) {
+    return { key: "limpeza:papel-toalha", label: "Papel toalha" };
+  }
+
+  if (startsComparison(t, "azeite")) {
+    return { key: "mercearia:azeite", label: "Azeite" };
+  }
+
   if (
-    startsComparison(t, "farinha") &&
-    hasComparisonToken(t, "trigo")
+    startsComparison(t, "achocolatado") &&
+    !hasComparisonToken(t, "bebida", "lactea", "liquido")
   ) {
-    return { key: "farinha:trigo", label: "Farinha de trigo" };
+    return { key: "mercearia:achocolatado-po", label: "Achocolatado em pó" };
+  }
+
+  if (startsComparison(t, "creme", "dental")) {
+    return { key: "higiene:creme-dental", label: "Creme dental" };
+  }
+
+  if (startsComparison(t, "sabonete")) {
+    if (hasComparisonToken(t, "intimo")) {
+      return { key: "higiene:sabonete-intimo", label: "Sabonete íntimo" };
+    }
+    if (hasComparisonToken(t, "liquido")) {
+      return { key: "higiene:sabonete-liquido", label: "Sabonete líquido" };
+    }
+    return { key: "higiene:sabonete-barra", label: "Sabonete em barra" };
+  }
+
+  if (startsComparison(t, "detergente")) {
+    return { key: "limpeza:detergente", label: "Detergente" };
+  }
+
+  if (startsComparison(t, "amaciante")) {
+    return { key: "limpeza:amaciante", label: "Amaciante" };
+  }
+
+  if (startsComparison(t, "agua", "sanitaria")) {
+    return { key: "limpeza:agua-sanitaria", label: "Água sanitária" };
+  }
+
+  if (
+    startsComparison(t, "sabao") &&
+    hasComparisonToken(t, "po")
+  ) {
+    return { key: "limpeza:sabao-po", label: "Sabão em pó" };
+  }
+
+  if (startsComparison(t, "shampoo")) {
+    return { key: "higiene:shampoo", label: "Shampoo" };
+  }
+
+  if (startsComparison(t, "condicionador")) {
+    return { key: "higiene:condicionador", label: "Condicionador" };
+  }
+
+  if (startsComparison(t, "desodorante")) {
+    return { key: "higiene:desodorante", label: "Desodorante" };
   }
 
   if (startsComparison(t, "arroz")) {
@@ -456,6 +513,28 @@ export function genericBasketFamily(value: string): GenericBasketFamily | null {
   }
 
   return null;
+}
+
+export function genericBasketFamilies(value: string): GenericBasketFamily[] {
+  const primary = genericBasketFamily(value);
+  if (!primary) return [];
+
+  const families: GenericBasketFamily[] = [primary];
+  const t = comparisonTokens(value);
+
+  // Brand-level need: "Nescau" means the powder product regardless of pack size,
+  // while "Achocolatado em pó" remains brand-agnostic and includes Nescau too.
+  if (
+    primary.key === "mercearia:achocolatado-po" &&
+    hasComparisonToken(t, "nescau")
+  ) {
+    families.push({
+      key: "marca:nescau-achocolatado-po",
+      label: "Nescau em pó",
+    });
+  }
+
+  return families;
 }
 
 function milkVariant(tokens: string[]) {
