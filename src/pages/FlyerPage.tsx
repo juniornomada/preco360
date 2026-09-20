@@ -279,7 +279,7 @@ const productEmoji = (name: string, category?: string | null) => {
 
 const forceVisualRule = (name: string, category?: string | null) => {
   const text = normalizeSearchText(`${category ?? ""} ${name}`);
-  return /barra de proteina|protein bar|dolce gusto|toddynho|listerine|antisseptico bucal|file de merluza|merluza|papel toalha|refrigerante|sukita|farinha de trigo|ketchup|molho barbecue|barbecue|molho de tomate|extrato de tomate|batata doce rosada|ervilhas? finas|jardineira de legumes|bacon|jerked beef|carne seca|charque|linguica calabresa|calabresa defumada|costela suina|uva verde|\bcaju\b|\bmelao\b|mousse de chocolate/.test(text);
+  return /barra de proteina|protein bar|dolce gusto|toddynho|listerine|antisseptico bucal|probio2|file de merluza|merluza|papel toalha|refrigerante|sukita|farinha de trigo|ketchup|molho barbecue|barbecue|molho de tomate|extrato de tomate|batata doce rosada|ervilhas? finas|jardineira de legumes|bacon|jerked beef|carne seca|charque|linguica calabresa|calabresa defumada|costela suina|uva verde|\bcaju\b|\bmelao\b|mousse de chocolate/.test(text);
 };
 
 const safeName = (value: string) =>
