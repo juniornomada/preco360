@@ -246,6 +246,11 @@ function buildSearchQuery(item: OfferRow) {
   return [...new Set([brand, raw, packageText].filter(Boolean))].join(" ").trim();
 }
 
+function preferPermanentVisualFallback(item: OfferRow) {
+  const text = normalize(item.raw_name);
+  return /barra de proteina|protein bar|dolce gusto|toddynho|listerine|antisseptico bucal|probio2|file de merluza|merluza|papel toalha|refrigerante|sukita|farinha de trigo|ketchup|molho barbecue|barbecue|molho de tomate|extrato de tomate|batata doce rosada|ervilhas? finas|jardineira de legumes|bacon|jerked beef|carne seca|charque|linguica calabresa|calabresa defumada|costela suina|uva verde|\bcaju\b|\bmelao\b|mousse de chocolate/.test(text);
+}
+
 function offerLooksFreshOrBulk(item: OfferRow) {
   const text = normalize(item.raw_name);
   return (
@@ -803,6 +808,19 @@ async function resolveOne(
   item: OfferRow,
 ) {
   const query = buildSearchQuery(item);
+
+  // These families have deterministic product-specific visual rules in the UI.
+  // Prefer a known-good icon to a fuzzy catalog image that can misrepresent the item.
+  if (preferPermanentVisualFallback(item)) {
+    await applyImage(supabase, item, {
+      imageUrl: null,
+      source: "category_fallback",
+      confidence: 1,
+      status: "fallback",
+      query,
+    });
+    return;
+  }
 
   const cached = await findLibraryImage(supabase, item);
   if (cached?.image_url) {
