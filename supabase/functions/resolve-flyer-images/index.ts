@@ -1201,16 +1201,125 @@ async function processBatch(flyerId: string) {
   if ((count ?? 0) > 0) await triggerNext(flyerId);
 }
 
+async function triggerSoapPilotNext(userId: string) {
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) return;
+
+  await fetch(url + "/functions/v1/resolve-flyer-images", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + key,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      scope: "soap_pilot",
+      user_id: userId,
+      internal: true,
+    }),
+  }).catch(() => {});
+}
+
+async function processSoapPilot(userId: string) {
+  const supabase = serviceClient();
+
+  const { data: rows, error } = await supabase
+    .from("flyer_items")
+    .select("id,flyer_id,user_id,product_id,raw_name,brand,package_quantity,package_unit,image_url,image_source,image_confidence,image_match_status,image_query")
+    .eq("user_id", userId)
+    .eq("image_match_status", "soap_pending")
+    .ilike("raw_name", "%sabonete%")
+    .order("created_at", { ascending: false })
+    .limit(6);
+
+  if (error) throw error;
+
+  const items = ((rows ?? []) as OfferRow[]).filter((item) =>
+    /\bsabonete\b/.test(normalize(item.raw_name))
+  );
+
+  if (!items.length) return;
+
+  const productIds = [...new Set(items.map((item) => item.product_id).filter(Boolean))];
+  const categoryByProduct = new Map<string, string | null>();
+
+  if (productIds.length) {
+    const { data: products } = await supabase
+      .from("products")
+      .select("id,category")
+      .in("id", productIds);
+
+    for (const product of products ?? []) {
+      categoryByProduct.set(product.id, product.category ?? null);
+    }
+  }
+
+  const prepared = items.map((item) => ({
+    ...item,
+    category: item.product_id
+      ? categoryByProduct.get(item.product_id) ?? null
+      : null,
+  }));
+
+  for (let index = 0; index < prepared.length; index += 3) {
+    const group = prepared.slice(index, index + 3);
+    await Promise.all(
+      group.map(async (item) => {
+        try {
+          await resolveOne(supabase, item);
+        } catch (error) {
+          console.warn("soap image pilot failed", item.id, error);
+          await applyImage(supabase, item, {
+            imageUrl: null,
+            source: "category_fallback",
+            confidence: 0,
+            status: "fallback",
+            query: buildSearchQuery(item),
+          });
+        }
+      }),
+    );
+  }
+
+  const { count } = await supabase
+    .from("flyer_items")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("image_match_status", "soap_pending")
+    .ilike("raw_name", "%sabonete%");
+
+  if ((count ?? 0) > 0) await triggerSoapPilotNext(userId);
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "METHOD_NOT_ALLOWED" });
 
   try {
     const body = await req.json();
+    const caller = await callerIdentity(req);
+    const scope = String(body?.scope ?? "").trim();
+
+    if (scope === "soap_pilot") {
+      const requestedUserId = String(body?.user_id ?? "").trim();
+      const targetUserId =
+        caller.isService && requestedUserId
+          ? requestedUserId
+          : caller.userId;
+
+      if (!targetUserId) return json(403, { error: "FORBIDDEN" });
+
+      EdgeRuntime.waitUntil(processSoapPilot(targetUserId));
+      return json(202, {
+        ok: true,
+        scope: "soap_pilot",
+        status: "resolving",
+      });
+    }
+
     const flyerId = String(body?.flyer_id ?? "").trim();
     if (!flyerId) return json(400, { error: "FLYER_ID_REQUIRED" });
 
-    const caller = await callerIdentity(req);
     const supabase = serviceClient();
     const { data: flyer, error } = await supabase
       .from("flyers")
