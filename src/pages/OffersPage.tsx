@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import {
   evaluateFlyerOffer,
+  findComparablePurchaseProducts,
   formatNormalizedPrice,
   inferPackage,
   matchFlyerItem,
@@ -731,6 +732,9 @@ export default function OffersPage() {
     const productMap = new Map(
       searchData.products.map((product) => [product.id, product]),
     );
+    const paidProducts = searchData.products.filter(
+      (product) => (product.prices ?? []).length > 0,
+    );
 
     const historicalItems = searchData.items.filter((item) =>
       historicalIds.has(item.flyer_id),
@@ -770,10 +774,14 @@ export default function OffersPage() {
               comparableOfferIdentity(item, previous),
             );
 
+        const comparablePurchaseProducts =
+          findComparablePurchaseProducts(candidate, paidProducts);
+
         const verdict = evaluateFlyerOffer(
           candidate,
           product,
           previousAdvertised,
+          comparablePurchaseProducts,
         );
 
         return {
