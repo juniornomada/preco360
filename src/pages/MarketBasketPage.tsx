@@ -433,7 +433,7 @@ export default function MarketBasketPage() {
     });
 
   return (
-    <div className="page-container mx-auto w-full max-w-3xl">
+    <div className="page-container !pb-40 mx-auto w-full max-w-3xl">
       <header className="mb-4">
         <button
           type="button"
