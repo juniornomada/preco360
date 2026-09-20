@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
-import { BrowserRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Trash2 } from "lucide-react";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -11,6 +11,7 @@ import Index from "./pages/Index";
 import AuthPage from "./pages/AuthPage";
 import ProductDetail from "./pages/ProductDetail";
 import SearchPage from "./pages/SearchPage";
+import OffersPage from "./pages/OffersPage";
 import ReceiptImportPage from "./pages/ReceiptImportPage";
 import FlyerPage from "./pages/FlyerPage";
 import FlyerHistoryPage from "./pages/FlyerHistoryPage";
@@ -25,12 +26,12 @@ function FlyerManageShortcut() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  if (location.pathname !== "/offers") return null;
+  if (location.pathname !== "/radar") return null;
 
   return (
     <button
       type="button"
-      onClick={() => navigate("/offers/history")}
+      onClick={() => navigate("/radar/history")}
       className="fixed bottom-20 right-4 z-40 flex items-center gap-2 rounded-full border bg-background px-3.5 py-2 text-xs font-semibold text-destructive shadow-lg"
       aria-label="Gerenciar e excluir tabloides"
     >
@@ -60,9 +61,11 @@ function AppRoutes() {
         <Route path="/product/:id" element={<ProductDetail />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/upload" element={<ReceiptImportPage />} />
-        <Route path="/offers" element={<FlyerPage />} />
-        <Route path="/offers/history" element={<FlyerHistoryPage />} />
+        <Route path="/offers" element={<OffersPage />} />
         <Route path="/offers/basket" element={<MarketBasketPage />} />
+        <Route path="/radar" element={<FlyerPage />} />
+        <Route path="/radar/history" element={<FlyerHistoryPage />} />
+        <Route path="/offers/history" element={<Navigate to="/radar/history" replace />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/qr-lab" element={<QrLabPage />} />
         <Route path="*" element={<NotFound />} />
