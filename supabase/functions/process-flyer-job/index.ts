@@ -367,6 +367,60 @@ function brandCompatible(a: any, b: any) {
   return identityDice(left, right) >= 0.9;
 }
 
+function stripKnownBrandsFromIdentity(value: string, a: any, b: any) {
+  const brands = [
+    normalizeOfferIdentity(a?.brand),
+    normalizeOfferIdentity(b?.brand),
+  ].filter(Boolean);
+
+  let result = value;
+  for (const brand of brands) {
+    for (const token of brand.split(/\s+/).filter(Boolean)) {
+      result = result
+        .split(/\s+/)
+        .filter((part) => part !== token)
+        .join(" ");
+    }
+  }
+  return result.replace(/\s+/g, " ").trim();
+}
+
+function coverRepeatIdentity(a: any, b: any) {
+  const pageA = Math.max(1, Math.trunc(Number(a?.source_page) || 1));
+  const pageB = Math.max(1, Math.trunc(Number(b?.source_page) || 1));
+
+  // Relax fuzzy identity only for the common flyer pattern where the cover
+  // repeats a promotion that later appears in its category page.
+  if (!((pageA === 1 && pageB > 1) || (pageB === 1 && pageA > 1))) {
+    return false;
+  }
+  if (!packageCompatible(a, b) || !brandCompatible(a, b)) return false;
+
+  const left = stripKnownBrandsFromIdentity(
+    normalizeOfferIdentity(a?.product_name),
+    a,
+    b,
+  );
+  const right = stripKnownBrandsFromIdentity(
+    normalizeOfferIdentity(b?.product_name),
+    a,
+    b,
+  );
+  if (!left || !right) return false;
+  if (left === right) return true;
+
+  const leftTokens = [...new Set(left.split(/\s+/).filter(Boolean))];
+  const rightTokens = [...new Set(right.split(/\s+/).filter(Boolean))];
+  if (Math.min(leftTokens.length, rightTokens.length) < 2) return false;
+
+  const rightSet = new Set(rightTokens);
+  const common = leftTokens.filter((token) => rightSet.has(token)).length;
+  const coverage = common / Math.min(leftTokens.length, rightTokens.length);
+  const sizeGap = Math.abs(leftTokens.length - rightTokens.length);
+
+  return coverage >= 0.9 && sizeGap <= 1;
+}
+
 function sameOfferIdentity(a: any, b: any) {
   if (offerIdentityKey(a) === offerIdentityKey(b)) return true;
   if (!packageCompatible(a, b) || !brandCompatible(a, b)) return false;
@@ -380,7 +434,9 @@ function sameOfferIdentity(a: any, b: any) {
   const longer = left.length <= right.length ? right : left;
   if (shorter.split(" ").filter(Boolean).length >= 3 && longer.includes(shorter)) return true;
 
-  return identityDice(left, right) >= 0.86;
+  if (identityDice(left, right) >= 0.86) return true;
+
+  return coverRepeatIdentity(a, b);
 }
 
 function positiveMoney(value: unknown) {
