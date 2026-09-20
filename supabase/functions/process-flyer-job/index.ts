@@ -196,9 +196,9 @@ function normalizeOfferIdentity(value: unknown) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/(\d)\s*[,\.]\s*(\d)/g, "$1.$2")
-    .replace(/\b\d+(?:\.\d+)?\s*(?:kg|g|ml|l|lt)\b/g, " ")
+    .replace(/\b\d+(?:\.\d+)?\s*(?:kg|g|ml|l|lt|un|und|unid|unidade)\b/g, " ")
     .replace(
-      /\b(?:pacote|embalagem|unidade|unidades|un|und|kg|g|ml|l|lt|sabor|sabores)\b/g,
+      /\b(?:de|da|do|das|dos|tipo|tipos|sabor|sabores|pacote|embalagem|unidade|unidades|un|und|kg|g|ml|l|lt|lata|sache|garrafa|bandeja|fardo|fresco|fresca|congelado|congelada)\b/g,
       " ",
     )
     .replace(/[^a-z0-9]+/g, " ")
@@ -217,6 +217,66 @@ function offerIdentityKey(offer: any) {
   ].join("|");
 }
 
+function identityDice(a: string, b: string) {
+  if (a === b) return 1;
+  if (a.length < 2 || b.length < 2) return 0;
+  const grams = (value: string) => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < value.length - 1; i += 1) {
+      const gram = value.slice(i, i + 2);
+      map.set(gram, (map.get(gram) ?? 0) + 1);
+    }
+    return map;
+  };
+  const A = grams(a);
+  const B = grams(b);
+  let intersection = 0;
+  for (const [gram, count] of A) {
+    intersection += Math.min(count, B.get(gram) ?? 0);
+  }
+  const totalA = [...A.values()].reduce((sum, value) => sum + value, 0);
+  const totalB = [...B.values()].reduce((sum, value) => sum + value, 0);
+  return (2 * intersection) / Math.max(1, totalA + totalB);
+}
+
+function packageCompatible(a: any, b: any) {
+  const aq = Number(a?.package_quantity);
+  const bq = Number(b?.package_quantity);
+  if (
+    Number.isFinite(aq) && aq > 0 &&
+    Number.isFinite(bq) && bq > 0 &&
+    Math.abs(aq - bq) > 0.001
+  ) return false;
+
+  const au = normalizeOfferIdentity(a?.package_unit);
+  const bu = normalizeOfferIdentity(b?.package_unit);
+  return !au || !bu || au === bu;
+}
+
+function brandCompatible(a: any, b: any) {
+  const left = normalizeOfferIdentity(a?.brand);
+  const right = normalizeOfferIdentity(b?.brand);
+  if (!left || !right || left === right) return true;
+  if (left.includes(right) || right.includes(left)) return true;
+  return identityDice(left, right) >= 0.9;
+}
+
+function sameOfferIdentity(a: any, b: any) {
+  if (offerIdentityKey(a) === offerIdentityKey(b)) return true;
+  if (!packageCompatible(a, b) || !brandCompatible(a, b)) return false;
+
+  const left = normalizeOfferIdentity(a?.product_name);
+  const right = normalizeOfferIdentity(b?.product_name);
+  if (!left || !right) return false;
+  if (left === right) return true;
+
+  const shorter = left.length <= right.length ? left : right;
+  const longer = left.length <= right.length ? right : left;
+  if (shorter.length >= 8 && longer.includes(shorter)) return true;
+
+  return identityDice(left, right) >= 0.86;
+}
+
 function positiveMoney(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -230,7 +290,7 @@ function sameMoney(a: unknown, b: unknown) {
 }
 
 function mergeableDuplicate(a: any, b: any) {
-  if (offerIdentityKey(a) !== offerIdentityKey(b)) return false;
+  if (!sameOfferIdentity(a, b)) return false;
 
   const aPrice = positiveMoney(a?.price);
   const bPrice = positiveMoney(b?.price);
