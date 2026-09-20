@@ -168,6 +168,13 @@ function ProductVisualIcon({
     <path d="M32 8v7h4" fill="#d1e5c3" />
     <path d="M19 27c5-9 10-10 14-5-3 7-8 10-14 5Z" fill="#6fa95e" />
   </>);
+  if (visual === "__milkcarton__") return simple(<>
+    <path d="M13 10h18l5 7v25H13V10Z" fill="#f4f7fb" />
+    <path d="M31 10v8h5" fill="#dce7f5" />
+    <path d="M13 17h23" stroke="#8bb6df" strokeWidth="3" />
+    <rect x="17" y="23" width="15" height="11" rx="3" fill="#d7eaff" />
+    <path d="M21 30c2-5 5-6 8-1" stroke="#ffffff" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+  </>);
   if (visual === "__wrap__") return simple(<>
     <rect x="8" y="13" width="32" height="22" rx="4" fill="#cbd2d9" />
     <ellipse cx="12" cy="24" rx="4" ry="9" fill="#eef1f4" />
