@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { genericBasketFamily } from "@/lib/flyerAnalysis";
+import { genericBasketFamilies, genericBasketFamily } from "@/lib/flyerAnalysis";
 
 describe("generic basket families", () => {
   it("groups brands of the same need together", () => {
@@ -38,6 +38,48 @@ describe("generic basket families", () => {
     );
     expect(genericBasketFamily("Óleo de Soja Liza 900ml")?.key).toBe(
       "mercearia:oleo-soja",
+    );
+    expect(genericBasketFamily("Azeite Extra Virgem Gallo 500ml")?.key).toBe(
+      "mercearia:azeite",
+    );
+    expect(
+      genericBasketFamily("Papel Higiênico Personal VIP Folha Dupla 12un")?.key,
+    ).toBe("higiene:papel-higienico");
+  });
+
+  it("groups powdered chocolate while keeping Nescau as an optional brand need", () => {
+    const nescau = genericBasketFamilies(
+      "Achocolatado Instantâneo em Pó Nescau Pacote 730g",
+    );
+    expect(nescau.map((family) => family.key)).toEqual([
+      "mercearia:achocolatado-po",
+      "marca:nescau-achocolatado-po",
+    ]);
+
+    expect(
+      genericBasketFamilies("Achocolatado em Pó Toddy Pacote 1,8kg").map(
+        (family) => family.key,
+      ),
+    ).toEqual(["mercearia:achocolatado-po"]);
+
+    expect(
+      genericBasketFamily("Bebida Láctea Achocolatado Nescau 180ml"),
+    ).toBeNull();
+    expect(genericBasketFamily("Cereal Nestlé Nescau 210g")).toBeNull();
+  });
+
+  it("adds common hygiene and cleaning needs", () => {
+    expect(genericBasketFamily("Papel Toalha Kitchen 2un")?.key).toBe(
+      "limpeza:papel-toalha",
+    );
+    expect(genericBasketFamily("Creme Dental Colgate 90g")?.key).toBe(
+      "higiene:creme-dental",
+    );
+    expect(genericBasketFamily("Sabão em Pó Omo 1,6kg")?.key).toBe(
+      "limpeza:sabao-po",
+    );
+    expect(genericBasketFamily("Sabonete Líquido Protex 250ml")?.key).toBe(
+      "higiene:sabonete-liquido",
     );
   });
 });
