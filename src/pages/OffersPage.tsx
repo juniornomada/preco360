@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -635,6 +635,35 @@ export default function OffersPage() {
   const normalizedSearch = deferredSearch.trim();
   const hasSearch = normalizedSearch.length >= 2;
   const today = useMemo(() => localDateKey(), []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const key = `preco360-soap-image-pilot-v1:${user.id}`;
+    try {
+      if (localStorage.getItem(key)) return;
+    } catch {
+      // Storage is only used to avoid repeating the pilot trigger.
+    }
+
+    let cancelled = false;
+    void supabase.functions
+      .invoke("resolve-flyer-images", {
+        body: { scope: "soap_pilot" },
+      })
+      .then(({ error }) => {
+        if (cancelled || error) return;
+        try {
+          localStorage.setItem(key, new Date().toISOString());
+        } catch {
+          // The resolver remains idempotent even without localStorage.
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const {
     data: flyers = [],
