@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import ProductVisual from "@/components/ProductVisual";
+import { ensureClubActivationNote } from "@/lib/clubOfferRules";
 import {
   ArrowDown,
   ArrowUp,
@@ -1170,7 +1171,11 @@ export default function FlyerPage() {
             excluded_types: rich.excludedTypes ?? [],
             store_restrictions: rich.storeRestrictions ?? [],
             purchase_limit: rich.purchaseLimit ?? null,
-            offer_notes: rich.offerNotes ?? [],
+            offer_notes: ensureClubActivationNote(
+              retailer.trim(),
+              rich.clubAdvertisedPrice,
+              rich.offerNotes,
+            ),
             extraction_confidence: rich.extractionConfidence ?? null,
             price_basis_quantity: rich.priceBasisQuantity ?? 1,
             price_basis_unit: rich.priceBasisUnit ?? "un",
