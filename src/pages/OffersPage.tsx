@@ -115,6 +115,32 @@ function dateBr(value?: string | null) {
   return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
 }
 
+function expiryLabel(value: string | null | undefined, today: string) {
+  if (!value) return "—";
+  if (value === today) return "até HOJE";
+
+  const todayMatch = today.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (todayMatch) {
+    const tomorrowDate = new Date(
+      Date.UTC(
+        Number(todayMatch[1]),
+        Number(todayMatch[2]) - 1,
+        Number(todayMatch[3]) + 1,
+      ),
+    );
+    const tomorrow =
+      `${tomorrowDate.getUTCFullYear()}-${String(
+        tomorrowDate.getUTCMonth() + 1,
+      ).padStart(2, "0")}-${String(tomorrowDate.getUTCDate()).padStart(
+        2,
+        "0",
+      )}`;
+    if (value === tomorrow) return "até AMANHÃ";
+  }
+
+  return `até ${dateBr(value)}`;
+}
+
 const searchStopWords = new Set([
   "de", "da", "do", "das", "dos", "em",
 ]);
@@ -1045,7 +1071,7 @@ export default function OffersPage() {
                 key={item.id}
                 className={isTopResult ? "border-primary/40 shadow-sm" : ""}
               >
-                <CardContent className="p-4">
+                <CardContent className="p-3.5 sm:p-4">
                   {isTopResult && (
                     <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.13em] text-primary">
                       {bestLabel}
@@ -1061,12 +1087,6 @@ export default function OffersPage() {
                     <div className="min-w-0 flex flex-1 items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <h2 className="font-bold leading-snug">{item.raw_name}</h2>
-                        <div className="mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-primary/20 bg-primary/5 px-2 py-1">
-                          <Store className="h-3.5 w-3.5 shrink-0 text-primary" />
-                          <span className="truncate text-xs font-bold text-foreground">
-                            {flyer?.retailer ?? "Supermercado"}
-                          </span>
-                        </div>
                       </div>
                       <div className="shrink-0 text-right">
                         {clubPrice ? (
@@ -1115,65 +1135,66 @@ export default function OffersPage() {
                     </div>
                   </div>
 
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-1 text-[11px] font-bold">
+                      <Store className="h-3.5 w-3.5 shrink-0 text-primary" />
+                      <span className="truncate">
+                        {flyer?.retailer ?? "Supermercado"}
+                      </span>
+                    </span>
                     <span
-                      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold ${ui.className}`}
+                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-bold ${ui.className}`}
                     >
                       <VerdictIcon className="h-3.5 w-3.5" />
                       {ui.label}
                     </span>
-                    <span className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] text-muted-foreground">
+                    <span className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] text-muted-foreground">
                       <Clock3 className="h-3.5 w-3.5" />
-                      até {dateBr(flyer?.valid_to)}
+                      {expiryLabel(flyer?.valid_to, today)}
                     </span>
                   </div>
 
-                  {verdict.deltaPct !== null && (
-                    <p
-                      className={`mt-2 text-sm font-extrabold ${
-                        verdict.deltaPct < 0
-                          ? "text-red-500"
-                          : verdict.deltaPct > 0
-                            ? "text-red-500"
-                            : "text-muted-foreground"
-                      }`}
-                    >
-                      {verdict.deltaPct < 0
-                        ? `↓ ${Math.abs(verdict.deltaPct).toFixed(0)}%`
-                        : verdict.deltaPct > 0
-                          ? `↑ ${Math.abs(verdict.deltaPct).toFixed(0)}%`
-                          : "0%"}
-                    </p>
-                  )}
+                  {(verdict.deltaPct !== null ||
+                    verdict.referencePrice ||
+                    productId) && (
+                    <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
+                      {verdict.deltaPct !== null && (
+                        <span
+                          className={`font-extrabold ${
+                            verdict.deltaPct === 0
+                              ? "text-muted-foreground"
+                              : "text-red-500"
+                          }`}
+                        >
+                          {verdict.deltaPct < 0
+                            ? `↓${Math.abs(verdict.deltaPct).toFixed(0)}%`
+                            : verdict.deltaPct > 0
+                              ? `↑${Math.abs(verdict.deltaPct).toFixed(0)}%`
+                              : "0%"}
+                        </span>
+                      )}
 
-                  {verdict.referencePrice && (
-                    <div className="mt-3 rounded-xl bg-muted/55 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Referência histórica
-                      </p>
-                      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
-                        <p className="text-sm font-extrabold">
+                      {verdict.referencePrice && (
+                        <span className="font-semibold text-muted-foreground">
+                          Ref.{" "}
                           {formatNormalizedPrice(
                             verdict.referencePrice,
                             candidate.baseUnit,
                           )}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {verdict.purchaseCount} pago(s) + {verdict.advertisedCount} oferta(s) anterior(es)
-                        </p>
-                      </div>
-                    </div>
-                  )}
+                        </span>
+                      )}
 
-                  {productId && (
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/product/${productId}`)}
-                      className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary"
-                    >
-                      Ver histórico completo
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
+                      {productId && (
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/product/${productId}`)}
+                          className="ml-auto inline-flex items-center gap-0.5 font-semibold text-primary"
+                        >
+                          Histórico
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
                   )}
                 </CardContent>
               </Card>
