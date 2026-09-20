@@ -69,6 +69,7 @@ const aliases: Record<string, string> = {
   mant: "manteiga", int: "integral", def: "defumada", fat: "fatiada",
   far: "farinha", mand: "mandioca", ferm: "fermento", desinf: "desinfetante",
   alum: "aluminio", pim: "pimenta", refin: "refinado", vd: "verde",
+  ref: "refrigerante", ant: "antarctica", guar: "guarana",
 };
 
 const stop = new Set([
@@ -149,7 +150,9 @@ function numberPt(value: string) {
 }
 
 export function inferPackage(value: string): PackageInfo | null {
-  const text = normalizeSearchText(value).replace(/(\d)\s+(kg|g|ml|l|lt|un|und|unid)\b/g, "$1$2");
+  const text = normalizeSearchText(value)
+    .replace(/\b([a-z]{3,})(kg|ml)\b/g, "$1 $2")
+    .replace(/(\d)\s+(kg|g|ml|l|lt|un|und|unid)\b/g, "$1$2");
   const multi = text.match(/\b(\d+)\s*x\s*(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|lt)\b/i);
   if (multi) {
     const quantity = Number(multi[1]) * numberPt(multi[2]);
@@ -424,7 +427,6 @@ function purchaseComparisonKey(value: string) {
   }
 
   if (startsComparison(t, "manteiga")) return "laticinio:manteiga";
-  if (startsComparison(t, "ervilha")) return "legume:ervilha";
   if (startsComparison(t, "fuba")) return "farinha:fuba";
   if (
     startsComparison(t, "farinha") &&
@@ -438,7 +440,9 @@ function purchaseComparisonKey(value: string) {
     return "pao:forma";
   }
   if (startsComparison(t, "pao") && hasComparisonToken(t, "frances")) {
-    return "pao:frances";
+    return hasComparisonToken(t, "congelado")
+      ? "pao:frances:congelado"
+      : "pao:frances:fresco";
   }
 
   if (startsComparison(t, "mortadela")) {
@@ -451,7 +455,19 @@ function purchaseComparisonKey(value: string) {
     hasComparisonToken(t, "queijo") &&
     hasComparisonToken(t, "mussarela")
   ) {
-    return "queijo:mussarela";
+    if (hasComparisonToken(t, "fatiada", "fatiado")) {
+      return "queijo:mussarela:fatiado";
+    }
+    if (hasComparisonToken(t, "peca")) return "queijo:mussarela:peca";
+    return "queijo:mussarela:generica";
+  }
+
+  if (
+    (startsComparison(t, "refrigerante") || startsComparison(t, "guarana")) &&
+    hasComparisonToken(t, "guarana") &&
+    hasComparisonToken(t, "antarctica")
+  ) {
+    return "refrigerante:guarana-antarctica";
   }
 
   if (
@@ -529,7 +545,14 @@ export function findComparablePurchaseProducts(
     }
 
     const pkg = historicalPackage(product);
-    if (!pkg || pkg.baseUnit !== candidate.baseUnit) return false;
+    if (
+      !pkg ||
+      pkg.baseUnit !== candidate.baseUnit ||
+      !Number.isFinite(pkg.baseQuantity) ||
+      pkg.baseQuantity <= 0
+    ) {
+      return false;
+    }
 
     if (candidate.baseUnit === "un") {
       return Math.abs(pkg.baseQuantity - candidate.packageInfo!.baseQuantity) < 0.01;
