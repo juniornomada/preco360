@@ -146,50 +146,115 @@ type OfferFamily =
   | "milkFermented"
   | "milkCoconut"
   | "milkSweet"
+  | "tomatoFresh"
+  | "tomatoSauce"
+  | "tomatoExtract"
+  | "tomatoPassata"
+  | "tomatoPeeled"
+  | "cornFresh"
+  | "cornGreen"
+  | "cornPopcorn"
+  | "coffeeGround"
+  | "coffeeBeans"
+  | "coffeeSoluble"
+  | "coffeeCapsule"
   | "cake"
   | "other";
 
-type SearchFamilyIntent = OfferFamily | "milk";
+type SearchFamilyIntent = OfferFamily | "milk" | "corn" | "coffee";
+
+function hasAny(tokens: Set<string>, values: string[]) {
+  return values.some((value) => tokens.has(value));
+}
 
 function queryOfferFamily(query: string): SearchFamilyIntent | null {
   const tokens = new Set(searchTokens(query));
-  const hasMilk = tokens.has("leite") || tokens.has("leites");
+  const hasMilk = hasAny(tokens, ["leite", "leites"]);
+  const hasTomato = hasAny(tokens, ["tomate", "tomates"]);
+  const hasCorn = hasAny(tokens, ["milho", "milhos"]);
+  const hasCoffee = hasAny(tokens, ["cafe", "cafes"]);
 
   if (hasMilk) {
-    if (tokens.has("creme") || tokens.has("cremes")) return "milkCream";
-    if (tokens.has("condensado") || tokens.has("condensados")) {
-      return "milkCondensed";
-    }
-    if (tokens.has("fermentado") || tokens.has("fermentados")) {
-      return "milkFermented";
-    }
+    if (hasAny(tokens, ["bolo", "bolos"])) return "cake";
+    if (hasAny(tokens, ["creme", "cremes"])) return "milkCream";
+    if (hasAny(tokens, ["condensado", "condensados"])) return "milkCondensed";
+    if (hasAny(tokens, ["fermentado", "fermentados"])) return "milkFermented";
     if (tokens.has("coco")) return "milkCoconut";
-    if (tokens.has("doce") || tokens.has("doces")) return "milkSweet";
-    if (tokens.has("bolo") || tokens.has("bolos")) return "cake";
+    if (hasAny(tokens, ["doce", "doces"])) return "milkSweet";
     if (tokens.has("po")) return "milkPowder";
-
-    // "leite" by itself means actual milk, not every product whose name
-    // happens to contain the word leite. It intentionally covers both
-    // liquid milk and powdered milk.
     return "milk";
   }
 
-  if (tokens.has("bebida") || tokens.has("bebidas")) return "drink";
+  if (hasTomato) {
+    // When tomato is only a sauce/ingredient of another primary product,
+    // keep literal search behavior instead of treating it as tomato itself.
+    if (hasAny(tokens, ["sardinha", "sardinhas", "atum", "pizza", "pizzas"])) {
+      return null;
+    }
+    if (hasAny(tokens, ["molho", "molhos"])) return "tomatoSauce";
+    if (hasAny(tokens, ["extrato", "extratos"])) return "tomatoExtract";
+    if (hasAny(tokens, ["passata", "passatas"])) return "tomatoPassata";
+    if (hasAny(tokens, ["pelado", "pelados", "pelada", "peladas"])) {
+      return "tomatoPeeled";
+    }
+    return "tomatoFresh";
+  }
+
+  if (hasCorn) {
+    if (hasAny(tokens, ["bolo", "bolos"])) return "cake";
+    if (hasAny(tokens, ["suco", "sucos"])) return "juice";
+
+    // These are derived products where milho is an ingredient/material,
+    // not the product family the user means by a plain "milho" search.
+    if (
+      hasAny(tokens, [
+        "curau",
+        "curaus",
+        "amido",
+        "amidos",
+        "farofa",
+        "farofas",
+      ])
+    ) {
+      return null;
+    }
+
+    if (hasAny(tokens, ["pipoca", "pipocas"])) return "cornPopcorn";
+    if (hasAny(tokens, ["verde", "verdes", "conserva", "vapor"])) {
+      return "cornGreen";
+    }
+    return "corn";
+  }
+
+  if (hasCoffee) {
+    // Coffee used as flavor/ingredient keeps the more specific primary family.
+    if (hasAny(tokens, ["bala", "balas", "bombom", "bombons"])) return null;
+    if (hasAny(tokens, ["bebida", "bebidas"])) return "drink";
+    if (hasAny(tokens, ["capsula", "capsulas"])) return "coffeeCapsule";
+    if (hasAny(tokens, ["soluvel", "soluveis"])) return "coffeeSoluble";
+    if (hasAny(tokens, ["grao", "graos"])) return "coffeeBeans";
+    if (tokens.has("po")) return "coffeeGround";
+    return "coffee";
+  }
+
+  if (hasAny(tokens, ["bebida", "bebidas"])) return "drink";
   if (
     tokens.has("po") ||
-    tokens.has("achocolatado") ||
-    tokens.has("achocolatada") ||
-    tokens.has("achocolatados") ||
-    tokens.has("achocolatadas")
+    hasAny(tokens, [
+      "achocolatado",
+      "achocolatada",
+      "achocolatados",
+      "achocolatadas",
+    ])
   ) {
     return "powder";
   }
-  if (tokens.has("cereal") || tokens.has("cereais")) return "cereal";
-  if (tokens.has("capsula") || tokens.has("capsulas")) return "capsule";
-  if (tokens.has("refrigerante") || tokens.has("refrigerantes")) {
+  if (hasAny(tokens, ["cereal", "cereais"])) return "cereal";
+  if (hasAny(tokens, ["capsula", "capsulas"])) return "capsule";
+  if (hasAny(tokens, ["refrigerante", "refrigerantes"])) {
     return "refrigerante";
   }
-  if (tokens.has("suco") || tokens.has("sucos")) return "juice";
+  if (hasAny(tokens, ["suco", "sucos"])) return "juice";
 
   return null;
 }
@@ -198,77 +263,84 @@ function inferOfferFamily(
   item: FlyerItemRow,
   product: ProductForMatch | null,
 ): OfferFamily {
+  const raw = normalizeSearchText(item.raw_name);
   const text = normalizeSearchText(
     `${item.raw_name} ${item.brand ?? ""} ${product?.name ?? ""} ${product?.category ?? ""}`,
   );
   const tokens = new Set(searchTokens(text));
   const packageUnit = normalizeSearchText(item.package_unit ?? "");
   const baseUnit = item.base_unit ?? null;
-  const hasMilk = tokens.has("leite") || tokens.has("leites");
+  const isVolume =
+    baseUnit === "l" || packageUnit === "ml" || packageUnit === "l";
+  const isWeight =
+    baseUnit === "kg" || packageUnit === "g" || packageUnit === "kg";
 
-  // Specific milk-derived products must be classified before generic milk.
-  if (tokens.has("bolo") || tokens.has("bolos")) return "cake";
-  if (
-    hasMilk &&
-    (tokens.has("creme") || tokens.has("cremes") || tokens.has("culinario"))
-  ) {
-    return "milkCream";
-  }
-  if (
-    hasMilk &&
-    (tokens.has("condensado") || tokens.has("condensados"))
-  ) {
-    return "milkCondensed";
-  }
-  if (
-    hasMilk &&
-    (tokens.has("fermentado") || tokens.has("fermentados"))
-  ) {
-    return "milkFermented";
-  }
-  if (hasMilk && tokens.has("coco")) return "milkCoconut";
-  if (hasMilk && (tokens.has("doce") || tokens.has("doces"))) {
-    return "milkSweet";
-  }
+  // Product-head rules: the beginning of the name is more reliable than a
+  // keyword appearing later as flavor, ingredient or accompaniment.
+  if (/^bolos?\b/.test(raw)) return "cake";
 
-  if (hasMilk && tokens.has("po")) return "milkPowder";
+  if (/^(?:mistura de )?creme de leite\b/.test(raw)) return "milkCream";
+  if (/^leite condensado\b/.test(raw)) return "milkCondensed";
+  if (/^leite fermentado\b/.test(raw)) return "milkFermented";
+  if (/^leite de coco\b/.test(raw)) return "milkCoconut";
+  if (/^doce de leite\b/.test(raw)) return "milkSweet";
 
-  // Plain milk sold by volume is liquid milk. This covers longa vida/UHT,
-  // integral, desnatado, semidesnatado and zero lactose.
-  if (hasMilk && (baseUnit === "l" || packageUnit === "ml" || packageUnit === "l")) {
+  if (/^leite\b/.test(raw)) {
+    if (/\bpo\b/.test(raw)) return "milkPowder";
+    if (isVolume) return "milkLiquid";
+    if (isWeight) return "milkPowder";
     return "milkLiquid";
   }
 
-  // Some milk-powder OCR names may omit "em pó". Weight-based plain milk is
-  // treated as powdered milk unless another specific milk family matched above.
-  if (hasMilk && (baseUnit === "kg" || packageUnit === "g" || packageUnit === "kg")) {
-    return "milkPowder";
+  if (/^molho (?:de )?tomate\b/.test(raw)) return "tomatoSauce";
+  if (/^extrato (?:de )?tomate\b/.test(raw)) return "tomatoExtract";
+  if (/^passata\b/.test(raw) && /\btomate\b/.test(raw)) {
+    return "tomatoPassata";
+  }
+  if (/^tomates?\b/.test(raw)) {
+    if (/\bpelad[oa]s?\b/.test(raw)) return "tomatoPeeled";
+    return "tomatoFresh";
   }
 
-  if (tokens.has("bebida") || tokens.has("bebidas")) return "drink";
-  if (tokens.has("cereal") || tokens.has("cereais")) return "cereal";
-  if (tokens.has("capsula") || tokens.has("capsulas")) return "capsule";
-  if (tokens.has("refrigerante") || tokens.has("refrigerantes")) {
+  if (/^milho\b/.test(raw)) {
+    if (/\bpipoca\b/.test(raw)) return "cornPopcorn";
+    if (/\bverde\b/.test(raw) || /\bconserva\b/.test(raw)) {
+      return "cornGreen";
+    }
+    return "cornFresh";
+  }
+
+  // Coffee is only treated as coffee when coffee itself is the product head.
+  // "Bala de café" and "bebida ... café" therefore stay in their own families.
+  if (/^(?:caps|capsula|capsulas)\b/.test(raw) && /\bcafe\b/.test(raw)) {
+    return "coffeeCapsule";
+  }
+  if (/^cafe\b/.test(raw)) {
+    if (isVolume) return "drink";
+    if (/\bsoluvel\b/.test(raw)) return "coffeeSoluble";
+    if (/\bgraos?\b/.test(raw)) return "coffeeBeans";
+    return "coffeeGround";
+  }
+
+  if (hasAny(tokens, ["bebida", "bebidas"])) return "drink";
+  if (hasAny(tokens, ["cereal", "cereais"])) return "cereal";
+  if (hasAny(tokens, ["capsula", "capsulas"])) return "capsule";
+  if (hasAny(tokens, ["refrigerante", "refrigerantes"])) {
     return "refrigerante";
   }
-  if (tokens.has("suco") || tokens.has("sucos")) return "juice";
+  if (hasAny(tokens, ["suco", "sucos"])) return "juice";
 
   if (tokens.has("po")) return "powder";
 
   // OCR/encartes frequentemente omitem "em pó" do nome, como
-  // "Achocolatado Nescau 350g". Achocolatado vendido em g/kg e que não é
-  // bebida é semanticamente a mesma família de achocolatado em pó.
-  const isChocolateDrinkPowderName =
-    tokens.has("achocolatado") ||
-    tokens.has("achocolatada") ||
-    tokens.has("achocolatados") ||
-    tokens.has("achocolatadas");
-  const isWeightPackage =
-    baseUnit === "kg" ||
-    packageUnit === "g" ||
-    packageUnit === "kg";
-
-  if (isChocolateDrinkPowderName && isWeightPackage) return "powder";
+  // "Achocolatado Nescau 350g".
+  const isChocolateDrinkPowderName = hasAny(tokens, [
+    "achocolatado",
+    "achocolatada",
+    "achocolatados",
+    "achocolatadas",
+  ]);
+  if (isChocolateDrinkPowderName && isWeight) return "powder";
 
   return "other";
 }
@@ -287,18 +359,28 @@ function familyLabel(family: OfferFamily) {
   if (family === "milkFermented") return "Leite fermentado";
   if (family === "milkCoconut") return "Leite de coco";
   if (family === "milkSweet") return "Doce de leite";
+  if (family === "tomatoFresh") return "Tomate";
+  if (family === "tomatoSauce") return "Molho de tomate";
+  if (family === "tomatoExtract") return "Extrato de tomate";
+  if (family === "tomatoPassata") return "Passata";
+  if (family === "tomatoPeeled") return "Tomate pelado";
+  if (family === "cornFresh") return "Milho";
+  if (family === "cornGreen") return "Milho verde";
+  if (family === "cornPopcorn") return "Milho para pipoca";
+  if (family === "coffeeGround") return "Café";
+  if (family === "coffeeBeans") return "Café em grão";
+  if (family === "coffeeSoluble") return "Café solúvel";
+  if (family === "coffeeCapsule") return "Café em cápsula";
   if (family === "cake") return "Bolo";
   return "Produto";
 }
 
 function familySemanticTokens(intent: SearchFamilyIntent | null) {
-  if (!intent) return new Set<string>();
+  const result = new Set<string>();
+  const add = (...tokens: string[]) => tokens.forEach((token) => result.add(token));
+  if (!intent) return result;
 
-  const common = new Set<string>();
-  const add = (...tokens: string[]) => tokens.forEach((token) => common.add(token));
-
-  if (intent === "milk") add("leite", "leites");
-  if (intent === "milkLiquid") add("leite", "leites");
+  if (intent === "milk" || intent === "milkLiquid") add("leite", "leites");
   if (intent === "milkPowder") add("leite", "leites", "po");
   if (intent === "milkCream") add("creme", "cremes", "leite", "leites");
   if (intent === "milkCondensed") {
@@ -309,7 +391,29 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   }
   if (intent === "milkCoconut") add("leite", "leites", "coco");
   if (intent === "milkSweet") add("doce", "doces", "leite", "leites");
-  if (intent === "cake") add("bolo", "bolos", "leite", "leites");
+
+  if (intent === "tomatoFresh") add("tomate", "tomates");
+  if (intent === "tomatoSauce") add("molho", "molhos", "tomate", "tomates");
+  if (intent === "tomatoExtract") {
+    add("extrato", "extratos", "tomate", "tomates");
+  }
+  if (intent === "tomatoPassata") add("passata", "passatas", "tomate", "tomates");
+  if (intent === "tomatoPeeled") {
+    add("tomate", "tomates", "pelado", "pelados", "pelada", "peladas");
+  }
+
+  if (intent === "corn") add("milho", "milhos");
+  if (intent === "cornFresh") add("milho", "milhos");
+  if (intent === "cornGreen") add("milho", "milhos", "verde", "verdes");
+  if (intent === "cornPopcorn") add("milho", "milhos", "pipoca", "pipocas");
+
+  if (intent === "coffee") add("cafe", "cafes");
+  if (intent === "coffeeGround") add("cafe", "cafes", "po");
+  if (intent === "coffeeBeans") add("cafe", "cafes", "grao", "graos");
+  if (intent === "coffeeSoluble") add("cafe", "cafes", "soluvel", "soluveis");
+  if (intent === "coffeeCapsule") {
+    add("cafe", "cafes", "caps", "capsula", "capsulas");
+  }
 
   if (intent === "powder") {
     add(
@@ -322,11 +426,35 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   }
   if (intent === "drink") add("bebida", "bebidas", "lactea", "lacteas");
   if (intent === "cereal") add("cereal", "cereais");
-  if (intent === "capsule") add("capsula", "capsulas");
+  if (intent === "capsule") add("caps", "capsula", "capsulas");
   if (intent === "refrigerante") add("refrigerante", "refrigerantes");
   if (intent === "juice") add("suco", "sucos");
+  if (intent === "cake") add("bolo", "bolos");
 
-  return common;
+  return result;
+}
+
+function familyMatchesIntent(family: OfferFamily, intent: SearchFamilyIntent | null) {
+  if (!intent) return true;
+  if (intent === "milk") {
+    return family === "milkLiquid" || family === "milkPowder";
+  }
+  if (intent === "corn") {
+    return (
+      family === "cornFresh" ||
+      family === "cornGreen" ||
+      family === "cornPopcorn"
+    );
+  }
+  if (intent === "coffee") {
+    return (
+      family === "coffeeGround" ||
+      family === "coffeeBeans" ||
+      family === "coffeeSoluble" ||
+      family === "coffeeCapsule"
+    );
+  }
+  return family === intent;
 }
 
 function matchesSearch(
@@ -335,17 +463,11 @@ function matchesSearch(
   family: OfferFamily,
 ) {
   const queryFamily = queryOfferFamily(query);
+  if (!familyMatchesIntent(family, queryFamily)) return false;
 
-  if (queryFamily === "milk") {
-    if (family !== "milkLiquid" && family !== "milkPowder") return false;
-  } else if (queryFamily && family !== queryFamily) {
-    return false;
-  }
-
-  // Product-family terms are semantic filters rather than mandatory literal
-  // words. Brand/model tokens remain mandatory. This lets "leite ninho"
-  // match Ninho milk but not "Bolo de Leite Ninho", and lets "nescau pó"
-  // match an OCR name that omitted the word "pó".
+  // Family words act as semantic filters, while brand/model words remain
+  // literal requirements. This prevents ingredient/flavor matches without
+  // making OCR wording variations disappear from valid results.
   const semanticTokens = familySemanticTokens(queryFamily);
   const wanted = searchTokens(query).filter(
     (token) => !semanticTokens.has(token),
@@ -731,7 +853,10 @@ export default function OffersPage() {
     [normalizedSearch],
   );
   const isBroadFamilySearch =
-    explicitSearchFamily === null || explicitSearchFamily === "milk";
+    explicitSearchFamily === null ||
+    explicitSearchFamily === "milk" ||
+    explicitSearchFamily === "corn" ||
+    explicitSearchFamily === "coffee";
 
   const bestOfferByFamily = useMemo(() => {
     const best = new Map<OfferFamily, string>();
