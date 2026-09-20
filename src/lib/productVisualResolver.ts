@@ -123,6 +123,7 @@ const specificRules: Rule[] = [
   // Dairy.
   { pattern: /manteiga|margarina/, visual: "🧈", confidence: 0.99 },
   { pattern: /queijo|cream cheese|requeijao|ricota|quark/, visual: "🧀", confidence: 0.99 },
+  { pattern: /leite longa vida|leite uht|leite integral|leite desnatado|leite semidesnatado|leite zero lactose/, visual: "__milkcarton__", confidence: 0.99 },
   { pattern: /leite|batavinho/, visual: "🥛", confidence: 0.97 },
   { pattern: /ovo/, visual: "🥚", confidence: 0.99 },
   { pattern: /\bmel\b/, visual: "🍯", confidence: 0.99 },
