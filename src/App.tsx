@@ -6,7 +6,6 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import BottomNav from "@/components/BottomNav";
-import OffersQuickNav from "@/components/OffersQuickNav";
 import Index from "./pages/Index";
 import AuthPage from "./pages/AuthPage";
 import ProductDetail from "./pages/ProductDetail";
@@ -51,7 +50,6 @@ function AppRoutes() {
         <Route path="/qr-lab" element={<QrLabPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
-      <OffersQuickNav />
       <BottomNav />
     </>
   );
