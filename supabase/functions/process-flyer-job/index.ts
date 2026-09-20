@@ -98,6 +98,7 @@ REGRAS OBRIGATÓRIAS
 32. Se produto + embalagem + preço + condições forem equivalentes em duas páginas, devolva apenas UM registro e prefira a ocorrência mais completa/detalhada; em empate, prefira a ocorrência da página posterior (normalmente a seção da categoria) em vez da chamada de capa.
 33. Se uma ocorrência mostrar apenas um preço promocional e outra ocorrência do mesmo produto/embalagem mostrar preço normal + Clube/Vantagens, e o preço promocional coincidir com o preço Clube, devolva somente a ocorrência completa com price normal e club_price.
 34. NÃO consolide ofertas realmente distintas: se o mesmo produto tiver preços/condições diferentes sem relação entre preço normal e Clube, mantenha registros separados.
+35. Antes de atribuir price, club_price ou notes, confirme que o texto/preço pertence ao MESMO quadrinho visual do produto. Não capture preço ou observação de um item vizinho. Se uma observação menciona outro produto/modelo (ex.: panela recebendo nota de faqueiro), descarte essa observação e não use seus números como preço/Clube.
 `;
 
 type JobRow = {
