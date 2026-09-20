@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import ProductVisual from "@/components/ProductVisual";
+import { requiresAppActivation } from "@/lib/clubOfferRules";
 import {
   BadgeCheck,
   ChevronRight,
@@ -58,6 +59,7 @@ type FlyerItemRow = {
   club_advertised_price?: number | string | null;
   source_page?: number | null;
   image_url?: string | null;
+  offer_notes?: string[] | null;
 };
 
 type AliasRow = {
@@ -705,7 +707,7 @@ export default function OffersPage() {
         db
           .from("flyer_items")
           .select(
-            "id,flyer_id,product_id,raw_name,brand,package_quantity,package_unit,advertised_price,normalized_price,base_unit,club_price,club_advertised_price,source_page,image_url",
+            "id,flyer_id,product_id,raw_name,brand,package_quantity,package_unit,advertised_price,normalized_price,base_unit,club_price,club_advertised_price,source_page,image_url,offer_notes",
           )
           .order("created_at", { ascending: false })
           .limit(5000),
@@ -1101,6 +1103,9 @@ export default function OffersPage() {
             const VerdictIcon = ui.Icon;
             const regularPrice = Number(item.advertised_price) || 0;
             const clubPrice = validClubPrice(item);
+            const appActivationRequired =
+              clubPrice !== null &&
+              requiresAppActivation(flyer?.retailer, item.offer_notes);
             const regularPackage =
               item.package_quantity && item.package_unit
                 ? inferPackage(`${item.package_quantity}${item.package_unit}`)
@@ -1167,6 +1172,11 @@ export default function OffersPage() {
                           <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-primary">
                             Clube
                           </p>
+                          {appActivationRequired && (
+                            <p className="mb-0.5 text-[8px] font-bold uppercase leading-tight text-amber-500">
+                              * ativar desconto APP
+                            </p>
+                          )}
                           <p className="text-xl font-extrabold leading-tight text-primary">
                             {brl(candidate.price)}
                           </p>
