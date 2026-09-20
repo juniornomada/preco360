@@ -1,12 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
-import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { Trash2 } from "lucide-react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import BottomNav from "@/components/BottomNav";
+import OffersQuickNav from "@/components/OffersQuickNav";
 import Index from "./pages/Index";
 import AuthPage from "./pages/AuthPage";
 import ProductDetail from "./pages/ProductDetail";
@@ -21,25 +21,6 @@ import QrLabPage from "./pages/QrLabPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
-
-function FlyerManageShortcut() {
-  const location = useLocation();
-  const navigate = useNavigate();
-
-  if (location.pathname !== "/radar") return null;
-
-  return (
-    <button
-      type="button"
-      onClick={() => navigate("/radar/history")}
-      className="fixed bottom-20 right-4 z-40 flex items-center gap-2 rounded-full border bg-background px-3.5 py-2 text-xs font-semibold text-destructive shadow-lg"
-      aria-label="Gerenciar e excluir tabloides"
-    >
-      <Trash2 className="h-4 w-4" />
-      Gerenciar tabloides
-    </button>
-  );
-}
 
 function AppRoutes() {
   const { user, loading } = useAuth();
@@ -70,7 +51,7 @@ function AppRoutes() {
         <Route path="/qr-lab" element={<QrLabPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
-      <FlyerManageShortcut />
+      <OffersQuickNav />
       <BottomNav />
     </>
   );
