@@ -385,6 +385,13 @@ export function genericBasketFamily(value: string): GenericBasketFamily | null {
     return { key: "tomate:pelado", label: "Tomate pelado" };
   }
 
+  if (
+    startsComparison(t, "farinha") &&
+    hasComparisonToken(t, "trigo")
+  ) {
+    return { key: "farinha:trigo", label: "Farinha de trigo" };
+  }
+
   if (startsComparison(t, "papel", "higienico")) {
     return { key: "higiene:papel-higienico", label: "Papel higiênico" };
   }
