@@ -749,115 +749,228 @@ async function triggerPage(jobId: string, pageNo: number) {
   }
 }
 
+async function extractPhysicalPage(
+  job: JobRow,
+  total: number,
+  pageNo: number,
+) {
+  const file = await downloadJobFile(job, pageNo);
+  const multiImagePages =
+    Array.isArray(job.source_files) && job.source_files.length > 1;
+  const prompt =
+    EXTRACTION_PROMPT +
+    "\n\nEXECUÇÃO EM ETAPAS — PÁGINA ALVO " + pageNo + "/" + total +
+    (multiImagePages
+      ? "\nEsta imagem corresponde à página física " + pageNo + " do tabloide."
+      : "\nAnalise SOMENTE a página física " + pageNo + " deste arquivo.") +
+    (multiImagePages
+      ? "\nAnalise integralmente esta imagem e extraia todas as ofertas visíveis."
+      : "\nIgnore completamente as demais páginas nesta execução.") +
+    "\nExtraia TODAS as ofertas visíveis da página alvo." +
+    "\nNÃO localize imagens nesta etapa: use image_box zerado e image_box_confidence=0. As miniaturas serão resolvidas depois pelo nome do produto." +
+    "\nDefina source_page=" + pageNo + " em todos os registros retornados." +
+    "\nNão omita ofertas só porque o mesmo produto pode aparecer em outra página." +
+    "\nRetorne o mesmo formato JSON do schema principal.";
+
+  const { parsed, model } = await runGemini(
+    file,
+    prompt,
+    job.result?.model,
+  );
+
+  const pageOffers = validOffers(parsed).map((offer: any) => ({
+    ...offer,
+    source_page: pageNo,
+    image_box: { x: 0, y: 0, width: 0, height: 0 },
+    image_box_confidence: 0,
+  }));
+
+  return { pageNo, parsed, model, pageOffers };
+}
+
 async function processPage(jobId: string, requestedPage: number) {
   try {
     const job = await fetchJob(jobId);
     if (job.status === "completed") return;
 
     const total = Math.max(1, Math.trunc(Number(job.page_count) || 1));
-    const pageNo = Math.max(1, Math.min(total, Math.trunc(Number(requestedPage) || 1)));
     const processedPages = Array.isArray(job.result?.processed_pages)
       ? job.result.processed_pages
           .map((value: unknown) => Math.trunc(Number(value) || 0))
           .filter((value: number) => value >= 1 && value <= total)
       : [];
 
-    // Internal retries are idempotent. If this page was already persisted, continue
-    // from the first unfinished page instead of duplicating offers.
-    if (processedPages.includes(pageNo)) {
-      const next = Array.from({ length: total }, (_, index) => index + 1)
-        .find((value) => !processedPages.includes(value));
-      if (next) await triggerPage(jobId, next);
-      return;
-    }
+    const pendingPages = Array.from(
+      { length: total },
+      (_, index) => index + 1,
+    ).filter((value) => !processedPages.includes(value));
+
+    if (!pendingPages.length) return;
+
+    const requested = Math.max(
+      1,
+      Math.min(total, Math.trunc(Number(requestedPage) || 1)),
+    );
+    const startPage = pendingPages.includes(requested)
+      ? requested
+      : pendingPages[0];
+
+    const multiImagePages =
+      Array.isArray(job.source_files) && job.source_files.length > 1;
+
+    // Image flyers are independent physical files, so two pages can be read in
+    // parallel without mixing their OCR/extraction context. PDFs remain one page
+    // per invocation to avoid sending the same large PDF twice concurrently.
+    const pagesToProcess = multiImagePages
+      ? [
+          startPage,
+          ...pendingPages.filter((page) => page !== startPage).slice(0, 1),
+        ]
+      : [startPage];
+
+    const pageLabel =
+      pagesToProcess.length > 1
+        ? pagesToProcess.join(" e ") + " de " + total
+        : pagesToProcess[0] + "/" + total;
 
     await updateJob(jobId, {
       status: "processing",
       progress_current: processedPages.length,
       progress_total: total,
       progress_label:
-        "Lendo página " + pageNo + "/" + total + " com IA no servidor…",
+        (pagesToProcess.length > 1 ? "Lendo páginas " : "Lendo página ") +
+        pageLabel +
+        " com IA no servidor…",
       error_message: null,
       warning_message: null,
     });
 
-    const file = await downloadJobFile(job, pageNo);
-    const multiImagePages = Array.isArray(job.source_files) && job.source_files.length > 1;
-    const prompt =
-      EXTRACTION_PROMPT +
-      "\n\nEXECUÇÃO EM ETAPAS — PÁGINA ALVO " + pageNo + "/" + total +
-      (multiImagePages
-        ? "\nEsta imagem corresponde à página física " + pageNo + " do tabloide."
-        : "\nAnalise SOMENTE a página física " + pageNo + " deste arquivo.") +
-      (multiImagePages
-        ? "\nAnalise integralmente esta imagem e extraia todas as ofertas visíveis."
-        : "\nIgnore completamente as demais páginas nesta execução.") +
-      "\nExtraia TODAS as ofertas visíveis da página alvo." +
-      "\nNÃO localize imagens nesta etapa: use image_box zerado e image_box_confidence=0. As miniaturas serão resolvidas depois pelo nome do produto." +
-      "\nDefina source_page=" + pageNo + " em todos os registros retornados." +
-      "\nNão omita ofertas só porque o mesmo produto pode aparecer em outra página." +
-      "\nRetorne o mesmo formato JSON do schema principal.";
-
-    const { parsed, model } = await runGemini(
-      file,
-      prompt,
-      job.result?.model,
+    const settled = await Promise.allSettled(
+      pagesToProcess.map((pageNo) =>
+        extractPhysicalPage(job, total, pageNo),
+      ),
     );
 
-    const pageOffers = validOffers(parsed).map((offer: any) => ({
-      ...offer,
-      source_page: pageNo,
-      // Product images are resolved after saving from the normalized product identity.
-      image_box: { x: 0, y: 0, width: 0, height: 0 },
-      image_box_confidence: 0,
-    }));
+    const successes: Array<Awaited<ReturnType<typeof extractPhysicalPage>>> = [];
+    const failures: Array<{ pageNo: number; error: unknown }> = [];
+
+    settled.forEach((entry, index) => {
+      const pageNo = pagesToProcess[index];
+      if (entry.status === "fulfilled") {
+        successes.push(entry.value);
+      } else {
+        failures.push({ pageNo, error: entry.reason });
+      }
+    });
 
     const previousOffers = Array.isArray(job.result?.offers)
       ? job.result.offers
       : [];
-    const rawOfferCount =
-      Math.max(
-        previousOffers.length,
-        Math.trunc(Number(job.result?.raw_offer_count) || 0),
-      ) + pageOffers.length;
-    const mergedRaw = [...previousOffers, ...pageOffers];
-    const offers = dedupeOffers(mergedRaw);
-    const completedPages = [...new Set([...processedPages, pageNo])].sort(
-      (a, b) => a - b,
+    const addedOffers = successes.flatMap((entry) => entry.pageOffers);
+    const baseRawOfferCount = Math.max(
+      previousOffers.length,
+      Math.trunc(Number(job.result?.raw_offer_count) || 0),
     );
+    const rawOfferCount = baseRawOfferCount + addedOffers.length;
+    const offers = dedupeOffers([...previousOffers, ...addedOffers]);
+    const completedPages = [
+      ...new Set([
+        ...processedPages,
+        ...successes.map((entry) => entry.pageNo),
+      ]),
+    ].sort((a, b) => a - b);
+
+    let retailer =
+      job.result?.retailer ??
+      job.retailer ??
+      null;
+    let validFrom =
+      job.result?.valid_from ??
+      job.valid_from ??
+      null;
+    let validTo =
+      job.result?.valid_to ??
+      job.valid_to ??
+      null;
+    let model = job.result?.model ?? null;
+
+    for (const success of successes) {
+      model = success.model || model;
+      retailer = success.parsed.retailer ?? retailer;
+      validFrom = alignDateYearToSource(
+        success.parsed.valid_from ?? validFrom,
+        job.source_file_name,
+      );
+      validTo = alignDateYearToSource(
+        success.parsed.valid_to ?? validTo,
+        job.source_file_name,
+      );
+    }
+
+    const retryCounts =
+      job.result?.page_retry_counts &&
+      typeof job.result.page_retry_counts === "object"
+        ? { ...job.result.page_retry_counts }
+        : {};
+
+    let terminalFailure:
+      | { pageNo: number; message: string }
+      | null = null;
+
+    for (const failure of failures) {
+      const message =
+        failure.error instanceof Error
+          ? failure.error.message
+          : String(failure.error ?? "Falha inesperada ao processar esta página.");
+      const currentRetries = Math.max(
+        0,
+        Math.trunc(Number(retryCounts[String(failure.pageNo)]) || 0),
+      );
+
+      if (isTransientAiFailure(failure.error) && currentRetries < 2) {
+        retryCounts[String(failure.pageNo)] = currentRetries + 1;
+      } else if (!terminalFailure) {
+        terminalFailure = {
+          pageNo: failure.pageNo,
+          message,
+        };
+      }
+    }
 
     const result = {
       ...(job.result ?? {}),
       ok: true,
       engine: "gemini-vision",
       model,
-      retailer:
-        parsed.retailer ??
-        job.result?.retailer ??
-        job.retailer ??
-        null,
-      valid_from:
-        alignDateYearToSource(
-          parsed.valid_from ??
-            job.result?.valid_from ??
-            job.valid_from ??
-            null,
-          job.source_file_name,
-        ),
-      valid_to:
-        alignDateYearToSource(
-          parsed.valid_to ??
-            job.result?.valid_to ??
-            job.valid_to ??
-            null,
-          job.source_file_name,
-        ),
+      retailer,
+      valid_from: validFrom,
+      valid_to: validTo,
       page_count: total,
       processed_pages: completedPages,
+      page_retry_counts: retryCounts,
       raw_offer_count: rawOfferCount,
       deduplicated_count: Math.max(0, rawOfferCount - offers.length),
       offers,
     };
+
+    if (terminalFailure) {
+      await updateJob(jobId, {
+        status: "failed",
+        progress_current: completedPages.length,
+        progress_total: total,
+        progress_label:
+          "A importação parou na página " +
+          terminalFailure.pageNo +
+          ". O progresso anterior foi preservado.",
+        retailer,
+        valid_from: validFrom,
+        valid_to: validTo,
+        result,
+        error_message: terminalFailure.message,
+        completed_at: new Date().toISOString(),
+      });
+      return;
+    }
 
     if (completedPages.length >= total) {
       if (!offers.length) {
@@ -873,48 +986,69 @@ async function processPage(jobId: string, requestedPage: number) {
         progress_label:
           offers.length + " ofertas importadas com sucesso." +
           (result.deduplicated_count
-            ? " " + result.deduplicated_count + " repetição(ões) consolidada(s)."
+            ? " " +
+              result.deduplicated_count +
+              " repetição(ões) consolidada(s)."
             : ""),
-        retailer: result.retailer,
-        valid_from: result.valid_from,
-        valid_to: result.valid_to,
+        retailer,
+        valid_from: validFrom,
+        valid_to: validTo,
         result,
         missing_pages: [],
+        error_message: null,
+        warning_message: null,
         completed_at: new Date().toISOString(),
       });
       return;
     }
+
+    const failedPages = failures.map((entry) => entry.pageNo);
+    const remainingPages = Array.from(
+      { length: total },
+      (_, index) => index + 1,
+    ).filter((value) => !completedPages.includes(value));
+
+    const nextPage =
+      failedPages.find((page) => remainingPages.includes(page)) ??
+      remainingPages[0];
+
+    const completedLabel =
+      successes.length > 1
+        ? "Páginas " +
+          successes.map((entry) => entry.pageNo).join(" e ") +
+          " concluídas"
+        : successes.length === 1
+          ? "Página " + successes[0].pageNo + " concluída"
+          : "Tentativa concluída";
 
     await updateJob(jobId, {
       status: "processing",
       progress_current: completedPages.length,
       progress_total: total,
       progress_label:
-        "Página " + pageNo + "/" + total +
-        " concluída · " + offers.length + " ofertas acumuladas. Continuando…",
-      retailer: result.retailer,
-      valid_from: result.valid_from,
-      valid_to: result.valid_to,
+        completedLabel +
+        " · " +
+        offers.length +
+        " ofertas acumuladas. Continuando…",
+      retailer,
+      valid_from: validFrom,
+      valid_to: validTo,
       result,
+      error_message: null,
+      warning_message: failures.length
+        ? "Uma página demorou a responder e será tentada novamente automaticamente."
+        : null,
       completed_at: null,
     });
 
-    const nextPage = Array.from({ length: total }, (_, index) => index + 1)
-      .find((value) => !completedPages.includes(value));
     if (nextPage) await triggerPage(jobId, nextPage);
   } catch (error) {
-    console.error("process-flyer-job page", requestedPage, error);
-
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Falha inesperada ao processar esta página.";
+    console.error("process-flyer-job page batch", requestedPage, error);
 
     const currentJob = await fetchJob(jobId).catch(() => null);
-    const total = Math.max(1, Math.trunc(Number(currentJob?.page_count) || 1));
-    const pageNo = Math.max(
+    const total = Math.max(
       1,
-      Math.min(total, Math.trunc(Number(requestedPage) || 1)),
+      Math.trunc(Number(currentJob?.page_count) || 1),
     );
     const processedPages = Array.isArray(currentJob?.result?.processed_pages)
       ? currentJob.result.processed_pages
@@ -922,60 +1056,16 @@ async function processPage(jobId: string, requestedPage: number) {
           .filter((value: number) => value >= 1 && value <= total)
       : [];
 
-    const retryCounts =
-      currentJob?.result?.page_retry_counts &&
-      typeof currentJob.result.page_retry_counts === "object"
-        ? currentJob.result.page_retry_counts
-        : {};
-    const currentRetries = Math.max(
-      0,
-      Math.trunc(Number(retryCounts[String(pageNo)]) || 0),
-    );
-
-    if (
-      currentJob &&
-      isTransientAiFailure(error) &&
-      currentRetries < 2
-    ) {
-      const nextRetry = currentRetries + 1;
-      const retryResult = {
-        ...(currentJob.result ?? {}),
-        page_retry_counts: {
-          ...retryCounts,
-          [String(pageNo)]: nextRetry,
-        },
-      };
-
-      try {
-        await updateJob(jobId, {
-          status: "processing",
-          progress_current: processedPages.length,
-          progress_total: total,
-          progress_label:
-            "Página " + pageNo + "/" + total +
-            " demorou a responder. Nova tentativa automática " +
-            nextRetry + "/2…",
-          result: retryResult,
-          error_message: null,
-          warning_message:
-            "A IA demorou em uma página, mas o Radar 360 está retomando automaticamente.",
-          completed_at: null,
-        });
-
-        await triggerPage(jobId, pageNo);
-        return;
-      } catch (retryError) {
-        console.error("process-flyer-job retry schedule", pageNo, retryError);
-      }
-    }
-
     await updateJob(jobId, {
       status: "failed",
       progress_current: processedPages.length,
       progress_total: total,
       progress_label:
-        "A importação parou na página " + pageNo + ". O progresso anterior foi preservado.",
-      error_message: message,
+        "A importação foi interrompida. O progresso anterior foi preservado.",
+      error_message:
+        error instanceof Error
+          ? error.message
+          : "Falha inesperada ao processar estas páginas.",
       completed_at: new Date().toISOString(),
     }).catch(() => {});
   }
@@ -1195,8 +1285,8 @@ Deno.serve(async (req: Request) => {
           .find((value) => !processedPages.includes(value)) ?? total;
     }
 
-    // New architecture: each invocation processes exactly one physical page,
-    // persists it, then starts the next page in a separate invocation.
+    // Multi-image flyers process up to two independent physical pages in
+    // parallel per invocation. PDFs remain page-by-page.
     EdgeRuntime.waitUntil(processPage(jobId, pageNo));
 
     return json(202, {
