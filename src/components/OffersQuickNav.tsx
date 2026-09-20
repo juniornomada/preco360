@@ -21,13 +21,13 @@ export default function OffersQuickNav() {
 
   const items = [
     {
-      label: "Radar 360",
+      label: "Radar",
       path: "/radar",
       active: radarActive,
       Icon: Radar,
     },
     {
-      label: "Cesta 360",
+      label: "Cesta",
       path: "/offers/basket",
       active: basketActive,
       Icon: ShoppingBasket,
