@@ -261,12 +261,15 @@ export default function MarketBasketPage() {
 
   const visibleGroups = useMemo(() => {
     const q = fallbackKey(search);
-    if (!q) return groups;
+    if (q.length < 2) return [];
+
     const tokens = q.split(/\s+/);
-    return groups.filter((group) => {
-      const haystack = fallbackKey(group.label);
-      return tokens.every((token) => haystack.includes(token));
-    });
+    return groups
+      .filter((group) => {
+        const haystack = fallbackKey(group.label);
+        return tokens.every((token) => haystack.includes(token));
+      })
+      .slice(0, 30);
   }, [groups, search]);
 
   const selectedGroups = useMemo(
@@ -387,7 +390,7 @@ export default function MarketBasketPage() {
       ...current,
       [key]: Math.max(1, current[key] ?? 0),
     }));
-    setSearch("");
+    setShowItems(false);
   };
 
   const changeQty = (key: string, delta: number) =>
@@ -674,11 +677,25 @@ export default function MarketBasketPage() {
                 );
               })}
 
-              {!loadingOffers && visibleGroups.length === 0 && (
-                <p className="py-6 text-center text-sm text-muted-foreground">
-                  Nenhuma oferta vigente encontrada para essa busca.
-                </p>
+              {!loadingOffers && search.trim().length < 2 && (
+                <div className="py-6 text-center">
+                  <Search className="mx-auto h-6 w-6 text-primary" />
+                  <p className="mt-2 text-sm font-medium">
+                    Digite pelo menos 2 letras
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Assim a Cesta 360 mostra somente os produtos relevantes e continua rápida no celular.
+                  </p>
+                </div>
               )}
+
+              {!loadingOffers &&
+                search.trim().length >= 2 &&
+                visibleGroups.length === 0 && (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    Nenhuma oferta vigente encontrada para essa busca.
+                  </p>
+                )}
             </div>
           )}
         </CardContent>
