@@ -574,7 +574,7 @@ export default function FlyerPage() {
             toast({
               title: "Importação retomada automaticamente",
               description:
-                "As páginas já concluídas foram preservadas. O Radar 360 continuará da página pendente.",
+                "As páginas já concluídas foram preservadas. O Radar continuará da página pendente.",
             });
           } catch (error: any) {
             setProcessing(false);
@@ -1229,7 +1229,7 @@ export default function FlyerPage() {
         title: replacedExisting ? "Tabloide reprocessado" : "Preços ofertados salvos",
         description: replacedExisting
           ? `${validItems.length} ofertas substituíram a leitura anterior desse mesmo arquivo.`
-          : `${validItems.length} ofertas agora fazem parte do histórico do Radar 360.`,
+          : `${validItems.length} ofertas agora fazem parte do histórico do Radar.`,
       });
       resetImportForm();
       setView("history");
@@ -1248,7 +1248,7 @@ export default function FlyerPage() {
     <div className="page-container !pb-40 mx-auto w-full max-w-3xl">
       <header className="mb-3 flex items-start justify-between gap-3 sm:mb-4">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary sm:text-xs">Radar 360</p>
+          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary sm:text-xs">Radar</p>
           <h1 className="mt-0.5 text-[clamp(1.45rem,6vw,2rem)] font-extrabold leading-tight tracking-tight sm:mt-1">
             Base de ofertas
           </h1>
@@ -1289,7 +1289,7 @@ export default function FlyerPage() {
         <span className="flex items-center gap-2">
           <ShoppingBasket className="h-4 w-4 text-primary" />
           <span className="text-left">
-            <span className="block text-sm font-bold">Cesta 360 · Comparar supermercados</span>
+            <span className="block text-sm font-bold">Cesta · Comparar supermercados</span>
             <span className="block text-[11px] font-normal text-muted-foreground">
               Monte sua lista e veja onde a compra toda vale mais a pena
             </span>
