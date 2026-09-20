@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { genericBasketFamily } from "@/lib/flyerAnalysis";
+import { requiresAppActivation } from "@/lib/clubOfferRules";
 
 const db = supabase as any;
 const STORAGE_KEY = "preco360-basket-selection-v2";
@@ -43,6 +44,7 @@ type Offer = {
   base_unit: "kg" | "l" | "un";
   package_quantity: number | null;
   package_unit: string | null;
+  offer_notes?: string[] | null;
 };
 
 type OfferWithMarket = Offer & {
@@ -243,7 +245,7 @@ export default function MarketBasketPage() {
       if (!ids.length) return [];
       const { data, error } = await db
         .from("flyer_items")
-        .select("id,flyer_id,product_id,raw_name,normalized_name,advertised_price,normalized_price,club_price,club_advertised_price,base_unit,package_quantity,package_unit")
+        .select("id,flyer_id,product_id,raw_name,normalized_name,advertised_price,normalized_price,club_price,club_advertised_price,base_unit,package_quantity,package_unit,offer_notes")
         .in("flyer_id", ids)
         .gt("advertised_price", 0);
       if (error) throw error;
@@ -638,6 +640,12 @@ export default function MarketBasketPage() {
                             {validClubPrice(row.offer)
                               ? "clube " +
                                 brl(effectiveAdvertisedPrice(row.offer)) +
+                                (requiresAppActivation(
+                                  row.offer.retailer,
+                                  row.offer.offer_notes,
+                                )
+                                  ? " · ativar desconto APP"
+                                  : "") +
                                 " · normal " +
                                 brl(Number(row.offer.advertised_price))
                               : "embalagem " +
@@ -794,7 +802,14 @@ export default function MarketBasketPage() {
                             ? "melhor custo " + normalizedPriceLabel(best) +
                               " · " +
                               (validClubPrice(best)
-                                ? "clube " + brl(effectiveAdvertisedPrice(best))
+                                ? "clube " +
+                                  brl(effectiveAdvertisedPrice(best)) +
+                                  (requiresAppActivation(
+                                    best.retailer,
+                                    best.offer_notes,
+                                  )
+                                    ? " · ativar desconto APP"
+                                    : "")
                                 : "embalagem " + brl(Number(best.advertised_price)))
                             : "melhor oferta " +
                               (best ? brl(effectiveAdvertisedPrice(best)) : brl(0))}
@@ -919,6 +934,15 @@ export default function MarketBasketPage() {
                               <p className="font-semibold">
                                 {brl(effectiveAdvertisedPrice(row.offer))}
                               </p>
+                              {validClubPrice(row.offer) &&
+                                requiresAppActivation(
+                                  row.offer.retailer,
+                                  row.offer.offer_notes,
+                                ) && (
+                                  <p className="text-[9px] font-bold uppercase leading-tight text-amber-500">
+                                    ativar desconto APP
+                                  </p>
+                                )}
                               {normalizedPriceLabel(row.offer) && (
                                 <p className="text-[10px] text-muted-foreground">
                                   {normalizedPriceLabel(row.offer)}
