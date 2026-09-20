@@ -204,6 +204,27 @@ function parseJsonResponse(text: string) {
     : new Error("A IA retornou JSON inválido.");
 }
 
+function alignDateYearToSource(value: unknown, sourceFileName: string) {
+  const date = typeof value === "string" ? value.trim() : "";
+  if (!/^20\d{2}-\d{2}-\d{2}$/.test(date)) return value ?? null;
+
+  const sourceYear =
+    sourceFileName.match(/(?:^|[_-])(20\d{2})(?=[_.-]|$)/)?.[1] ?? null;
+  if (!sourceYear) return date;
+
+  const detectedYear = Number(date.slice(0, 4));
+  const expectedYear = Number(sourceYear);
+  if (
+    Number.isFinite(detectedYear) &&
+    Number.isFinite(expectedYear) &&
+    Math.abs(detectedYear - expectedYear) === 1
+  ) {
+    return sourceYear + date.slice(4);
+  }
+
+  return date;
+}
+
 function validOffers(parsed: any) {
   return Array.isArray(parsed?.offers)
     ? parsed.offers.filter((offer: any) =>
@@ -798,15 +819,21 @@ async function processPage(jobId: string, requestedPage: number) {
         job.retailer ??
         null,
       valid_from:
-        parsed.valid_from ??
-        job.result?.valid_from ??
-        job.valid_from ??
-        null,
+        alignDateYearToSource(
+          parsed.valid_from ??
+            job.result?.valid_from ??
+            job.valid_from ??
+            null,
+          job.source_file_name,
+        ),
       valid_to:
-        parsed.valid_to ??
-        job.result?.valid_to ??
-        job.valid_to ??
-        null,
+        alignDateYearToSource(
+          parsed.valid_to ??
+            job.result?.valid_to ??
+            job.valid_to ??
+            null,
+          job.source_file_name,
+        ),
       page_count: total,
       processed_pages: completedPages,
       raw_offer_count: rawOfferCount,
