@@ -18,7 +18,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { genericBasketFamily } from "@/lib/flyerAnalysis";
+import { genericBasketFamilies } from "@/lib/flyerAnalysis";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
 
 const db = supabase as any;
@@ -307,10 +307,11 @@ export default function MarketBasketPage() {
         );
       }
 
-      // A generic family represents the need, not a specific SKU. All brands
-      // and package sizes from active flyers compete inside the same family.
-      const family = genericBasketFamily(offer.raw_name);
-      if (family) {
+      // A generic family represents the need, not a specific SKU. Most offers
+      // belong to one generic family; some can also expose a useful brand-level
+      // need (for example Nescau em pó) without leaving the broader
+      // "Achocolatado em pó" comparison.
+      for (const family of genericBasketFamilies(offer.raw_name)) {
         addOffer(
           genericMap,
           "g:" + family.key + "|u:" + offer.base_unit,
@@ -739,12 +740,12 @@ export default function MarketBasketPage() {
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Leite em pó, molho de tomate, farinha..."
+              placeholder="Leite em pó, papel higiênico, azeite..."
               className="h-11 pl-9"
             />
           </div>
           <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-            Procure pelo que você precisa, não pela marca. Ex.: “leite em pó” compara Ninho, Glória e outras marcas capturadas pelo Radar.
+            Procure pelo que você precisa, sem escolher uma marca. Ex.: “papel higiênico”, “azeite” ou “achocolatado em pó”. Se quiser uma marca, “Nescau” também reúne os tamanhos disponíveis.
           </p>
 
           <button
