@@ -19,7 +19,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
 const db = supabase as any;
-const STORAGE_KEY = "preco360-basket-selection-v1";
+const STORAGE_KEY = "preco360-basket-selection-v2";
 
 type Flyer = {
   id: string;
@@ -97,6 +97,53 @@ function comparablePrice(offer: OfferWithMarket) {
     return normalized;
   }
   return advertised;
+}
+
+function packageBaseQuantity(offer: OfferWithMarket) {
+  const quantity = Number(offer.package_quantity);
+  const unit = (offer.package_unit ?? "").toLowerCase();
+  if (!Number.isFinite(quantity) || quantity <= 0) return 1;
+
+  if (offer.base_unit === "kg") {
+    if (unit === "g") return quantity / 1000;
+    if (unit === "kg") return quantity;
+  }
+
+  if (offer.base_unit === "l") {
+    if (unit === "ml") return quantity / 1000;
+    if (unit === "l") return quantity;
+  }
+
+  return 1;
+}
+
+function packageLabel(offer: OfferWithMarket) {
+  const quantity = Number(offer.package_quantity);
+  const unit = offer.package_unit ?? "";
+  if (Number.isFinite(quantity) && quantity > 0 && unit) {
+    const formatted = Number.isInteger(quantity)
+      ? String(quantity)
+      : quantity.toLocaleString("pt-BR");
+    return formatted + unit;
+  }
+  return offer.base_unit === "un" ? "1 un" : "1 embalagem";
+}
+
+function desiredBaseQuantity(group: Group, packageCount: number) {
+  const reference = [...group.offers].sort(compareOfferValue)[0];
+  if (!reference) return packageCount;
+  return packageBaseQuantity(reference) * packageCount;
+}
+
+function equivalentGroupCost(
+  group: Group,
+  offer: OfferWithMarket,
+  packageCount: number,
+) {
+  if (offer.base_unit === "kg" || offer.base_unit === "l") {
+    return comparablePrice(offer) * desiredBaseQuantity(group, packageCount);
+  }
+  return Number(offer.advertised_price) * packageCount;
 }
 
 function compareOfferValue(a: OfferWithMarket, b: OfferWithMarket) {
@@ -257,13 +304,13 @@ export default function MarketBasketPage() {
         const best = bestOfferByGroup.get(group.key) ?? null;
 
         if (offer) {
-          const offerComparablePrice = comparablePrice(offer);
           covered += 1;
-          total += offerComparablePrice * group.quantity;
+          const offerCost = equivalentGroupCost(group, offer, group.quantity);
+          total += offerCost;
           if (best) {
-            const bestPrice = comparablePrice(best);
-            bestComparableTotal += bestPrice * group.quantity;
-            premiumVsBest += (offerComparablePrice - bestPrice) * group.quantity;
+            const bestCost = equivalentGroupCost(group, best, group.quantity);
+            bestComparableTotal += bestCost;
+            premiumVsBest += offerCost - bestCost;
           }
         }
       }
@@ -299,7 +346,7 @@ export default function MarketBasketPage() {
           label: group.label,
           quantity: group.quantity,
           offer,
-          subtotal: comparablePrice(offer) * group.quantity,
+          subtotal: equivalentGroupCost(group, offer, group.quantity),
         };
       })
       .filter(Boolean) as Array<{
@@ -334,6 +381,14 @@ export default function MarketBasketPage() {
       else next[key] = 1;
       return next;
     });
+
+  const addToBasket = (key: string) => {
+    setSelected((current) => ({
+      ...current,
+      [key]: Math.max(1, current[key] ?? 0),
+    }));
+    setSearch("");
+  };
 
   const changeQty = (key: string, delta: number) =>
     setSelected((current) => {
@@ -425,7 +480,12 @@ export default function MarketBasketPage() {
                 {split.rows.map((row) => (
                   <div key={row.key} className="flex items-start justify-between gap-3 rounded-lg bg-muted/40 p-3">
                     <div className="min-w-0">
-                      <p className="font-medium">{row.quantity}× {row.label}</p>
+                      <p className="font-medium">
+                        {row.quantity}× {row.label}
+                        <span className="ml-1 text-xs font-normal text-muted-foreground">
+                          ({row.quantity} pacote{row.quantity > 1 ? "s" : ""})
+                        </span>
+                      </p>
                       <p className="text-xs text-muted-foreground">
                         {row.offer.retailer} · válido até {dateBr(row.offer.validTo)}
                       </p>
@@ -466,6 +526,61 @@ export default function MarketBasketPage() {
             )}
           </div>
 
+          {selectedGroups.length > 0 && (
+            <div className="mt-3 space-y-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                Na cesta
+              </p>
+              {selectedGroups.map((group) => {
+                const qty = selected[group.key] ?? 0;
+                const reference = [...group.offers].sort(compareOfferValue)[0];
+                return (
+                  <div
+                    key={"basket-" + group.key}
+                    className="flex items-center gap-3 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2.5"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                      <Check className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">{group.label}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {qty} pacote{qty > 1 ? "s" : ""} · {reference ? packageLabel(reference) : "embalagem"}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1 rounded-lg border bg-background p-1">
+                      <button
+                        type="button"
+                        aria-label={"Diminuir quantidade de " + group.label}
+                        className="flex h-8 w-8 items-center justify-center rounded-md text-lg active:bg-muted"
+                        onClick={() => changeQty(group.key, -1)}
+                      >−</button>
+                      <span className="min-w-7 text-center text-sm font-bold">{qty}</span>
+                      <button
+                        type="button"
+                        aria-label={"Aumentar quantidade de " + group.label}
+                        className="flex h-8 w-8 items-center justify-center rounded-md text-lg active:bg-muted"
+                        onClick={() => changeQty(group.key, 1)}
+                      >+</button>
+                    </div>
+                  </div>
+                );
+              })}
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 w-full border-primary/25 text-primary"
+                onClick={() => {
+                  setSearch("");
+                  setShowItems(true);
+                }}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Adicionar outro produto
+              </Button>
+            </div>
+          )}
+
           <div className="relative mt-3">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <Input
@@ -493,26 +608,11 @@ export default function MarketBasketPage() {
                 return (
                   <div
                     key={group.key}
-                    role="button"
-                    tabIndex={0}
-                    aria-pressed={qty > 0}
-                    aria-label={
-                      qty
-                        ? "Remover " + group.label + " da lista"
-                        : "Adicionar " + group.label + " à lista"
-                    }
-                    onClick={() => toggle(group.key)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        toggle(group.key);
-                      }
-                    }}
                     className={
-                      "cursor-pointer select-none rounded-xl border p-3 transition active:scale-[0.995] " +
+                      "rounded-xl border p-3 transition " +
                       (qty
                         ? "border-primary/50 bg-primary/10 ring-1 ring-primary/20"
-                        : "bg-card hover:border-primary/25")
+                        : "bg-card")
                     }
                   >
                     <div className="flex items-start gap-3">
@@ -525,7 +625,7 @@ export default function MarketBasketPage() {
                             : "bg-background text-muted-foreground")
                         }
                       >
-                        {qty ? <Check className="h-5 w-5" /> : null}
+                        {qty ? <Check className="h-5 w-5" /> : <ShoppingBasket className="h-4 w-4" />}
                       </span>
 
                       <div className="min-w-0 flex-1">
@@ -537,38 +637,37 @@ export default function MarketBasketPage() {
                               " · embalagem " + brl(Number(best.advertised_price))
                             : "melhor oferta " + brl(Number(best?.advertised_price ?? 0))}
                         </p>
-                        <p className="mt-1 text-[11px] font-medium text-primary">
-                          {qty ? "Selecionado" : "Toque no produto para adicionar"}
-                        </p>
+                        {best && (
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            1 pacote = {packageLabel(best)}
+                          </p>
+                        )}
                       </div>
+                    </div>
 
-                      {qty > 0 && (
-                        <div
-                          className="flex shrink-0 items-center gap-1 rounded-lg border bg-background p-1"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            aria-label={"Diminuir quantidade de " + group.label}
-                            className="flex h-9 w-9 items-center justify-center rounded-md text-lg active:bg-muted"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              changeQty(group.key, -1);
-                            }}
-                          >−</button>
-                          <span className="min-w-8 text-center text-sm font-bold">
-                            {qty}{group.baseUnit === "un" ? "" : " " + unitLabel(group.baseUnit)}
+                    <div className="mt-3">
+                      {qty > 0 ? (
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs font-semibold text-primary">
+                            Na cesta · {qty} pacote{qty > 1 ? "s" : ""}
                           </span>
                           <button
                             type="button"
-                            aria-label={"Aumentar quantidade de " + group.label}
-                            className="flex h-9 w-9 items-center justify-center rounded-md text-lg active:bg-muted"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              changeQty(group.key, 1);
-                            }}
-                          >+</button>
+                            className="text-xs font-semibold text-muted-foreground underline-offset-2 hover:underline"
+                            onClick={() => toggle(group.key)}
+                          >
+                            Remover
+                          </button>
                         </div>
+                      ) : (
+                        <Button
+                          type="button"
+                          className="h-10 w-full"
+                          onClick={() => addToBasket(group.key)}
+                        >
+                          <ShoppingBasket className="mr-2 h-4 w-4" />
+                          Adicionar à cesta
+                        </Button>
                       )}
                     </div>
                   </div>
@@ -627,9 +726,10 @@ export default function MarketBasketPage() {
       )}
 
       <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">
-        Para produtos em g/kg ou ml/L, a Cesta 360 compara pelo valor equivalente em R$/kg ou R$/L:
-        cada quantidade selecionada representa 1 kg ou 1 L de referência, enquanto o preço da
-        embalagem continua visível. Itens por unidade usam o preço da embalagem. O comparador usa
+        A quantidade da cesta representa número de embalagens. Por exemplo, arroz de 5 kg entra
+        como 1 pacote de 5 kg; dois pacotes representam 10 kg. Para comparar supermercados com
+        embalagens diferentes, a Cesta 360 continua normalizando internamente por R$/kg ou R$/L.
+        Itens por unidade usam o preço da própria embalagem. O comparador usa
         somente preços dos tabloides importados e ainda vigentes. Ausência de um item no tabloide
         não significa que o mercado não venda o produto — apenas que não temos um preço promocional
         válido para ele.
