@@ -127,9 +127,49 @@ function searchTokens(value: string) {
     });
 }
 
+function matchesProductIntent(value: string, query: string) {
+  const q = normalizeSearchText(query).trim();
+  const source = normalizeSearchText(value).trim();
+  if (!q || !source) return true;
+
+  const wantsDairyDrink =
+    /\bbebida\s+lactea\b/.test(q) ||
+    (/\bbebida\b/.test(q) && /\blactea\b/.test(q));
+  const sourceIsDairyDrink = /\bbebida\s+lactea\b/.test(source);
+
+  if (wantsDairyDrink && !sourceIsDairyDrink) return false;
+
+  // "Achocolatado" by itself refers to the product family. A dairy drink with
+  // chocolate flavor should only enter when the user explicitly asks for it.
+  const wantsChocolatePowderFamily =
+    /\bachocolatad[oa]s?\b/.test(q) && !wantsDairyDrink;
+  if (wantsChocolatePowderFamily && sourceIsDairyDrink) return false;
+
+  const wantsPowder =
+    /\bem\s+po\b/.test(q) ||
+    (q.split(/\s+/).length >= 2 && /(?:^|\s)po(?:\s|$)/.test(q));
+  if (wantsPowder && !/(?:^|\s)po(?:\s|$)/.test(source)) return false;
+
+  const wantsCereal = /\bcereais?\b/.test(q);
+  if (wantsCereal && !/\bcereais?\b/.test(source)) return false;
+
+  const wantsCapsule = /\bcapsulas?\b/.test(q);
+  if (wantsCapsule && !/\bcapsulas?\b/.test(source)) return false;
+
+  const wantsRefrigerante = /\brefrigerantes?\b/.test(q);
+  if (wantsRefrigerante && !/\brefrigerantes?\b/.test(source)) return false;
+
+  const wantsJuice = /\bsucos?\b/.test(q);
+  if (wantsJuice && !/\bsucos?\b/.test(source)) return false;
+
+  return true;
+}
+
 function matchesSearch(value: string, query: string) {
   const wanted = searchTokens(query);
   if (!wanted.length) return true;
+  if (!matchesProductIntent(value, query)) return false;
+
   const source = searchTokens(value);
   return wanted.every((needle) =>
     source.some((token) =>
@@ -413,7 +453,7 @@ export default function OffersPage() {
           productId,
           candidate,
           verdict,
-          searchText: `${item.raw_name} ${item.brand ?? ""} ${product?.name ?? ""} ${product?.brand ?? ""}`,
+          searchText: `${item.raw_name} ${item.brand ?? ""} ${product?.name ?? ""} ${product?.brand ?? ""} ${product?.category ?? ""}`,
         };
       })
       .sort((a, b) => {
