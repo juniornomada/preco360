@@ -386,34 +386,72 @@ export default function OffersPage() {
     if (!preparedOffers.length) return [];
     if (!hasSearch) return search.trim() ? [] : preparedOffers.slice(0, 12);
 
-    return preparedOffers
-      .filter((entry) => matchesSearch(entry.searchText, normalizedSearch))
-      .sort((a, b) => {
-        const relevanceDiff =
-          searchRelevance(b, normalizedSearch) -
-          searchRelevance(a, normalizedSearch);
-        if (relevanceDiff) return relevanceDiff;
+    const matches = preparedOffers.filter((entry) =>
+      matchesSearch(entry.searchText, normalizedSearch),
+    );
 
-        // For the same product/family, price is the primary decision signal.
-        // candidateFromItem already uses a valid club price when available,
-        // so this compares the amount the user can actually pay.
-        if (comparableOfferIdentity(a.item, b.item)) {
-          const priceDiff =
-            a.candidate.normalizedPrice - b.candidate.normalizedPrice;
-          if (Math.abs(priceDiff) > 0.0001) return priceDiff;
+    // Build stable semantic groups first. A pairwise comparator alone is not
+    // enough here because an unrelated item between two comparable offers can
+    // make Array.sort non-transitive (e.g. Nescau powder -> Nescau drink ->
+    // Nescau powder). Grouping guarantees every comparable family is sorted
+    // internally by its real effective unit price.
+    const groups: typeof matches[] = [];
+
+    for (const entry of matches) {
+      const group = groups.find((candidateGroup) =>
+        candidateGroup.some((member) =>
+          comparableOfferIdentity(member.item, entry.item),
+        ),
+      );
+
+      if (group) group.push(entry);
+      else groups.push([entry]);
+    }
+
+    const sortedGroups = groups
+      .map((group, originalIndex) => {
+        const sorted = [...group].sort((a, b) => {
+          const relevanceDiff =
+            searchRelevance(b, normalizedSearch) -
+            searchRelevance(a, normalizedSearch);
+          if (relevanceDiff) return relevanceDiff;
+
+          if (a.candidate.baseUnit === b.candidate.baseUnit) {
+            const priceDiff =
+              a.candidate.normalizedPrice - b.candidate.normalizedPrice;
+            if (Math.abs(priceDiff) > 0.0001) return priceDiff;
+          }
 
           const packagePriceDiff = a.candidate.price - b.candidate.price;
           if (Math.abs(packagePriceDiff) > 0.0001) return packagePriceDiff;
-        }
 
-        // Different families/units are not directly price-comparable
-        // (e.g. Nescau bebida 180ml vs Nescau em pó 350g).
-        const verdictDiff =
-          verdictOrder[a.verdict.key] - verdictOrder[b.verdict.key];
-        if (verdictDiff) return verdictDiff;
+          const verdictDiff =
+            verdictOrder[a.verdict.key] - verdictOrder[b.verdict.key];
+          if (verdictDiff) return verdictDiff;
 
-        return 0;
+          return 0;
+        });
+
+        return {
+          sorted,
+          originalIndex,
+          relevance: Math.max(
+            ...group.map((entry) =>
+              searchRelevance(entry, normalizedSearch),
+            ),
+          ),
+          verdict: Math.min(
+            ...group.map((entry) => verdictOrder[entry.verdict.key]),
+          ),
+        };
+      })
+      .sort((a, b) => {
+        if (a.relevance !== b.relevance) return b.relevance - a.relevance;
+        if (a.verdict !== b.verdict) return a.verdict - b.verdict;
+        return a.originalIndex - b.originalIndex;
       });
+
+    return sortedGroups.flatMap((group) => group.sorted);
   }, [preparedOffers, hasSearch, normalizedSearch, search]);
 
   const activeFlyerCount = useMemo(() => {
