@@ -247,20 +247,74 @@ export default function OffersPage() {
   const hasSearch = normalizedSearch.length >= 2;
   const today = useMemo(() => localDateKey(), []);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["live-market-offers", user?.id, today],
+  const {
+    data: flyers = [],
+    isLoading: loadingFlyers,
+    error: flyersError,
+  } = useQuery({
+    queryKey: ["live-market-flyers", user?.id, today],
     enabled: !!user,
+    staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const { data, error } = await db
+        .from("flyers")
+        .select("id,retailer,title,valid_from,valid_to")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      return (data ?? []) as FlyerRow[];
+    },
+  });
+
+  const activeFlyers = useMemo(
+    () =>
+      flyers.filter(
+        (flyer) =>
+          !!flyer.valid_from &&
+          !!flyer.valid_to &&
+          flyer.valid_from <= today &&
+          flyer.valid_to >= today,
+      ),
+    [flyers, today],
+  );
+
+  const activeFlyerIds = useMemo(
+    () => activeFlyers.map((flyer) => flyer.id),
+    [activeFlyers],
+  );
+
+  const { data: activeOfferCount = 0 } = useQuery({
+    queryKey: ["live-market-offer-count", user?.id, today, activeFlyerIds],
+    enabled: !!user && activeFlyerIds.length > 0,
+    staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const { count, error } = await db
+        .from("flyer_items")
+        .select("id", { count: "exact", head: true })
+        .in("flyer_id", activeFlyerIds);
+
+      if (error) throw error;
+      return count ?? 0;
+    },
+  });
+
+  const {
+    data: searchData,
+    isLoading: loadingSearchData,
+    error: searchDataError,
+  } = useQuery({
+    queryKey: ["live-market-offers-search-base", user?.id, today],
+    enabled: !!user && hasSearch,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const [
-        { data: flyers, error: flyersError },
         { data: items, error: itemsError },
         { data: products, error: productsError },
         { data: aliases, error: aliasesError },
       ] = await Promise.all([
-        db
-          .from("flyers")
-          .select("id,retailer,title,valid_from,valid_to")
-          .order("created_at", { ascending: false }),
         db
           .from("flyer_items")
           .select(
@@ -279,13 +333,11 @@ export default function OffersPage() {
           .select("product_id,normalized_alias,retailer"),
       ]);
 
-      if (flyersError) throw flyersError;
       if (itemsError) throw itemsError;
       if (productsError) throw productsError;
       if (aliasesError) throw aliasesError;
 
       return {
-        flyers: (flyers ?? []) as FlyerRow[],
         items: (items ?? []) as FlyerItemRow[],
         products: (products ?? []) as ProductForMatch[],
         aliases: (aliases ?? []) as AliasRow[],
@@ -293,26 +345,24 @@ export default function OffersPage() {
     },
   });
 
-  const preparedOffers = useMemo(() => {
-    if (!data) return [];
+  const isLoading = loadingFlyers || (hasSearch && loadingSearchData);
+  const error = flyersError || searchDataError;
 
-    const flyerById = new Map(data.flyers.map((flyer) => [flyer.id, flyer]));
-    const activeFlyers = data.flyers.filter(
-      (flyer) =>
-        !!flyer.valid_from &&
-        !!flyer.valid_to &&
-        flyer.valid_from <= today &&
-        flyer.valid_to >= today,
-    );
-    const activeIds = new Set(activeFlyers.map((flyer) => flyer.id));
+  const preparedOffers = useMemo(() => {
+    if (!hasSearch || !searchData) return [];
+
+    const flyerById = new Map(flyers.map((flyer) => [flyer.id, flyer]));
+    const activeIds = new Set(activeFlyerIds);
     const historicalIds = new Set(
-      data.flyers
+      flyers
         .filter((flyer) => !!flyer.valid_to && flyer.valid_to < today)
         .map((flyer) => flyer.id),
     );
-    const productMap = new Map(data.products.map((product) => [product.id, product]));
+    const productMap = new Map(
+      searchData.products.map((product) => [product.id, product]),
+    );
 
-    const historicalItems = data.items.filter((item) =>
+    const historicalItems = searchData.items.filter((item) =>
       historicalIds.has(item.flyer_id),
     );
     const historyByProduct = new Map<string, FlyerItemRow[]>();
@@ -323,7 +373,7 @@ export default function OffersPage() {
       historyByProduct.set(previous.product_id, rows);
     }
 
-    return data.items
+    return searchData.items
       .filter((item) => activeIds.has(item.flyer_id))
       .map((item) => {
         const flyer = flyerById.get(item.flyer_id);
@@ -333,8 +383,8 @@ export default function OffersPage() {
         if (!productId) {
           productId = matchFlyerItem(
             candidate,
-            data.products,
-            data.aliases,
+            searchData.products,
+            searchData.aliases,
             flyer?.retailer,
           ).productId;
         }
@@ -380,11 +430,10 @@ export default function OffersPage() {
         }
         return a.candidate.price - b.candidate.price;
       });
-  }, [data, today]);
+  }, [hasSearch, searchData, flyers, activeFlyerIds, today]);
 
   const analyzed = useMemo(() => {
-    if (!preparedOffers.length) return [];
-    if (!hasSearch) return search.trim() ? [] : preparedOffers.slice(0, 12);
+    if (!hasSearch || !preparedOffers.length) return [];
 
     const matches = preparedOffers.filter((entry) =>
       matchesSearch(entry.searchText, normalizedSearch),
@@ -454,32 +503,8 @@ export default function OffersPage() {
     return sortedGroups.flatMap((group) => group.sorted);
   }, [preparedOffers, hasSearch, normalizedSearch, search]);
 
-  const activeFlyerCount = useMemo(() => {
-    if (!data) return 0;
-    return data.flyers.filter(
-      (flyer) =>
-        !!flyer.valid_from &&
-        !!flyer.valid_to &&
-        flyer.valid_from <= today &&
-        flyer.valid_to >= today,
-    ).length;
-  }, [data, today]);
-
-  const allActiveOfferCount = useMemo(() => {
-    if (!data) return 0;
-    const activeIds = new Set(
-      data.flyers
-        .filter(
-          (flyer) =>
-            !!flyer.valid_from &&
-            !!flyer.valid_to &&
-            flyer.valid_from <= today &&
-            flyer.valid_to >= today,
-        )
-        .map((flyer) => flyer.id),
-    );
-    return data.items.filter((item) => activeIds.has(item.flyer_id)).length;
-  }, [data, today]);
+  const activeFlyerCount = activeFlyers.length;
+  const allActiveOfferCount = activeOfferCount;
 
   return (
     <div className="page-container !pb-40 mx-auto w-full max-w-3xl">
@@ -515,7 +540,7 @@ export default function OffersPage() {
         </span>
       </div>
 
-      {isLoading && (
+      {hasSearch && isLoading && (
         <Card className="border-dashed">
           <CardContent className="p-7 text-center text-sm text-muted-foreground">
             Consultando as ofertas vigentes…
@@ -575,12 +600,12 @@ export default function OffersPage() {
               <p className="mt-3 font-bold">
                 {hasSearch
                   ? `Nenhuma oferta vigente para “${normalizedSearch}”`
-                  : "Nenhuma oferta disponível"}
+                  : "Busque um produto"}
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
                 {hasSearch
                   ? "Tente parte do nome, a marca ou uma descrição mais curta."
-                  : "Os tabloides vigentes ainda não possuem ofertas consultáveis."}
+                  : "Digite pelo menos 2 letras para consultar somente as ofertas relevantes."}
               </p>
             </CardContent>
           </Card>
