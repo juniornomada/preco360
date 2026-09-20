@@ -73,7 +73,7 @@ export default function FlyerHistoryPage() {
   };
 
   return (
-    <div className="page-container mx-auto w-full max-w-3xl">
+    <div className="page-container !pb-40 mx-auto w-full max-w-3xl">
       <div className="mb-4 flex items-center gap-3">
         <Button asChild size="icon" variant="outline" aria-label="Voltar para Radar 360">
           <Link to="/radar"><ArrowLeft className="h-4 w-4" /></Link>
