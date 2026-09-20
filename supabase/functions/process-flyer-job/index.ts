@@ -206,14 +206,28 @@ function normalizeOfferIdentity(value: unknown) {
     .trim();
 }
 
-function offerIdentityKey(offer: any) {
+function normalizedPackageIdentity(offer: any) {
   const quantity = Number(offer?.package_quantity);
-  const quantityKey = Number.isFinite(quantity) && quantity > 0 ? String(quantity) : "";
-  const unitKey = normalizeOfferIdentity(offer?.package_unit);
+  const unit = normalizeOfferIdentity(offer?.package_unit);
+  if (!Number.isFinite(quantity) || quantity <= 0 || !unit) {
+    return { quantity: null as number | null, unit };
+  }
+  if (unit === "kg") return { quantity: quantity * 1000, unit: "g" };
+  if (unit === "g") return { quantity, unit: "g" };
+  if (unit === "l" || unit === "lt") return { quantity: quantity * 1000, unit: "ml" };
+  if (unit === "ml") return { quantity, unit: "ml" };
+  if (["un","und","unid","unidade"].includes(unit)) return { quantity, unit: "un" };
+  return { quantity, unit };
+}
+
+function offerIdentityKey(offer: any) {
+  const pkg = normalizedPackageIdentity(offer);
+  const quantityKey =
+    pkg.quantity !== null ? String(Math.round(pkg.quantity * 1000) / 1000) : "";
   return [
     normalizeOfferIdentity(offer?.product_name),
     quantityKey,
-    unitKey,
+    pkg.unit,
   ].join("|");
 }
 
@@ -240,17 +254,14 @@ function identityDice(a: string, b: string) {
 }
 
 function packageCompatible(a: any, b: any) {
-  const aq = Number(a?.package_quantity);
-  const bq = Number(b?.package_quantity);
-  if (
-    Number.isFinite(aq) && aq > 0 &&
-    Number.isFinite(bq) && bq > 0 &&
-    Math.abs(aq - bq) > 0.001
-  ) return false;
+  const left = normalizedPackageIdentity(a);
+  const right = normalizedPackageIdentity(b);
 
-  const au = normalizeOfferIdentity(a?.package_unit);
-  const bu = normalizeOfferIdentity(b?.package_unit);
-  return !au || !bu || au === bu;
+  if (left.unit && right.unit && left.unit !== right.unit) return false;
+  if (left.quantity !== null && right.quantity !== null) {
+    return Math.abs(left.quantity - right.quantity) < 0.01;
+  }
+  return true;
 }
 
 function brandCompatible(a: any, b: any) {
@@ -272,7 +283,7 @@ function sameOfferIdentity(a: any, b: any) {
 
   const shorter = left.length <= right.length ? left : right;
   const longer = left.length <= right.length ? right : left;
-  if (shorter.length >= 8 && longer.includes(shorter)) return true;
+  if (shorter.split(" ").filter(Boolean).length >= 3 && longer.includes(shorter)) return true;
 
   return identityDice(left, right) >= 0.86;
 }
