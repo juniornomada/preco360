@@ -1602,28 +1602,26 @@ export default function FlyerPage() {
                                   />
 
                                   <div className="min-w-0 flex-1">
-                                    <div className="flex items-start justify-between gap-3">
-                                      <div className="min-w-0">
-                                        <p className="font-bold leading-snug">{displayProductName(item.raw_name)}</p>
-                                        <p className="mt-0.5 text-[11px] text-muted-foreground">
-                                          Página {item.source_page ?? "—"}
+                                    <p className="font-bold leading-snug">
+                                      {displayProductName(item.raw_name)}
+                                    </p>
+                                    <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                      <p className="font-extrabold">
+                                        {offerPriceWithReference(
+                                          Number(item.advertised_price),
+                                          Number(item.normalized_price) || Number(item.advertised_price),
+                                          item.base_unit || "un",
+                                        )}
+                                      </p>
+                                      {item.club_advertised_price ? (
+                                        <p className="text-[11px] font-semibold text-primary">
+                                          Clube {brl(Number(item.club_advertised_price))}
                                         </p>
-                                      </div>
-                                      <div className="shrink-0 text-right">
-                                        <p className="font-extrabold">
-                                          {offerPriceWithReference(
-                                            Number(item.advertised_price),
-                                            Number(item.normalized_price) || Number(item.advertised_price),
-                                            item.base_unit || "un",
-                                          )}
-                                        </p>
-                                        {item.club_advertised_price ? (
-                                          <p className="text-[11px] font-semibold text-primary">
-                                            Clube {brl(Number(item.club_advertised_price))}
-                                          </p>
-                                        ) : null}
-                                      </div>
+                                      ) : null}
                                     </div>
+                                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                      Página {item.source_page ?? "—"}
+                                    </p>
 
                                     <div className="mt-2 flex items-end justify-between gap-2">
                                       <VerdictDelta
