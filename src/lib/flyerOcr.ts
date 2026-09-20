@@ -131,9 +131,9 @@ function normalizeOfferNameForDedupe(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/(\d)\s*[,\.]\s*(\d)/g, "$1.$2")
-    .replace(/\b\d+(?:\.\d+)?\s*(?:kg|g|ml|l|lt)\b/g, " ")
+    .replace(/\b\d+(?:\.\d+)?\s*(?:kg|g|ml|l|lt|un|und|unid|unidade)\b/g, " ")
     .replace(
-      /\b(?:pacote|embalagem|unidade|unidades|un|und|kg|g|ml|l|lt|sabor|sabores)\b/g,
+      /\b(?:de|da|do|das|dos|tipo|tipos|sabor|sabores|pacote|embalagem|unidade|unidades|un|und|kg|g|ml|l|lt|lata|sache|garrafa|bandeja|fardo|fresco|fresca|congelado|congelada)\b/g,
       " ",
     )
     .replace(/[^a-z0-9]+/g, " ")
@@ -151,6 +151,66 @@ function offerIdentityKey(offer: VisionOffer) {
   ].join("|");
 }
 
+function identityDice(a: string, b: string) {
+  if (a === b) return 1;
+  if (a.length < 2 || b.length < 2) return 0;
+
+  const grams = (value: string) => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < value.length - 1; i += 1) {
+      const gram = value.slice(i, i + 2);
+      map.set(gram, (map.get(gram) ?? 0) + 1);
+    }
+    return map;
+  };
+
+  const left = grams(a);
+  const right = grams(b);
+  let intersection = 0;
+  for (const [gram, count] of left) {
+    intersection += Math.min(count, right.get(gram) ?? 0);
+  }
+
+  const leftTotal = [...left.values()].reduce((sum, value) => sum + value, 0);
+  const rightTotal = [...right.values()].reduce((sum, value) => sum + value, 0);
+  return (2 * intersection) / Math.max(1, leftTotal + rightTotal);
+}
+
+function sameVisionIdentity(a: VisionOffer, b: VisionOffer) {
+  if (offerIdentityKey(a) === offerIdentityKey(b)) return true;
+
+  const aq = Number(a.package_quantity);
+  const bq = Number(b.package_quantity);
+  if (
+    Number.isFinite(aq) && aq > 0 &&
+    Number.isFinite(bq) && bq > 0 &&
+    Math.abs(aq - bq) > 0.001
+  ) return false;
+
+  const au = normalizeIdentity(a.package_unit || "");
+  const bu = normalizeIdentity(b.package_unit || "");
+  if (au && bu && au !== bu) return false;
+
+  const ab = normalizeOfferNameForDedupe(a.brand || "");
+  const bb = normalizeOfferNameForDedupe(b.brand || "");
+  if (
+    ab && bb && ab !== bb &&
+    !ab.includes(bb) && !bb.includes(ab) &&
+    identityDice(ab, bb) < 0.9
+  ) return false;
+
+  const left = normalizeOfferNameForDedupe(a.product_name || "");
+  const right = normalizeOfferNameForDedupe(b.product_name || "");
+  if (!left || !right) return false;
+  if (left === right) return true;
+
+  const shorter = left.length <= right.length ? left : right;
+  const longer = left.length <= right.length ? right : left;
+  if (shorter.length >= 8 && longer.includes(shorter)) return true;
+
+  return identityDice(left, right) >= 0.86;
+}
+
 function positiveMoney(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -164,7 +224,7 @@ function sameMoney(a: unknown, b: unknown) {
 }
 
 function mergeableVisionDuplicate(a: VisionOffer, b: VisionOffer) {
-  if (offerIdentityKey(a) !== offerIdentityKey(b)) return false;
+  if (!sameVisionIdentity(a, b)) return false;
 
   const aPrice = positiveMoney(a.price);
   const bPrice = positiveMoney(b.price);
