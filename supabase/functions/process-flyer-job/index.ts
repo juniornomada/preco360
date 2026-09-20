@@ -719,6 +719,11 @@ async function triggerRefine(jobId: string) {
   if (!response.ok) throw new Error("Falha ao agendar refinamento (" + response.status + ").");
 }
 
+function isTransientAiFailure(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /timed out|timeout|429|resource exhausted|overloaded|temporar|502|503|504/i.test(message);
+}
+
 async function triggerPage(jobId: string, pageNo: number) {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -899,14 +904,78 @@ async function processPage(jobId: string, requestedPage: number) {
     if (nextPage) await triggerPage(jobId, nextPage);
   } catch (error) {
     console.error("process-flyer-job page", requestedPage, error);
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Falha inesperada ao processar esta página.";
+
+    const currentJob = await fetchJob(jobId).catch(() => null);
+    const total = Math.max(1, Math.trunc(Number(currentJob?.page_count) || 1));
+    const pageNo = Math.max(
+      1,
+      Math.min(total, Math.trunc(Number(requestedPage) || 1)),
+    );
+    const processedPages = Array.isArray(currentJob?.result?.processed_pages)
+      ? currentJob.result.processed_pages
+          .map((value: unknown) => Math.trunc(Number(value) || 0))
+          .filter((value: number) => value >= 1 && value <= total)
+      : [];
+
+    const retryCounts =
+      currentJob?.result?.page_retry_counts &&
+      typeof currentJob.result.page_retry_counts === "object"
+        ? currentJob.result.page_retry_counts
+        : {};
+    const currentRetries = Math.max(
+      0,
+      Math.trunc(Number(retryCounts[String(pageNo)]) || 0),
+    );
+
+    if (
+      currentJob &&
+      isTransientAiFailure(error) &&
+      currentRetries < 2
+    ) {
+      const nextRetry = currentRetries + 1;
+      const retryResult = {
+        ...(currentJob.result ?? {}),
+        page_retry_counts: {
+          ...retryCounts,
+          [String(pageNo)]: nextRetry,
+        },
+      };
+
+      try {
+        await updateJob(jobId, {
+          status: "processing",
+          progress_current: processedPages.length,
+          progress_total: total,
+          progress_label:
+            "Página " + pageNo + "/" + total +
+            " demorou a responder. Nova tentativa automática " +
+            nextRetry + "/2…",
+          result: retryResult,
+          error_message: null,
+          warning_message:
+            "A IA demorou em uma página, mas o Radar 360 está retomando automaticamente.",
+          completed_at: null,
+        });
+
+        await triggerPage(jobId, pageNo);
+        return;
+      } catch (retryError) {
+        console.error("process-flyer-job retry schedule", pageNo, retryError);
+      }
+    }
+
     await updateJob(jobId, {
       status: "failed",
+      progress_current: processedPages.length,
+      progress_total: total,
       progress_label:
-        "A importação parou na página " + requestedPage + ". Você pode tentar novamente.",
-      error_message:
-        error instanceof Error
-          ? error.message
-          : "Falha inesperada ao processar esta página.",
+        "A importação parou na página " + pageNo + ". O progresso anterior foi preservado.",
+      error_message: message,
       completed_at: new Date().toISOString(),
     }).catch(() => {});
   }
