@@ -1184,7 +1184,7 @@ export default function OffersPage() {
 
                       {verdict.referencePrice && (
                         <span className="font-semibold text-muted-foreground">
-                          Ref.{" "}
+                          {verdict.purchaseCount > 0 ? "Pago " : "Ref. "}
                           {formatNormalizedPrice(
                             verdict.referencePrice,
                             candidate.baseUnit,
