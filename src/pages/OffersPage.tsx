@@ -12,7 +12,9 @@ import {
   ChevronRight,
   Clock3,
   History,
+  Radar,
   Search,
+  ShoppingBasket,
   Sparkles,
   Store,
   Tags,
@@ -923,11 +925,16 @@ export default function OffersPage() {
     return best;
   }, [analyzed]);
 
+  const resultFamilyCount = useMemo(
+    () => new Set(analyzed.map((entry) => entry.family)).size,
+    [analyzed],
+  );
+
   const activeFlyerCount = activeFlyers.length;
   const allActiveOfferCount = activeOfferCount;
 
   return (
-    <div className="page-container !pb-40 mx-auto w-full max-w-3xl">
+    <div className="page-container !pb-24 mx-auto w-full max-w-3xl">
       <header className="mb-4">
         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary">
           Preço 360 · Ofertas
@@ -949,6 +956,27 @@ export default function OffersPage() {
           onChange={(event) => setSearch(event.target.value)}
           autoFocus
         />
+      </div>
+
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          className="h-9 gap-1.5 rounded-xl text-xs font-bold"
+          onClick={() => navigate("/radar")}
+        >
+          <Radar className="h-3.5 w-3.5 text-primary" />
+          Radar 360
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-9 gap-1.5 rounded-xl text-xs font-bold"
+          onClick={() => navigate("/offers/basket")}
+        >
+          <ShoppingBasket className="h-3.5 w-3.5 text-primary" />
+          Cesta 360
+        </Button>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
@@ -1032,7 +1060,7 @@ export default function OffersPage() {
         )}
 
       {!isLoading && !error && analyzed.length > 0 && (
-        <div className="space-y-2.5">
+        <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
@@ -1042,13 +1070,15 @@ export default function OffersPage() {
                 {analyzed.length} oferta(s) encontrada(s)
               </p>
             </div>
-            {hasSearch && analyzed[0] && (
-              <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">
-                {isBroadFamilySearch
-                  ? "Melhor por tipo de produto"
-                  : "Melhor oportunidade primeiro"}
-              </span>
-            )}
+            {hasSearch &&
+              analyzed[0] &&
+              (!isBroadFamilySearch || resultFamilyCount > 1) && (
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold text-primary">
+                  {isBroadFamilySearch
+                    ? "Melhor por tipo"
+                    : "Melhor primeiro"}
+                </span>
+              )}
           </div>
 
           {analyzed.slice(0, hasSearch ? 30 : 12).map((entry, index) => {
@@ -1079,14 +1109,14 @@ export default function OffersPage() {
                 key={item.id}
                 className={isTopResult ? "border-primary/40 shadow-sm" : ""}
               >
-                <CardContent className="p-3.5 sm:p-4">
+                <CardContent className="p-3 sm:p-4">
                   {isTopResult && (
-                    <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.13em] text-primary">
+                    <p className="mb-1.5 text-[9px] font-bold uppercase tracking-[0.13em] text-primary">
                       {bestLabel}
                     </p>
                   )}
 
-                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2.5 sm:gap-x-3">
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 sm:gap-x-3">
                     <ProductVisual
                       name={item.raw_name}
                       category={entry.product?.category}
@@ -1096,20 +1126,20 @@ export default function OffersPage() {
                     <div className="min-w-0">
                       <h2 className="font-bold leading-snug">{item.raw_name}</h2>
 
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-1 text-[11px] font-bold">
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-bold">
                           <Store className="h-3.5 w-3.5 shrink-0 text-primary" />
                           <span className="truncate">
                             {flyer?.retailer ?? "Supermercado"}
                           </span>
                         </span>
                         <span
-                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-bold ${ui.className}`}
+                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${ui.className}`}
                         >
                           <VerdictIcon className="h-3.5 w-3.5" />
                           {ui.label}
                         </span>
-                        <span className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] text-muted-foreground">
+                        <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground">
                           <Clock3 className="h-3.5 w-3.5" />
                           {expiryLabel(flyer?.valid_to, today)}
                         </span>
@@ -1133,7 +1163,7 @@ export default function OffersPage() {
                               )}
                             </p>
                           )}
-                          <p className="mt-1 text-[10px] leading-tight text-muted-foreground">
+                          <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground/80">
                             Normal {brl(regularPrice)}
                             {regularNormalized.baseUnit !== "un"
                               ? " · " +
@@ -1163,13 +1193,15 @@ export default function OffersPage() {
                       {(verdict.deltaPct !== null ||
                         verdict.referencePrice ||
                         productId) && (
-                        <div className="mt-1.5 flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5 text-[10px] leading-tight">
+                        <div className="mt-1 flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 text-[9px] leading-tight">
                           {verdict.deltaPct !== null && (
                             <span
                               className={`font-extrabold ${
-                                verdict.deltaPct === 0
-                                  ? "text-muted-foreground"
-                                  : "text-red-500"
+                                verdict.deltaPct < 0
+                                  ? "text-green-500"
+                                  : verdict.deltaPct > 0
+                                    ? "text-red-500"
+                                    : "text-muted-foreground"
                               }`}
                             >
                               {verdict.deltaPct < 0
