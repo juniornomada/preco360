@@ -132,80 +132,121 @@ function searchTokens(value: string) {
     .filter((token) => !searchStopWords.has(token));
 }
 
-function matchesProductIntent(value: string, query: string) {
-  const q = normalizeSearchText(query).trim();
-  const source = normalizeSearchText(value).trim();
-  if (!q || !source) return true;
+type OfferFamily =
+  | "powder"
+  | "drink"
+  | "cereal"
+  | "capsule"
+  | "refrigerante"
+  | "juice"
+  | "other";
 
-  const qTokens = new Set(searchTokens(q));
-  const sourceTokens = new Set(searchTokens(source));
+const familyQueryTokens = new Set([
+  "po",
+  "achocolatado",
+  "achocolatada",
+  "achocolatados",
+  "achocolatadas",
+  "bebida",
+  "bebidas",
+  "lactea",
+  "lacteas",
+  "cereal",
+  "cereais",
+  "capsula",
+  "capsulas",
+  "refrigerante",
+  "refrigerantes",
+  "suco",
+  "sucos",
+]);
 
-  const wantsDrink = qTokens.has("bebida") || qTokens.has("bebidas");
-  const wantsDairyDrink =
-    wantsDrink && (qTokens.has("lactea") || qTokens.has("lacteas"));
-  const wantsPowder = qTokens.has("po");
-  const wantsChocolateDrinkPowder =
-    (qTokens.has("achocolatado") || qTokens.has("achocolatada")) &&
-    !wantsDrink;
+function queryOfferFamily(query: string): OfferFamily | null {
+  const tokens = new Set(searchTokens(query));
 
-  const sourceIsDrink =
-    sourceTokens.has("bebida") || sourceTokens.has("bebidas");
-  const sourceIsDairyDrink =
-    sourceIsDrink &&
-    (sourceTokens.has("lactea") || sourceTokens.has("lacteas"));
-  const sourceIsPowder = sourceTokens.has("po");
-
-  // Family words are order-independent:
-  // "bebida nescau" === "nescau bebida"
-  // "nescau em pó" === "pó nescau" === "nescau pó".
-  if (wantsDairyDrink && !sourceIsDairyDrink) return false;
-  if (wantsDrink && !sourceIsDrink) return false;
-  if (wantsPowder && !sourceIsPowder) return false;
-
-  // When the user asks for "achocolatado" without saying "bebida", interpret
-  // it as the shelf-stable/powder family and exclude dairy drinks.
-  if (wantsChocolateDrinkPowder && sourceIsDrink) return false;
-
-  const wantsCereal = qTokens.has("cereal") || qTokens.has("cereais");
+  if (tokens.has("bebida") || tokens.has("bebidas")) return "drink";
   if (
-    wantsCereal &&
-    !(sourceTokens.has("cereal") || sourceTokens.has("cereais"))
+    tokens.has("po") ||
+    tokens.has("achocolatado") ||
+    tokens.has("achocolatada") ||
+    tokens.has("achocolatados") ||
+    tokens.has("achocolatadas")
   ) {
-    return false;
+    return "powder";
   }
-
-  const wantsCapsule = qTokens.has("capsula") || qTokens.has("capsulas");
-  if (
-    wantsCapsule &&
-    !(sourceTokens.has("capsula") || sourceTokens.has("capsulas"))
-  ) {
-    return false;
+  if (tokens.has("cereal") || tokens.has("cereais")) return "cereal";
+  if (tokens.has("capsula") || tokens.has("capsulas")) return "capsule";
+  if (tokens.has("refrigerante") || tokens.has("refrigerantes")) {
+    return "refrigerante";
   }
+  if (tokens.has("suco") || tokens.has("sucos")) return "juice";
 
-  const wantsRefrigerante =
-    qTokens.has("refrigerante") || qTokens.has("refrigerantes");
-  if (
-    wantsRefrigerante &&
-    !(sourceTokens.has("refrigerante") || sourceTokens.has("refrigerantes"))
-  ) {
-    return false;
-  }
-
-  const wantsJuice = qTokens.has("suco") || qTokens.has("sucos");
-  if (
-    wantsJuice &&
-    !(sourceTokens.has("suco") || sourceTokens.has("sucos"))
-  ) {
-    return false;
-  }
-
-  return true;
+  return null;
 }
 
-function matchesSearch(value: string, query: string) {
-  const wanted = searchTokens(query);
+function inferOfferFamily(
+  item: FlyerItemRow,
+  product: ProductForMatch | null,
+): OfferFamily {
+  const text = normalizeSearchText(
+    `${item.raw_name} ${item.brand ?? ""} ${product?.name ?? ""} ${product?.category ?? ""}`,
+  );
+  const tokens = new Set(searchTokens(text));
+  const packageUnit = normalizeSearchText(item.package_unit ?? "");
+  const baseUnit = item.base_unit ?? null;
+
+  if (tokens.has("bebida") || tokens.has("bebidas")) return "drink";
+  if (tokens.has("cereal") || tokens.has("cereais")) return "cereal";
+  if (tokens.has("capsula") || tokens.has("capsulas")) return "capsule";
+  if (tokens.has("refrigerante") || tokens.has("refrigerantes")) {
+    return "refrigerante";
+  }
+  if (tokens.has("suco") || tokens.has("sucos")) return "juice";
+
+  if (tokens.has("po")) return "powder";
+
+  // OCR/encartes frequentemente omitem "em pó" do nome, como
+  // "Achocolatado Nescau 350g". Achocolatado vendido em g/kg e que não é
+  // bebida é semanticamente a mesma família de achocolatado em pó.
+  const isChocolateDrinkPowderName =
+    tokens.has("achocolatado") ||
+    tokens.has("achocolatada") ||
+    tokens.has("achocolatados") ||
+    tokens.has("achocolatadas");
+  const isWeightPackage =
+    baseUnit === "kg" ||
+    packageUnit === "g" ||
+    packageUnit === "kg";
+
+  if (isChocolateDrinkPowderName && isWeightPackage) return "powder";
+
+  return "other";
+}
+
+function familyLabel(family: OfferFamily) {
+  if (family === "powder") return "Achocolatado em pó";
+  if (family === "drink") return "Bebida";
+  if (family === "cereal") return "Cereal";
+  if (family === "capsule") return "Cápsulas";
+  if (family === "refrigerante") return "Refrigerante";
+  if (family === "juice") return "Suco";
+  return "Produto";
+}
+
+function matchesSearch(
+  value: string,
+  query: string,
+  family: OfferFamily,
+) {
+  const queryFamily = queryOfferFamily(query);
+  if (queryFamily && family !== queryFamily) return false;
+
+  // Product-family terms are semantic filters, not mandatory literal words.
+  // This lets "nescau pó" match "Achocolatado Nescau 350g".
+  const wanted = searchTokens(query).filter(
+    (token) => !familyQueryTokens.has(token),
+  );
   if (!wanted.length) return true;
-  if (!matchesProductIntent(value, query)) return false;
 
   const source = searchTokens(value);
   return wanted.every((needle) =>
@@ -490,6 +531,7 @@ export default function OffersPage() {
           productId,
           candidate,
           verdict,
+          family: inferOfferFamily(item, product),
           searchText: `${item.raw_name} ${item.brand ?? ""} ${product?.name ?? ""} ${product?.brand ?? ""} ${product?.category ?? ""}`,
         };
       })
@@ -513,7 +555,7 @@ export default function OffersPage() {
     if (!hasSearch || !preparedOffers.length) return [];
 
     const matches = preparedOffers.filter((entry) =>
-      matchesSearch(entry.searchText, normalizedSearch),
+      matchesSearch(entry.searchText, normalizedSearch, entry.family),
     );
 
     // Build stable semantic groups first. A pairwise comparator alone is not
@@ -579,6 +621,42 @@ export default function OffersPage() {
 
     return sortedGroups.flatMap((group) => group.sorted);
   }, [preparedOffers, hasSearch, normalizedSearch, search]);
+
+  const explicitSearchFamily = useMemo(
+    () => queryOfferFamily(normalizedSearch),
+    [normalizedSearch],
+  );
+
+  const bestOfferByFamily = useMemo(() => {
+    const best = new Map<OfferFamily, string>();
+
+    for (const entry of analyzed) {
+      const currentId = best.get(entry.family);
+      if (!currentId) {
+        best.set(entry.family, entry.item.id);
+        continue;
+      }
+
+      const current = analyzed.find((candidate) => candidate.item.id === currentId);
+      if (!current) {
+        best.set(entry.family, entry.item.id);
+        continue;
+      }
+
+      const currentPrice = current.candidate.normalizedPrice;
+      const candidatePrice = entry.candidate.normalizedPrice;
+      if (candidatePrice < currentPrice - 0.0001) {
+        best.set(entry.family, entry.item.id);
+      } else if (
+        Math.abs(candidatePrice - currentPrice) <= 0.0001 &&
+        entry.candidate.price < current.candidate.price
+      ) {
+        best.set(entry.family, entry.item.id);
+      }
+    }
+
+    return best;
+  }, [analyzed]);
 
   const activeFlyerCount = activeFlyers.length;
   const allActiveOfferCount = activeOfferCount;
@@ -701,7 +779,9 @@ export default function OffersPage() {
             </div>
             {hasSearch && analyzed[0] && (
               <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">
-                Melhor oportunidade primeiro
+                {explicitSearchFamily
+                  ? "Melhor oportunidade primeiro"
+                  : "Melhor por tipo de produto"}
               </span>
             )}
           </div>
@@ -720,7 +800,14 @@ export default function OffersPage() {
               regularPrice,
               regularPackage,
             );
-            const isTopResult = hasSearch && index === 0;
+            const isFamilyBest =
+              bestOfferByFamily.get(entry.family) === item.id;
+            const isTopResult = explicitSearchFamily
+              ? hasSearch && index === 0
+              : hasSearch && isFamilyBest;
+            const bestLabel = explicitSearchFamily
+              ? "Melhor oportunidade encontrada"
+              : `Melhor oportunidade · ${familyLabel(entry.family)}`;
 
             return (
               <Card
@@ -730,7 +817,7 @@ export default function OffersPage() {
                 <CardContent className="p-4">
                   {isTopResult && (
                     <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.13em] text-primary">
-                      Melhor oportunidade encontrada
+                      {bestLabel}
                     </p>
                   )}
 
