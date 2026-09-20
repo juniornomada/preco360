@@ -134,6 +134,75 @@ function meaningfulBrandTokens(value: unknown) {
   return tokens(value).filter((token) => token.length >= 2);
 }
 
+function semanticFamily(value: unknown) {
+  const text = normalize(value);
+
+  const rules: Array<[string, RegExp]> = [
+    ["protein_bar", /barra de proteina|barra de prot\b|protein bar/],
+    ["supplement", /\bwhey\b|creatina|suplemento/],
+    ["yogurt", /iog\s*liq|iogurte|probio2/],
+    ["mouthwash", /listerine|antisseptico bucal/],
+    ["fish", /merluza|tilapia|bacalhau|pintado|salmao|sardinha|peixe/],
+    ["shrimp", /camarao/],
+    ["paper_towel", /papel toalha|toalha de papel/],
+    ["toilet_paper", /papel higienico|papel hig\b/],
+    ["soda", /refrigerante|sukita|guarana|fanta|sprite/],
+    ["milk_drink", /bebida lactea|composto lacteo/],
+    ["wine", /vinho|frisante|espumante/],
+    ["beer", /cerveja|\bcerv\b/],
+    ["spirits", /smirnoff ice|cachaca|caipirinha|\bgin\b|licor|coquetel|aperitivo|campari|aperol/],
+    ["juice", /suco|refresco|nectar/],
+    ["chocolate_drink", /achocolatado|toddynho/],
+    // Type wins over flavor: café sabor chocolate stays coffee.
+    ["coffee", /cafe|cappuccino|dolce gusto|capsula/],
+    ["tea", /\bcha\b/],
+    ["biscuit", /biscoito|\bbisc\b|cookie|bolacha|wafer|rosquinha|torrada|polvilho/],
+    ["candy", /bala|gelatina|bombom|confeito|goma de mascar|torrone/],
+    ["chocolate", /chocolate|nutella|creme de avela/],
+    ["rice", /arroz/],
+    ["beans", /feijao/],
+    ["flour", /farinha|fuba|flocao|tapioca/],
+    ["olive_oil", /azeite|oleo/],
+    ["pasta", /macarrao|lasanha|nhoque|massa/],
+    ["bread", /pao/],
+    ["pizza", /pizza/],
+    ["sushi", /temaki|sushi|\bmaki\b/],
+    ["sandwich", /sanduiche/],
+    ["dessert", /mousse|pudim|sobremesa|sorvete|torta|panettone|waffle/],
+    ["ketchup", /ketchup/],
+    ["mustard", /mostarda/],
+    ["tomato_sauce", /molho de tomate|extrato de tomate/],
+    ["mayonnaise", /maionese/],
+    ["peas", /ervilha/],
+    ["bacon", /bacon/],
+    ["sausage", /linguica|salsicha|calabresa/],
+    ["chicken", /frango|sobrecoxa|\bcoxa\b|coxinha|\basa\b/],
+    ["beef", /contra file|coxao|patinho|acem|osso buco|carne moida|bovino|bovina|lagarto/],
+    ["pork", /costela suina|costelinha suina|bisteca suina|panceta suina|pernil|lombo/],
+    ["cold_cuts", /mortadela|presunto|salame/],
+    ["butter", /manteiga|margarina/],
+    ["cheese", /queijo|cream cheese|requeijao|ricota|quark/],
+    ["milk", /\bleite\b/],
+    ["egg", /\bovos?\b/],
+    ["corn", /milho/],
+    ["tomato", /tomate/],
+    ["fruit", /uva|manga|banana|abacaxi|caju|melao|melancia|maca|pera|laranja|tangerina|maracuja|goiaba|mirtilo|mamao/],
+    ["cleaning", /deterg|desengordurante|limpador|desinfetante|sabao|amaciante|tira manchas|agua sanitaria|cloro/],
+    ["personal_care", /shampoo|condicionador|sabonete|desodorante|protetor solar|hidratante|tintura/],
+  ];
+
+  for (const [family, pattern] of rules) {
+    if (pattern.test(text)) return family;
+  }
+  return null;
+}
+
+function semanticCompatible(expected: unknown, candidate: unknown) {
+  const expectedFamily = semanticFamily(expected);
+  const candidateFamily = semanticFamily(candidate);
+  return !expectedFamily || !candidateFamily || expectedFamily === candidateFamily;
+}
+
 function packageBase(quantity: unknown, unit: unknown) {
   const q = Number(quantity);
   const u = normalize(unit);
@@ -272,6 +341,8 @@ function offerIsAmbiguousMultiProduct(item: OfferRow) {
 }
 
 function cacheScore(item: OfferRow, cached: LibraryImage) {
+  if (!semanticCompatible(item.raw_name, cached.normalized_name)) return 0;
+
   if (item.product_id && cached.product_id === item.product_id) {
     const pkg = packageSimilarity(item, `${cached.package_quantity ?? ""}${cached.package_unit ?? ""}`);
     if (pkg >= 0.72 || !packageBase(item.package_quantity, item.package_unit)) {
@@ -314,7 +385,11 @@ async function findLibraryImage(
     .eq("product_key", key)
     .maybeSingle();
 
-  if (exact?.image_url && Number(exact.confidence) >= 0.85) {
+  if (
+    exact?.image_url &&
+    Number(exact.confidence) >= 0.85 &&
+    semanticCompatible(item.raw_name, exact.normalized_name)
+  ) {
     return exact as LibraryImage;
   }
 
@@ -341,6 +416,8 @@ function scoreOffHit(item: OfferRow, hit: any): Candidate | null {
   const brands = Array.isArray(hit?.brands) ? hit.brands.join(" ") : String(hit?.brands ?? "");
   const title = String(hit?.product_name ?? "");
   const quantity = String(hit?.quantity ?? "");
+
+  if (!semanticCompatible(item.raw_name, title)) return null;
 
   const brandScore = brandSimilarity(item, brands, title);
   const packageScore = packageSimilarity(item, quantity);
@@ -508,6 +585,7 @@ async function searchGoogleImages(item: OfferRow, query: string) {
   return hits
     .map((hit: any) => {
       const title = String(hit?.title ?? "");
+      if (!semanticCompatible(item.raw_name, title)) return null;
       const brandScore = brandSimilarity(item, title, title);
       const nameScore = nameSimilarity(item, title, title);
       const packageScore = parseQuantity(title) ? packageSimilarity(item, title) : 0.5;
