@@ -146,24 +146,38 @@ const normalizeProduceOcr = (value: string) =>
 
 const displayProductName = (value: string) =>
   normalizeProduceOcr(value)
-    .replace(/\bMamão Formoso\b/gi, "Mamão Formosa");
+    .replace(/\bMamão Formoso\b/gi, "Mamão Formosa")
+    .replace(
+      /Arroz Riviera ou Patéko Riviera\s*\/\s*Patéko\s*5kg/gi,
+      "Arroz Riviera ou Patéko 5kg",
+    );
 
 const productEmoji = (name: string, category?: string | null) => {
   const text = normalizeProduceOcr(
     normalizeSearchText(`${category ?? ""} ${name}`),
   );
 
-  // Product type has priority over flavor/variant words.
+  // Regras específicas: o tipo principal sempre vence sabor ou palavras genéricas.
   if (/barra de proteina|protein bar|suplemento.*proteina|suplemento.*whey/.test(text)) return "__proteinbar__";
+  if (/capsulas?.*dolce gusto|bebida.*dolce gusto|dolce gusto/.test(text)) return "__dolcegusto__";
+  if (/toddynho/.test(text)) return "__toddynho__";
+  if (/listerine|antisseptico bucal/.test(text)) return "__mouthwash__";
   if (/iogurte|probio2/.test(text)) return "__yogurt__";
-  if (/bebida lactea/.test(text)) return "🥛";
 
+  if (/file de merluza|merluza/.test(text)) return "__fishfillet__";
+  if (/peixe|tilapia|pescado|salmao|sardinha|mapara|pangasius/.test(text)) return "🐟";
+
+  if (/papel toalha/.test(text)) return "__papertowel__";
+  if (/papel higienico/.test(text)) return "🧻";
+
+  if (/refrigerante|sukita|guarana|fanta|sprite/.test(text)) return "__soda__";
+  if (/bebida lactea/.test(text)) return "🥛";
   if (/vinho|frisante|chopp de vinho/.test(text)) return "🍷";
   if (/aperitivo campari/.test(text)) return "🍹";
   if (/cerveja/.test(text)) return "🍺";
   if (/agua de coco/.test(text)) return "🥥";
   if (/agua mineral/.test(text)) return "💧";
-  if (/refrigerante|suco|refresco|bebida/.test(text)) return "🧃";
+  if (/suco|refresco|bebida/.test(text)) return "🧃";
   if (/achocolatado/.test(text)) return "🍫";
   if (/cafe|cappuccino|capsula/.test(text)) return "☕";
 
@@ -172,11 +186,12 @@ const productEmoji = (name: string, category?: string | null) => {
   if (/amendoim/.test(text)) return "🥜";
   if (/arroz/.test(text)) return "🍚";
   if (/feijao/.test(text)) return "🫘";
+  if (/farinha de trigo/.test(text)) return "__flourbag__";
+  if (/farinha de milho|flocao/.test(text)) return "🌽";
   if (/azeite|oleo/.test(text)) return "🫒";
   if (/macarrao|nhoque|massa/.test(text)) return "🍝";
   if (/pipoca/.test(text)) return "🍿";
   if (/farofa/.test(text)) return "🥣";
-  if (/farinha de milho|flocao/.test(text)) return "🌽";
   if (/bolo|churros/.test(text)) return "🍰";
   if (/pao/.test(text)) return "🍞";
   if (/pizza/.test(text)) return "🍕";
@@ -184,21 +199,34 @@ const productEmoji = (name: string, category?: string | null) => {
   if (/sanduiche/.test(text)) return "🥪";
   if (/kibe/.test(text)) return "🧆";
   if (/strogonoff/.test(text)) return "🍲";
+  if (/mousse de chocolate/.test(text)) return "__mousse__";
   if (/pudim/.test(text)) return "🍮";
   if (/sorvete|sobremesa/.test(text)) return "🍨";
-  if (/maionese/.test(text)) return "__mayo__";
-  if (/molho de tomate|extrato de tomate|molho de soja|shoyu/.test(text)) return "🥫";
 
+  if (/ketchup/.test(text)) return "__ketchup__";
+  if (/molho barbecue|barbecue/.test(text)) return "__bbq__";
+  if (/molho de tomate|extrato de tomate/.test(text)) return "__tomatosauce__";
+  if (/maionese/.test(text)) return "__mayo__";
+  if (/molho de soja|shoyu/.test(text)) return "🥫";
+
+  if (/batata doce rosada/.test(text)) return "__sweetpotato__";
   if (/batata.*airfryer|batata.*congel|batata mister|batata uni/.test(text)) return "🍟";
-  if (/peixe|tilapia|pescado|salmao|sardinha|mapara|pangasius/.test(text)) return "🐟";
-  if (/salsicha|hot dog|linguica/.test(text)) return "🌭";
+  if (/ervilhas? finas|ervilhas? congel/.test(text)) return "__peas__";
+  if (/jardineira de legumes/.test(text)) return "__vegetablemix__";
+
+  if (/bacon.*fatias|bacon em fatias/.test(text)) return "__baconslices__";
+  if (/bacon.*pedaco|bacon.*fracionado|bacon.*peca/.test(text)) return "__baconchunk__";
+  if (/jerked beef|carne seca|charque/.test(text)) return "__jerkedbeef__";
+  if (/linguica calabresa|calabresa defumada/.test(text)) return "__calabresa__";
+  if (/salsicha|hot dog/.test(text)) return "🌭";
+  if (/costela suina|costela de porco/.test(text)) return "__porkribs__";
   if (/hamburguer/.test(text)) return "🍔";
   if (/frango|sobrecoxa|filezinho|steak de frango/.test(text)) return "🍗";
   if (/bovino|bovina|carne|lagarto|suino|pernil|lombo|paleta|ponta de peito/.test(text)) return "🥩";
 
   if (/manteiga|margarina/.test(text)) return "🧈";
   if (/queijo|cream cheese|requeijao|ricota|quark/.test(text)) return "🧀";
-  if (/leite|iogurte|batavinho/.test(text)) return "🥛";
+  if (/leite|batavinho/.test(text)) return "🥛";
   if (/ovo/.test(text)) return "🥚";
   if (/mel\b/.test(text)) return "🍯";
   if (/granola|cereal/.test(text)) return "🥣";
@@ -208,7 +236,6 @@ const productEmoji = (name: string, category?: string | null) => {
   if (/alho/.test(text)) return "🧄";
   if (/brocolis/.test(text)) return "🥦";
 
-  // Hortifruti: use the closest available visual; beet gets a custom SVG below.
   if (/berinjela/.test(text)) return "🍆";
   if (/tomate/.test(text)) return "🍅";
   if (/milho/.test(text)) return "🌽";
@@ -218,7 +245,10 @@ const productEmoji = (name: string, category?: string | null) => {
   if (/beterraba/.test(text)) return "__beet__";
   if (/abobora|moranga/.test(text)) return "🎃";
   if (/mandioquinha|mandioca/.test(text)) return "🍠";
+  if (/uva verde/.test(text)) return "__greengrapes__";
   if (/uva/.test(text)) return "🍇";
+  if (/caju/.test(text)) return "__cashew__";
+  if (/melao/.test(text)) return "__melon__";
   if (/abacaxi/.test(text)) return "🍍";
   if (/melancia/.test(text)) return "🍉";
   if (/manga/.test(text)) return "🥭";
@@ -227,15 +257,12 @@ const productEmoji = (name: string, category?: string | null) => {
   if (/maca/.test(text)) return "🍎";
   if (/laranja|tangerina|mexerica|limao/.test(text)) return "🍊";
   if (/mamao/.test(text)) return "__papaya__";
-  if (/maracuja|caju|goiaba|fruta/.test(text)) return "🍈";
+  if (/maracuja|goiaba|fruta/.test(text)) return "🍈";
   if (/hortifruti|legume|verdura/.test(text)) return "🥬";
 
   if (/alimento.*cao|alimento.*gato|racao|whiskas|pedigree|qualidy/.test(text)) return "🐾";
   if (/fralda/.test(text)) return "👶";
-  if (/papel toalha/.test(text)) return "🧽";
-  if (/papel higienico/.test(text)) return "🧻";
   if (/prestobarba|barbeador|aparelho de barbear/.test(text)) return "🪒";
-  if (/listerine|antisseptico bucal/.test(text)) return "__mouthwash__";
   if (/creme dental/.test(text)) return "🪥";
   if (/shampoo|condicionador|sabonete|desodorante|higiene/.test(text)) return "🧴";
   if (/agua sanitaria|tira manchas|lava roupa|lava louca|detergente|sabao|amaciante|desinfetante|limpeza|essencia concentrada/.test(text)) return "🧼";
@@ -248,6 +275,11 @@ const productEmoji = (name: string, category?: string | null) => {
   if (/orquidea|astromelia|maco de|flor/.test(text)) return "🌸";
   if (/vaso/.test(text)) return "🪴";
   return null;
+};
+
+const forceVisualRule = (name: string, category?: string | null) => {
+  const text = normalizeSearchText(`${category ?? ""} ${name}`);
+  return /barra de proteina|protein bar|dolce gusto|toddynho|listerine|antisseptico bucal|file de merluza|merluza|papel toalha|refrigerante|sukita|farinha de trigo|ketchup|molho barbecue|barbecue|molho de tomate|extrato de tomate|batata doce rosada|ervilhas? finas|jardineira de legumes|bacon|jerked beef|carne seca|charque|linguica calabresa|calabresa defumada|costela suina|uva verde|\bcaju\b|\bmelao\b|mousse de chocolate/.test(text);
 };
 
 const safeName = (value: string) =>
@@ -1676,6 +1708,151 @@ export default function FlyerPage() {
   );
 }
 
+function ProductVisualIcon({
+  visual,
+}: {
+  visual: string | null;
+}) {
+  if (visual === "__beet__") {
+    return (
+      <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
+        <path d="M24 16c-8.2 0-14 5.7-14 13 0 8.8 9.1 14.1 14 17 4.9-2.9 14-8.2 14-17 0-7.3-5.8-13-14-13Z" fill="#8b3f8f" />
+        <path d="M23 17c-5.5-7-3.9-12.2 1.1-15.2 2.3 5.2 2.1 10.2-1.1 15.2Z" fill="#4f9d55" />
+        <path d="M27 17c2.3-7.1 7.1-9.6 12.6-8-2.3 5.3-6.4 8.1-12.6 8Z" fill="#68b66b" />
+      </svg>
+    );
+  }
+
+  const simple = (children: React.ReactNode) => (
+    <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
+      {children}
+    </svg>
+  );
+
+  if (visual === "__mayo__") return simple(<>
+    <path d="M13 12h22l-2 30H15L13 12Z" fill="#f6f0cf" />
+    <path d="M12 8h24v7H12V8Z" fill="#f2c84b" />
+    <rect x="17" y="20" width="14" height="12" rx="3" fill="#fff" />
+  </>);
+  if (visual === "__papaya__") return simple(<>
+    <path d="M10 26c2-10 12-18 23-15 8 2 9 10 4 17-7 10-21 11-27 4-2-2-2-4 0-6Z" fill="#f39a32" />
+    <path d="M15 27c4-7 11-10 18-9-2 7-8 12-17 13Z" fill="#ffbd4a" />
+    <circle cx="26" cy="24" r="1.7" fill="#3e2c22" /><circle cx="30" cy="22" r="1.7" fill="#3e2c22" />
+  </>);
+  if (visual === "__mouthwash__") return simple(<>
+    <rect x="18" y="4" width="12" height="7" rx="2" fill="#d7e8f7" />
+    <rect x="13" y="10" width="22" height="33" rx="5" fill="#38a9d6" />
+    <rect x="17" y="22" width="14" height="10" rx="2" fill="#eef7fb" />
+  </>);
+  if (visual === "__proteinbar__") return simple(<>
+    <rect x="7" y="14" width="34" height="20" rx="5" fill="#713d24" />
+    <rect x="11" y="18" width="26" height="12" rx="3" fill="#b76b3f" />
+    <path d="M15 21h18" stroke="#f5d8a8" strokeWidth="3" strokeLinecap="round" />
+  </>);
+  if (visual === "__yogurt__") return simple(<>
+    <path d="M14 14h20l-2.5 26h-15L14 14Z" fill="#f5f7fb" />
+    <ellipse cx="24" cy="14" rx="11" ry="4" fill="#dce7f2" />
+    <rect x="17" y="21" width="14" height="10" rx="3" fill="#f09ab3" />
+  </>);
+  if (visual === "__fishfillet__") return simple(<>
+    <path d="M8 25c7-10 21-13 31-5-4 12-20 18-31 9l-3 4v-12l3 4Z" fill="#8ecae6" />
+    <path d="M15 25c7-5 14-6 20-3-4 6-12 9-20 6Z" fill="#e8f5fb" />
+  </>);
+  if (visual === "__papertowel__") return simple(<>
+    <ellipse cx="24" cy="9" rx="11" ry="4" fill="#f5f5f5" />
+    <rect x="13" y="9" width="22" height="31" rx="4" fill="#fff" />
+    <ellipse cx="24" cy="40" rx="11" ry="4" fill="#e7e7e7" />
+    <ellipse cx="24" cy="9" rx="4" ry="2" fill="#b9a98f" />
+  </>);
+  if (visual === "__soda__") return simple(<>
+    <path d="M18 5h12v7l3 5v25H15V17l3-5V5Z" fill="#d94b4b" />
+    <rect x="17" y="21" width="14" height="10" rx="2" fill="#fff" />
+    <path d="M20 26h8" stroke="#d94b4b" strokeWidth="2" />
+  </>);
+  if (visual === "__dolcegusto__") return simple(<>
+    <path d="M10 16c2-7 8-11 14-11s12 4 14 11l-4 22H14L10 16Z" fill="#5c3b2e" />
+    <ellipse cx="24" cy="16" rx="14" ry="7" fill="#2f211b" />
+    <ellipse cx="24" cy="16" rx="9" ry="4" fill="#8c684f" />
+  </>);
+  if (visual === "__toddynho__") return simple(<>
+    <rect x="12" y="7" width="24" height="34" rx="3" fill="#7b3f20" />
+    <rect x="16" y="14" width="16" height="15" rx="2" fill="#f2d39a" />
+    <path d="M31 7l6-5" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" />
+  </>);
+  if (visual === "__flourbag__") return simple(<>
+    <path d="M12 8h24l-2 34H14L12 8Z" fill="#f4e6c8" />
+    <rect x="16" y="17" width="16" height="13" rx="2" fill="#fff" />
+    <path d="M20 26l4-8 4 8" stroke="#c79a4a" strokeWidth="2" />
+  </>);
+  if (visual === "__ketchup__") return simple(<>
+    <path d="M18 6h12v7l4 8-3 21H17l-3-21 4-8V6Z" fill="#d92727" />
+    <rect x="17" y="23" width="14" height="8" rx="2" fill="#fff" />
+  </>);
+  if (visual === "__bbq__") return simple(<>
+    <path d="M17 6h14v5l4 7-4 24H17l-4-24 4-7V6Z" fill="#6f351e" />
+    <rect x="16" y="21" width="16" height="10" rx="2" fill="#f5d7a1" />
+    <text x="24" y="28" textAnchor="middle" fontSize="6" fontWeight="700" fill="#5a2b18">BBQ</text>
+  </>);
+  if (visual === "__tomatosauce__") return simple(<>
+    <path d="M12 8h24l-3 32H15L12 8Z" fill="#d73b32" />
+    <rect x="16" y="17" width="16" height="14" rx="3" fill="#fff" />
+    <circle cx="24" cy="24" r="5" fill="#e9453b" />
+  </>);
+  if (visual === "__sweetpotato__") return simple(<>
+    <path d="M8 29c4-13 18-21 31-11 2 11-9 20-23 20-7 0-11-4-8-9Z" fill="#a43d78" />
+    <path d="M14 29c5-6 12-10 19-9-2 6-9 12-17 13Z" fill="#f3c050" />
+  </>);
+  if (visual === "__peas__") return simple(<>
+    <path d="M7 27c8-13 25-15 35-5-8 14-25 17-35 5Z" fill="#61a744" />
+    {[14,20,26,32].map((x)=><circle key={x} cx={x} cy="26" r="4" fill="#9bd36a" />)}
+  </>);
+  if (visual === "__vegetablemix__") return simple(<>
+    <circle cx="15" cy="17" r="6" fill="#ef8c32" /><circle cx="29" cy="16" r="6" fill="#77b255" />
+    <rect x="13" y="27" width="8" height="13" rx="3" fill="#e8b04a" />
+    <circle cx="31" cy="31" r="5" fill="#7bbd50" /><circle cx="38" cy="35" r="4" fill="#8bd05d" />
+  </>);
+  if (visual === "__greengrapes__") return simple(<>
+    {[20,27,34,16,24,31,21,28].map((x,i)=><circle key={i} cx={x} cy={18+i*2.4} r="5" fill={i%2?"#a8cf45":"#8fbd35"} />)}
+    <path d="M25 10c5-6 10-7 15-4-3 5-8 8-15 8Z" fill="#4d9b45" />
+  </>);
+  if (visual === "__cashew__") return simple(<>
+    <path d="M12 23c3-11 15-16 24-9 7 6 4 17-5 22-9 5-22 0-19-13Z" fill="#e7a23b" />
+    <path d="M29 34c4 0 8 3 8 7-5 3-11 0-11-5 0-1 1-2 3-2Z" fill="#8a5b35" />
+  </>);
+  if (visual === "__melon__") return simple(<>
+    <circle cx="24" cy="25" r="16" fill="#c8d96b" />
+    <path d="M24 9v32M14 13c7 8 7 17 0 25M34 13c-7 8-7 17 0 25" stroke="#8a9e4e" strokeWidth="2" fill="none" />
+  </>);
+  if (visual === "__baconslices__") return simple(<>
+    <path d="M7 15c8-5 14 4 22-1 5-3 9-1 12 2l-4 8c-7-5-13 3-21 0-5-2-8-1-12 1Z" fill="#e4776f" />
+    <path d="M8 29c8-5 14 4 22-1 5-3 9-1 12 2l-4 8c-7-5-13 3-21 0-5-2-8-1-12 1Z" fill="#f09b8f" />
+  </>);
+  if (visual === "__baconchunk__") return simple(<>
+    <path d="M8 17l24-8 9 12-24 18L7 31Z" fill="#db6e63" />
+    <path d="M12 20l22-7 3 4-22 9Z" fill="#f1b09d" />
+  </>);
+  if (visual === "__porkribs__") return simple(<>
+    <path d="M7 29c5-12 21-20 34-8-3 13-19 20-31 13Z" fill="#df8f8c" />
+    <path d="M15 19l5 16M22 16l5 17M29 16l5 14" stroke="#f7ddd3" strokeWidth="3" />
+  </>);
+  if (visual === "__jerkedbeef__") return simple(<>
+    <rect x="8" y="12" width="14" height="13" rx="4" fill="#8e4e2d" />
+    <rect x="24" y="9" width="16" height="14" rx="4" fill="#9d5a35" />
+    <rect x="15" y="27" width="18" height="13" rx="4" fill="#7c4328" />
+  </>);
+  if (visual === "__calabresa__") return simple(<>
+    <path d="M8 28c8-15 24-17 33-4-6 10-16 15-28 12" stroke="#b84b3d" strokeWidth="8" strokeLinecap="round" fill="none" />
+    <path d="M12 30c8-10 18-11 25-4" stroke="#e17b63" strokeWidth="2" fill="none" />
+  </>);
+  if (visual === "__mousse__") return simple(<>
+    <path d="M11 18h26l-4 23H15L11 18Z" fill="#f2e7dc" />
+    <path d="M14 18c3-10 17-12 20 0Z" fill="#69402f" />
+    <path d="M18 16c2-5 10-6 13 0Z" fill="#8a5a44" />
+  </>);
+
+  return visual ? <span className="text-3xl">{visual}</span> : <Tags className="h-7 w-7 text-primary/70" />;
+}
+
 function ProductThumb({
   name,
   category,
@@ -1685,11 +1862,15 @@ function ProductThumb({
   category?: string | null;
   imageUrl?: string | null;
 }) {
+  const visual = productEmoji(name, category);
+  const useRuleIcon = forceVisualRule(name, category);
+  const safeImageUrl = useRuleIcon ? null : imageUrl;
+
   return (
     <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-muted/50">
-      {imageUrl ? (
+      {safeImageUrl ? (
         <img
-          src={imageUrl}
+          src={safeImageUrl}
           alt=""
           loading="lazy"
           className="h-full w-full object-contain p-1"
@@ -1702,58 +1883,9 @@ function ProductThumb({
       ) : null}
       <span
         aria-hidden="true"
-        className={`${imageUrl ? "hidden" : "flex"} h-full w-full items-center justify-center`}
+        className={`${safeImageUrl ? "hidden" : "flex"} h-full w-full items-center justify-center`}
       >
-        {productEmoji(name, category) === "__beet__" ? (
-          <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
-            <path d="M24 16c-8.2 0-14 5.7-14 13 0 8.8 9.1 14.1 14 17 4.9-2.9 14-8.2 14-17 0-7.3-5.8-13-14-13Z" fill="#8b3f8f" />
-            <path d="M23 17c-5.5-7-3.9-12.2 1.1-15.2 2.3 5.2 2.1 10.2-1.1 15.2Z" fill="#4f9d55" />
-            <path d="M27 17c2.3-7.1 7.1-9.6 12.6-8-2.3 5.3-6.4 8.1-12.6 8Z" fill="#68b66b" />
-            <path d="M20 18c-6-2.5-10.4-.8-13.1 3.4 5.2 1.5 9.5.4 13.1-3.4Z" fill="#5ba960" />
-          </svg>
-        ) : productEmoji(name, category) === "__mayo__" ? (
-          <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
-            <path d="M13 12h22l-2 30H15L13 12Z" fill="#f6f0cf" />
-            <path d="M12 8h24v7H12V8Z" rx="2" fill="#f2c84b" />
-            <path d="M17 19h14v14H17V19Z" rx="3" fill="#fff8e6" />
-            <path d="M20 24c3-3 5-3 8 0-2 5-6 5-8 0Z" fill="#f2c84b" />
-            <path d="M16 42h16" stroke="#c7b977" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-        ) : productEmoji(name, category) === "__papaya__" ? (
-          <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
-            <path d="M10 26c2-10 12-18 23-15 8 2 9 10 4 17-7 10-21 11-27 4-2-2-2-4 0-6Z" fill="#f39a32" />
-            <path d="M14 27c4-7 12-11 19-9-1 7-8 13-17 13-2 0-3-2-2-4Z" fill="#ffbd4a" />
-            <ellipse cx="27" cy="23" rx="2.2" ry="1.5" fill="#463124" />
-            <ellipse cx="31" cy="22" rx="2.2" ry="1.5" fill="#463124" />
-            <ellipse cx="24" cy="27" rx="2.2" ry="1.5" fill="#463124" />
-            <path d="M34 11c2-5 5-7 9-6-1 4-4 7-9 8" fill="#4f9d55" />
-          </svg>
-        ) : productEmoji(name, category) === "__mouthwash__" ? (
-          <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
-            <rect x="17" y="5" width="14" height="7" rx="2" fill="#d7e8f7" />
-            <rect x="14" y="11" width="20" height="31" rx="5" fill="#56a8d8" />
-            <rect x="17" y="20" width="14" height="12" rx="2" fill="#eef7fb" />
-            <path d="M20 26h8" stroke="#2f6d91" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-        ) : productEmoji(name, category) === "__proteinbar__" ? (
-          <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
-            <rect x="7" y="15" width="34" height="18" rx="5" fill="#7a3f22" />
-            <path d="M10 18h28v12H10z" fill="#b86a3d" />
-            <path d="M15 20h18" stroke="#f3d7a5" strokeWidth="3" strokeLinecap="round" />
-            <path d="M18 27h12" stroke="#5b2b17" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-        ) : productEmoji(name, category) === "__yogurt__" ? (
-          <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
-            <path d="M14 14h20l-2.5 26h-15L14 14Z" fill="#f5f7fb" />
-            <ellipse cx="24" cy="14" rx="11" ry="4" fill="#dce7f2" />
-            <rect x="17" y="21" width="14" height="10" rx="3" fill="#f09ab3" />
-            <path d="M21 26c2-3 5-3 7 0" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-        ) : productEmoji(name, category) ? (
-          <span className="text-3xl">{productEmoji(name, category)}</span>
-        ) : (
-          <Tags className="h-7 w-7 text-primary/70" />
-        )}
+        <ProductVisualIcon visual={visual} />
       </span>
     </div>
   );
