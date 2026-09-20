@@ -1013,7 +1013,7 @@ export default function OffersPage() {
             <Clock3 className="mx-auto h-8 w-8 text-primary" />
             <p className="mt-3 font-bold">Nenhum tabloide vigente hoje</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Importe os tabloides atuais no Radar 360 para liberar a consulta.
+              Importe os tabloides atuais no Radar para liberar a consulta.
             </p>
             <Button className="mt-4" onClick={() => navigate("/radar")}>
               Abrir Radar 360
