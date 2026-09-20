@@ -22,7 +22,7 @@ const specificRules: Rule[] = [
   { pattern: /toddynho/, visual: "__toddynho__", forceIcon: true, confidence: 0.99 },
   { pattern: /listerine|antisseptico bucal/, visual: "__mouthwash__", forceIcon: true, confidence: 0.99 },
   { pattern: /probio2/, visual: "__yogurt__", forceIcon: true, confidence: 0.99 },
-  { pattern: /iog\.\s*liq|iogurte/, visual: "__yogurt__", confidence: 0.98 },
+  { pattern: /iog\s*liq|iogurte/, visual: "__yogurt__", confidence: 0.98 },
 
   // Fish and seafood.
   { pattern: /file de merluza|merluza/, visual: "__fishfillet__", forceIcon: true, confidence: 0.99 },
@@ -45,7 +45,7 @@ const specificRules: Rule[] = [
   { pattern: /espumante/, visual: "🥂", confidence: 0.99 },
   { pattern: /aperitivo|campari|aperol/, visual: "🍹", confidence: 0.98 },
   { pattern: /cerveja|\bcerv\b/, visual: "🍺", confidence: 0.99 },
-  { pattern: /cachaca|caipirinha|\bgin\b|licor|coquetel/, visual: "🥃", confidence: 0.97 },
+  { pattern: /smirnoff ice|bebida mista.*alcool|cachaca|caipirinha|\bgin\b|licor|coquetel/, visual: "🥃", confidence: 0.97 },
   { pattern: /agua de coco/, visual: "🥥", confidence: 0.99 },
   { pattern: /agua mineral/, visual: "💧", confidence: 0.99 },
   { pattern: /suco|refresco|nectar/, visual: "🧃", confidence: 0.97 },
