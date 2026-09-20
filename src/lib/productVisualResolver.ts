@@ -168,7 +168,8 @@ const specificRules: Rule[] = [
   { pattern: /absorvente/, visual: "__sanitary__", confidence: 0.98 },
   { pattern: /prestobarba|barbeador|aparelho gilette|gillette venus|aparelho de barbear/, visual: "🪒", confidence: 0.99 },
   { pattern: /escova dental|creme dental|gel dental/, visual: "🪥", confidence: 0.99 },
-  { pattern: /shampoo|condicionador|kit jacques|sabonete|desodorante|higiene|colonia|hidratante|protetor solar|tintura biocolor|creme de tratamento|lenco umedecido|toalha umed/, visual: "🧴", confidence: 0.96 },
+  { pattern: /sabonete|sabonetes/, visual: "__soapbar__", forceIcon: true, confidence: 0.99 },
+  { pattern: /shampoo|condicionador|kit jacques|desodorante|higiene|colonia|hidratante|protetor solar|tintura biocolor|creme de tratamento|lenco umedecido|toalha umed/, visual: "🧴", confidence: 0.96 },
 
   // Cleaning and household.
   { pattern: /essencia concentrada|agua sanitaria|tira manchas|lava roupa|lava louca|deterg|desengordurante|limpador|cif|veja|uau|sabao|amaciante|desinfetante|cloro|antimofo|multinseticida|remov tupi|cera auto|esponja de aco/, visual: "🧼", confidence: 0.96 },
