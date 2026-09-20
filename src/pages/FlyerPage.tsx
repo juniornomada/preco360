@@ -154,8 +154,9 @@ const productEmoji = (name: string, category?: string | null) => {
   );
 
   // Product type has priority over flavor/variant words.
+  if (/barra de proteina|protein bar|suplemento.*proteina|suplemento.*whey/.test(text)) return "__proteinbar__";
+  if (/iogurte|probio2/.test(text)) return "__yogurt__";
   if (/bebida lactea/.test(text)) return "🥛";
-  if (/barra de proteina|protein bar|suplemento.*proteina|suplemento.*whey/.test(text)) return "🍫";
 
   if (/vinho|frisante|chopp de vinho/.test(text)) return "🍷";
   if (/aperitivo campari/.test(text)) return "🍹";
@@ -234,7 +235,8 @@ const productEmoji = (name: string, category?: string | null) => {
   if (/papel toalha/.test(text)) return "🧽";
   if (/papel higienico/.test(text)) return "🧻";
   if (/prestobarba|barbeador|aparelho de barbear/.test(text)) return "🪒";
-  if (/creme dental|listerine|antisseptico bucal/.test(text)) return "🪥";
+  if (/listerine|antisseptico bucal/.test(text)) return "__mouthwash__";
+  if (/creme dental/.test(text)) return "🪥";
   if (/shampoo|condicionador|sabonete|desodorante|higiene/.test(text)) return "🧴";
   if (/agua sanitaria|tira manchas|lava roupa|lava louca|detergente|sabao|amaciante|desinfetante|limpeza|essencia concentrada/.test(text)) return "🧼";
   if (/rodo/.test(text)) return "🧹";
@@ -1725,6 +1727,27 @@ function ProductThumb({
             <ellipse cx="31" cy="22" rx="2.2" ry="1.5" fill="#463124" />
             <ellipse cx="24" cy="27" rx="2.2" ry="1.5" fill="#463124" />
             <path d="M34 11c2-5 5-7 9-6-1 4-4 7-9 8" fill="#4f9d55" />
+          </svg>
+        ) : productEmoji(name, category) === "__mouthwash__" ? (
+          <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
+            <rect x="17" y="5" width="14" height="7" rx="2" fill="#d7e8f7" />
+            <rect x="14" y="11" width="20" height="31" rx="5" fill="#56a8d8" />
+            <rect x="17" y="20" width="14" height="12" rx="2" fill="#eef7fb" />
+            <path d="M20 26h8" stroke="#2f6d91" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        ) : productEmoji(name, category) === "__proteinbar__" ? (
+          <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
+            <rect x="7" y="15" width="34" height="18" rx="5" fill="#7a3f22" />
+            <path d="M10 18h28v12H10z" fill="#b86a3d" />
+            <path d="M15 20h18" stroke="#f3d7a5" strokeWidth="3" strokeLinecap="round" />
+            <path d="M18 27h12" stroke="#5b2b17" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        ) : productEmoji(name, category) === "__yogurt__" ? (
+          <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
+            <path d="M14 14h20l-2.5 26h-15L14 14Z" fill="#f5f7fb" />
+            <ellipse cx="24" cy="14" rx="11" ry="4" fill="#dce7f2" />
+            <rect x="17" y="21" width="14" height="10" rx="3" fill="#f09ab3" />
+            <path d="M21 26c2-3 5-3 7 0" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
           </svg>
         ) : productEmoji(name, category) ? (
           <span className="text-3xl">{productEmoji(name, category)}</span>
