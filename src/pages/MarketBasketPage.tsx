@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -6,7 +6,6 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
-  Plus,
   Search,
   ShoppingBasket,
   Sparkles,
@@ -192,6 +191,7 @@ export default function MarketBasketPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [selected, setSelected] = useState<Record<string, number>>({});
   const [selectionHydrated, setSelectionHydrated] = useState(false);
   const [showItems, setShowItems] = useState(true);
@@ -506,7 +506,16 @@ export default function MarketBasketPage() {
       ...current,
       [key]: Math.max(1, current[key] ?? 0),
     }));
+    setSearch("");
     setShowItems(false);
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    if (value.trim().length >= 2) {
+      setShowItems(true);
+    }
   };
 
   const changeQty = (key: string, delta: number) =>
@@ -720,26 +729,15 @@ export default function MarketBasketPage() {
                   </div>
                 );
               })}
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 w-full border-primary/25 text-primary"
-                onClick={() => {
-                  setSearch("");
-                  setShowItems(true);
-                }}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Adicionar outro produto
-              </Button>
             </div>
           )}
 
           <div className="relative mt-3">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <Input
+              ref={searchInputRef}
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => handleSearchChange(event.target.value)}
               placeholder="Leite em pó, papel higiênico, azeite..."
               className="h-11 pl-9"
             />
