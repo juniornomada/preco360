@@ -1264,10 +1264,10 @@ export default function FlyerPage() {
         <div>
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary sm:text-xs">Radar 360</p>
           <h1 className="mt-0.5 text-[clamp(1.45rem,6vw,2rem)] font-extrabold leading-tight tracking-tight sm:mt-1">
-            Ofertas que realmente valem
+            Base de ofertas
           </h1>
           <p className="mt-1 max-w-xl text-xs leading-snug text-muted-foreground sm:text-sm">
-            Compare preço ofertado com preço pago, normalizando kg, litro e embalagem.
+            Importe, revise e mantenha os tabloides que alimentam o Preço 360.
           </p>
         </div>
         <div className="rounded-xl bg-primary/10 p-2.5 text-primary sm:rounded-2xl sm:p-3">
@@ -1277,7 +1277,7 @@ export default function FlyerPage() {
 
       <div className="mb-2.5 grid grid-cols-3 gap-1.5 rounded-xl bg-muted p-1 sm:mb-3 sm:gap-2">
         {([
-          ["radar", "Radar", Sparkles],
+          ["radar", "Revisão", Sparkles],
           ["import", "Importar", Upload],
           ["history", "Histórico", History],
         ] as const).map(([key, label, Icon]) => (
