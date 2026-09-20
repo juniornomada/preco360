@@ -16,6 +16,15 @@ import { SefazCaptchaAssist } from "@/components/SefazCaptchaAssist";
 import { DebugAttempts } from "@/components/DebugAttempts";
 import { addAttempt } from "@/lib/importLog";
 import { stepFromErrorCode } from "@/components/ImportProgress";
+import {
+  inferPackage,
+  matchFlyerItem,
+  normalizeSearchText,
+  normalizedUnitPrice,
+  type AliasForMatch,
+  type FlyerCandidate,
+  type ProductForMatch,
+} from "@/lib/flyerAnalysis";
 
 interface ParsedItem {
   name: string;
@@ -616,48 +625,133 @@ export default function UploadPage() {
         }
       }
 
+      // Load the user's catalog and learned receipt aliases once. Receipt text
+      // stays untouched; matching only decides which canonical product receives
+      // the price history.
+      const [{ data: catalogData, error: catalogError }, { data: aliasData, error: aliasError }] =
+        await Promise.all([
+          supabase
+            .from("products")
+            .select("id,name,category,brand,package_size,unit,stockable")
+            .eq("user_id", user.id),
+          supabase
+            .from("product_aliases")
+            .select("product_id,normalized_alias,retailer")
+            .eq("user_id", user.id),
+        ]);
+
+      if (catalogError) throw catalogError;
+      if (aliasError) throw aliasError;
+
+      const catalog: ProductForMatch[] = (catalogData ?? []) as ProductForMatch[];
+      const learnedAliases: AliasForMatch[] = (aliasData ?? []) as AliasForMatch[];
+      const knownAliasKeys = new Set(
+        learnedAliases.map(
+          (alias) =>
+            `${alias.normalized_alias}|${normalizeSearchText(alias.retailer ?? "")}`,
+        ),
+      );
+
       let newCount = 0;
-      let updatedCount = 0;
+      let linkedCount = 0;
 
       for (const item of deduped.values()) {
-        // Check if product already exists for this user
-        const { data: existingProducts } = await supabase
-          .from("products")
-          .select("id")
-          .eq("user_id", user.id)
-          .ilike("name", item.name.trim())
-          .limit(1);
+        const rawReceiptName = item.name.trim();
+        const itemPrice = parseFloat(item.price);
+        const packageInfo = inferPackage(rawReceiptName);
+        const normalized = normalizedUnitPrice(itemPrice, packageInfo);
+        const candidate: FlyerCandidate = {
+          rawName: rawReceiptName,
+          price: itemPrice,
+          packageInfo,
+          normalizedPrice: normalized.normalizedPrice,
+          baseUnit: normalized.baseUnit,
+          clubPrice: false,
+          sourcePage: 1,
+        };
 
-        let productId: string;
+        const retailerName =
+          (item.supermarket || supermarket || "Desconhecido").trim() ||
+          "Desconhecido";
+        const aliasRetailer =
+          normalizeSearchText(retailerName) === "desconhecido"
+            ? null
+            : retailerName;
 
-        if (existingProducts && existingProducts.length > 0) {
-          productId = existingProducts[0].id;
-          updatedCount++;
+        // Try a learned alias first and then the same semantic matcher used by
+        // the Radar. It understands common receipt abbreviations and package size.
+        const match = matchFlyerItem(
+          candidate,
+          catalog,
+          learnedAliases,
+          aliasRetailer ?? undefined,
+        );
+
+        let productId = match.productId;
+
+        if (productId) {
+          linkedCount++;
         } else {
           const { data: newProduct, error: pErr } = await supabase
             .from("products")
-            .insert({ name: item.name.trim(), category: item.category || "Geral", user_id: user.id })
-            .select()
+            .insert({
+              name: rawReceiptName,
+              category: item.category || "Geral",
+              package_size: packageInfo?.quantity ?? null,
+              unit: packageInfo?.unit ?? null,
+              user_id: user.id,
+            })
+            .select("id,name,category,brand,package_size,unit,stockable")
             .single();
           if (pErr) throw pErr;
+
           productId = newProduct.id;
+          catalog.push(newProduct as ProductForMatch);
           newCount++;
+        }
+
+        // Learn the exact fiscal description for this retailer. Future receipts
+        // can then link immediately even when the canonical display name differs.
+        const normalizedAlias = normalizeSearchText(rawReceiptName);
+        const aliasKey =
+          `${normalizedAlias}|${normalizeSearchText(aliasRetailer ?? "")}`;
+
+        if (normalizedAlias && !knownAliasKeys.has(aliasKey)) {
+          const { error: aliasInsertError } = await supabase
+            .from("product_aliases")
+            .insert({
+              user_id: user.id,
+              product_id: productId,
+              alias: rawReceiptName,
+              normalized_alias: normalizedAlias,
+              retailer: aliasRetailer,
+            });
+
+          if (aliasInsertError) throw aliasInsertError;
+
+          knownAliasKeys.add(aliasKey);
+          learnedAliases.push({
+            product_id: productId,
+            normalized_alias: normalizedAlias,
+            retailer: aliasRetailer,
+          });
         }
 
         const { error: prErr } = await supabase.from("prices").insert({
           product_id: productId,
-          supermarket: item.supermarket || supermarket || "Desconhecido",
-          price: parseFloat(item.price),
+          supermarket: retailerName,
+          price: itemPrice,
           date: dateToUse,
           user_id: user.id,
-          receipt_text: `Importado via cupom`,
+          source: "receipt",
+          receipt_text: rawReceiptName,
         });
         if (prErr) throw prErr;
       }
 
       const parts = [];
       if (newCount > 0) parts.push(`${newCount} novo(s)`);
-      if (updatedCount > 0) parts.push(`${updatedCount} atualizado(s)`);
+      if (linkedCount > 0) parts.push(`${linkedCount} vinculado(s)`);
       toast({ title: "Salvo!", description: `${parts.join(", ")} — ${deduped.size} preços registrados.` });
       setItems([]);
       setFile(null);
