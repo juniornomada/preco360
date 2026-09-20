@@ -140,6 +140,46 @@ function matchesSearch(value: string, query: string) {
   );
 }
 
+const identityStop = new Set([
+  "de", "da", "do", "das", "dos", "em", "po", "lt", "lata", "latas",
+  "tradicional", "tipo", "tipos", "sabor", "sabores", "embalagem",
+  "pacote", "pct", "un", "und", "unid", "kg", "g", "ml", "l",
+]);
+
+function offerIdentityTokens(value: string) {
+  return normalizeSearchText(value)
+    .split(/\s+/)
+    .filter((token) =>
+      token &&
+      !identityStop.has(token) &&
+      !/^\d+(?:\.\d+)?$/.test(token),
+    );
+}
+
+function comparableOfferIdentity(current: FlyerItemRow, previous: FlyerItemRow) {
+  if (
+    current.base_unit &&
+    previous.base_unit &&
+    current.base_unit !== previous.base_unit
+  ) {
+    return false;
+  }
+
+  const a = offerIdentityTokens(current.raw_name);
+  const b = offerIdentityTokens(previous.raw_name);
+  if (!a.length || !b.length) return false;
+
+  const bSet = new Set(b);
+  const common = [...new Set(a)].filter((token) => bSet.has(token));
+  if (common.length < 2) return false;
+
+  // Prevent same-brand but different product families from contaminating history.
+  // Example: "Achocolatado Nescau" must not compare with "Cereal Nescau".
+  if (a[0] !== b[0] && common.length < 3) return false;
+
+  return true;
+}
+
 function candidateFromItem(item: FlyerItemRow): FlyerCandidate {
   const packageInfo =
     item.package_quantity && item.package_unit
@@ -254,13 +294,11 @@ export default function OffersPage() {
         }
         const product = productId ? productMap.get(productId) ?? null : null;
 
-        const previousAdvertised = productId
-          ? data.items.filter(
-              (previous) =>
-                previous.product_id === productId &&
-                historicalIds.has(previous.flyer_id),
-            )
-          : [];
+        const previousAdvertised = data.items.filter((previous) => {
+          if (!historicalIds.has(previous.flyer_id)) return false;
+          if (productId && previous.product_id === productId) return true;
+          return comparableOfferIdentity(item, previous);
+        });
 
         const verdict = evaluateFlyerOffer(
           candidate,
