@@ -145,40 +145,14 @@ function expiryLabel(value: string | null | undefined, today: string) {
 }
 
 function compactOfferName(item: FlyerItemRow) {
-  const rawName = item.raw_name.trim();
-  const packageMatch = rawName.match(
-    /\b(?:(?:pacote|pct|embalagem|garrafa|lata|caixa|frasco|pote)\s+)?(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|un|und|unid)\s*$/i,
-  );
-
-  const fieldUnit = (item.package_unit ?? "").trim();
-  const fieldQuantity = item.package_quantity;
-  const fieldPackageLabel =
-    fieldQuantity && fieldUnit
-      ? `${Number(fieldQuantity).toLocaleString("pt-BR", {
-          maximumFractionDigits: 3,
-        })}${fieldUnit.toLowerCase() === "l" ? "L" : fieldUnit.toLowerCase()}`
-      : null;
-
-  if (!packageMatch || packageMatch.index === undefined) {
-    return {
-      title: rawName,
-      packageLabel: fieldPackageLabel,
-    };
-  }
-
-  const matchedUnit = packageMatch[2].toLowerCase();
-  const packageLabel = `${packageMatch[1].replace(".", ",")}${
-    matchedUnit === "l" ? "L" : matchedUnit
-  }`;
-  const title = rawName
-    .slice(0, packageMatch.index)
-    .replace(/[\s·,\-–—]+$/, "")
+  return item.raw_name
+    .trim()
+    .replace(
+      /\b(?:pacote|pct|embalagem|garrafa|lata|caixa|frasco|pote)\s+(?=\d+(?:[.,]\d+)?\s*(?:kg|g|ml|l|un|und|unid)\b)/gi,
+      "",
+    )
+    .replace(/\s{2,}/g, " ")
     .trim();
-
-  return {
-    title: title || rawName,
-    packageLabel,
-  };
 }
 
 const searchStopWords = new Set([
@@ -1135,7 +1109,7 @@ export default function OffersPage() {
               regularPrice,
               regularPackage,
             );
-            const { title: displayTitle, packageLabel } = compactOfferName(item);
+            const displayTitle = compactOfferName(item);
             const isFamilyBest =
               bestOfferByFamily.get(entry.family) === item.id;
             const isTopResult = isBroadFamilySearch
@@ -1196,14 +1170,12 @@ export default function OffersPage() {
                           <p className="text-xl font-extrabold leading-tight text-primary">
                             {brl(candidate.price)}
                           </p>
-                          {(packageLabel || candidate.baseUnit !== "un") && (
+                          {candidate.baseUnit !== "un" && (
                             <p className="mt-0.5 text-[10px] font-semibold text-primary">
-                              {packageLabel && <>{packageLabel} · </>}
-                              {candidate.baseUnit !== "un" &&
-                                formatNormalizedPrice(
-                                  candidate.normalizedPrice,
-                                  candidate.baseUnit,
-                                )}
+                              {formatNormalizedPrice(
+                                candidate.normalizedPrice,
+                                candidate.baseUnit,
+                              )}
                             </p>
                           )}
                           <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground/80">
@@ -1222,14 +1194,12 @@ export default function OffersPage() {
                           <p className="text-xl font-extrabold leading-tight">
                             {brl(candidate.price)}
                           </p>
-                          {(packageLabel || candidate.baseUnit !== "un") && (
+                          {candidate.baseUnit !== "un" && (
                             <p className="mt-0.5 text-[10px] text-muted-foreground">
-                              {packageLabel && <>{packageLabel} · </>}
-                              {candidate.baseUnit !== "un" &&
-                                formatNormalizedPrice(
-                                  candidate.normalizedPrice,
-                                  candidate.baseUnit,
-                                )}
+                              {formatNormalizedPrice(
+                                candidate.normalizedPrice,
+                                candidate.baseUnit,
+                              )}
                             </p>
                           )}
                         </>
