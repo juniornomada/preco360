@@ -7,7 +7,7 @@ import AddProductModal from "@/components/AddProductModal";
 import { formatBRL } from "@/lib/priceAnalysis";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { BadgeDollarSign, Camera, ChevronRight, CircleDollarSign, PackageSearch, Plus, ReceiptText, ShoppingBasket } from "lucide-react";
+import { BadgeDollarSign, ChevronRight, CircleDollarSign, PackageSearch, Plus, ReceiptText, ShoppingBasket, Tags } from "lucide-react";
 
 export default function Index() {
   const navigate = useNavigate();
@@ -63,14 +63,14 @@ export default function Index() {
             Esse preço está realmente bom?
           </h2>
           <p className="mt-3 max-w-[42rem] text-[clamp(0.84rem,3.5vw,0.96rem)] leading-[1.55] text-white/70">
-            Compare o preço da prateleira com o que você já pagou e registre novos valores para melhorar a análise.
+            Veja ofertas vigentes, compare com o seu histórico e descubra onde vale a pena comprar antes de sair de casa.
           </p>
           <div className="mt-4 grid gap-2 sm:mt-5 sm:grid-cols-2">
-            <Button className="h-10 rounded-xl text-sm sm:h-11" onClick={() => navigate("/search")}>
-              <BadgeDollarSign className="mr-2 h-4 w-4" /> Cotar preço agora
+            <Button className="h-10 rounded-xl text-sm sm:h-11" onClick={() => navigate("/offers")}>
+              <Tags className="mr-2 h-4 w-4" /> Consultar ofertas
             </Button>
-            <Button variant="secondary" className="h-10 rounded-xl bg-white/10 text-sm text-white hover:bg-white/15 sm:h-11" onClick={() => navigate("/upload")}>
-              <Camera className="mr-2 h-4 w-4" /> Ler cupom fiscal
+            <Button variant="secondary" className="h-10 rounded-xl bg-white/10 text-sm text-white hover:bg-white/15 sm:h-11" onClick={() => navigate("/search")}>
+              <BadgeDollarSign className="mr-2 h-4 w-4" /> Cotar na loja
             </Button>
           </div>
         </div>
