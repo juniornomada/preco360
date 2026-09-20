@@ -144,6 +144,43 @@ function expiryLabel(value: string | null | undefined, today: string) {
   return `até ${dateBr(value)}`;
 }
 
+function compactOfferName(item: FlyerItemRow) {
+  const rawName = item.raw_name.trim();
+  const packageMatch = rawName.match(
+    /\b(?:(?:pacote|pct|embalagem|garrafa|lata|caixa|frasco|pote)\s+)?(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|un|und|unid)\s*$/i,
+  );
+
+  const fieldUnit = (item.package_unit ?? "").trim();
+  const fieldQuantity = item.package_quantity;
+  const fieldPackageLabel =
+    fieldQuantity && fieldUnit
+      ? `${Number(fieldQuantity).toLocaleString("pt-BR", {
+          maximumFractionDigits: 3,
+        })}${fieldUnit.toLowerCase() === "l" ? "L" : fieldUnit.toLowerCase()}`
+      : null;
+
+  if (!packageMatch || packageMatch.index === undefined) {
+    return {
+      title: rawName,
+      packageLabel: fieldPackageLabel,
+    };
+  }
+
+  const matchedUnit = packageMatch[2].toLowerCase();
+  const packageLabel = `${packageMatch[1].replace(".", ",")}${
+    matchedUnit === "l" ? "L" : matchedUnit
+  }`;
+  const title = rawName
+    .slice(0, packageMatch.index)
+    .replace(/[\s·,\-–—]+$/, "")
+    .trim();
+
+  return {
+    title: title || rawName,
+    packageLabel,
+  };
+}
+
 const searchStopWords = new Set([
   "de", "da", "do", "das", "dos", "em",
 ]);
@@ -1098,6 +1135,7 @@ export default function OffersPage() {
               regularPrice,
               regularPackage,
             );
+            const { title: displayTitle, packageLabel } = compactOfferName(item);
             const isFamilyBest =
               bestOfferByFamily.get(entry.family) === item.id;
             const isTopResult = isBroadFamilySearch
@@ -1127,7 +1165,7 @@ export default function OffersPage() {
                     />
 
                     <div className="min-w-0">
-                      <h2 className="text-[15px] font-bold leading-[1.22] sm:text-base sm:leading-snug">{item.raw_name}</h2>
+                      <h2 className="text-[15px] font-bold leading-[1.22] sm:text-base sm:leading-snug">{displayTitle}</h2>
 
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-bold">
@@ -1158,12 +1196,14 @@ export default function OffersPage() {
                           <p className="text-xl font-extrabold leading-tight text-primary">
                             {brl(candidate.price)}
                           </p>
-                          {candidate.baseUnit !== "un" && (
+                          {(packageLabel || candidate.baseUnit !== "un") && (
                             <p className="mt-0.5 text-[10px] font-semibold text-primary">
-                              {formatNormalizedPrice(
-                                candidate.normalizedPrice,
-                                candidate.baseUnit,
-                              )}
+                              {packageLabel && <>{packageLabel} · </>}
+                              {candidate.baseUnit !== "un" &&
+                                formatNormalizedPrice(
+                                  candidate.normalizedPrice,
+                                  candidate.baseUnit,
+                                )}
                             </p>
                           )}
                           <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground/80">
@@ -1182,12 +1222,14 @@ export default function OffersPage() {
                           <p className="text-xl font-extrabold leading-tight">
                             {brl(candidate.price)}
                           </p>
-                          {candidate.baseUnit !== "un" && (
+                          {(packageLabel || candidate.baseUnit !== "un") && (
                             <p className="mt-0.5 text-[10px] text-muted-foreground">
-                              {formatNormalizedPrice(
-                                candidate.normalizedPrice,
-                                candidate.baseUnit,
-                              )}
+                              {packageLabel && <>{packageLabel} · </>}
+                              {candidate.baseUnit !== "un" &&
+                                formatNormalizedPrice(
+                                  candidate.normalizedPrice,
+                                  candidate.baseUnit,
+                                )}
                             </p>
                           )}
                         </>
