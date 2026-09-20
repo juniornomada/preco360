@@ -454,6 +454,7 @@ async function runGemini(file: File, prompt: string, preferredModel?: string) {
     (freeSet.has(configured) && configured) ||
     FREE_GEMINI_MODELS[0];
 
+  const isImagePage = mimeType.startsWith("image/");
   const body = {
     contents: [{ role: "user", parts: [
       { text: prompt },
@@ -461,13 +462,25 @@ async function runGemini(file: File, prompt: string, preferredModel?: string) {
     ] }],
     generationConfig: {
       responseMimeType: "application/json",
-      maxOutputTokens: 32768,
+      // A single flyer image normally needs far less output than a whole PDF.
+      // Keeping a generous cap preserves completeness while reducing long-tail latency.
+      maxOutputTokens: isImagePage ? 24576 : 32768,
       temperature: 0,
     },
   };
 
+  const allCandidates = Array.from(new Set([preferred, ...FREE_GEMINI_MODELS]));
+  // Multi-image flyers process one physical page per invocation. Two model
+  // attempts are enough here and keep the invocation safely below the Edge
+  // Function lifetime when a provider call stalls. PDFs keep the broader
+  // fallback list because they are heavier and less predictable.
+  const modelCandidates = isImagePage
+    ? allCandidates.slice(0, 2)
+    : allCandidates;
+  const requestTimeoutMs = isImagePage ? 55000 : 105000;
+
   let lastError = "Nenhum modelo Gemini gratuito disponível.";
-  for (const model of Array.from(new Set([preferred, ...FREE_GEMINI_MODELS]))) {
+  for (const model of modelCandidates) {
     let response: Response;
     try {
       response = await fetch(
@@ -477,7 +490,7 @@ async function runGemini(file: File, prompt: string, preferredModel?: string) {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(105000),
+          signal: AbortSignal.timeout(requestTimeoutMs),
         },
       );
     } catch (error) {
