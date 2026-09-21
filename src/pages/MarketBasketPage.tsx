@@ -79,6 +79,12 @@ type OfferWithMarket = Offer & {
   validTo: string;
 };
 
+type BasketActiveData = {
+  flyerCount: number;
+  retailers: string[];
+  offers: OfferWithMarket[];
+};
+
 type Group = {
   key: string;
   label: string;
@@ -508,41 +514,41 @@ export default function MarketBasketPage() {
 
   const today = todayLocal();
 
-  const { data: flyers = [], isLoading: loadingFlyers } = useQuery<Flyer[]>({
-    queryKey: ["active-flyers-basket", user?.id, today],
-    queryFn: async () => {
+  const {
+    data: basketData,
+    isLoading: loadingBasketData,
+  } = useQuery<BasketActiveData>({
+    queryKey: ["basket-active-data-v1", user?.id, today],
+    queryFn: async ({ signal }) => {
       const { data, error } = await db
-        .from("flyers")
-        .select("id,retailer,valid_from,valid_to")
-        .lte("valid_from", today)
-        .gte("valid_to", today)
-        .order("retailer");
+        .rpc("basket_active_data_v1", { p_on_date: today })
+        .abortSignal(signal);
       if (error) throw error;
-      return data ?? [];
+
+      const row = Array.isArray(data) ? data[0] : data;
+      const offers = (Array.isArray(row?.offers) ? row.offers : []).map(
+        (offer: any) => ({
+          ...offer,
+          validTo: offer.valid_to,
+        }),
+      ) as OfferWithMarket[];
+
+      return {
+        flyerCount: Number(row?.flyer_count ?? 0),
+        retailers: Array.isArray(row?.retailers)
+          ? row.retailers.filter(Boolean)
+          : [],
+        offers,
+      };
     },
     enabled: !!user,
   });
 
-  const flyerMap = useMemo(
-    () => new Map(flyers.map((flyer) => [flyer.id, flyer])),
-    [flyers],
-  );
-
-  const { data: offers = [], isLoading: loadingOffers } = useQuery<Offer[]>({
-    queryKey: ["active-flyer-items-basket", user?.id, flyers.map((f) => f.id).join(",")],
-    queryFn: async () => {
-      const ids = flyers.map((flyer) => flyer.id);
-      if (!ids.length) return [];
-      const { data, error } = await db
-        .from("flyer_items")
-        .select("id,flyer_id,product_id,raw_name,normalized_name,advertised_price,normalized_price,club_price,club_advertised_price,base_unit,package_quantity,package_unit,offer_notes")
-        .in("flyer_id", ids)
-        .gt("advertised_price", 0);
-      if (error) throw error;
-      return data ?? [];
-    },
-    enabled: !!user && !loadingFlyers,
-  });
+  const flyerCount = basketData?.flyerCount ?? 0;
+  const retailers = basketData?.retailers ?? [];
+  const offers = basketData?.offers ?? [];
+  const loadingFlyers = loadingBasketData;
+  const loadingOffers = loadingBasketData;
 
   const groups = useMemo<Group[]>(() => {
     const specificMap = new Map<string, Group>();
@@ -575,14 +581,7 @@ export default function MarketBasketPage() {
     };
 
     for (const offer of offers) {
-      const flyer = flyerMap.get(offer.flyer_id);
-      if (!flyer?.retailer) continue;
-
-      const enriched: OfferWithMarket = {
-        ...offer,
-        retailer: flyer.retailer,
-        validTo: flyer.valid_to,
-      };
+      if (!offer.retailer) continue;
 
       const identityKey = offer.product_id
         ? "p:" + offer.product_id
@@ -593,7 +592,7 @@ export default function MarketBasketPage() {
           specificMap,
           identityKey + "|u:" + offer.base_unit,
           offer.raw_name,
-          enriched,
+          offer,
         );
       }
 
@@ -606,7 +605,7 @@ export default function MarketBasketPage() {
           genericMap,
           "g:" + family.key + "|u:" + offer.base_unit,
           family.label,
-          enriched,
+          offer,
           true,
         );
       }
@@ -656,7 +655,7 @@ export default function MarketBasketPage() {
       }
       return a.label.localeCompare(b.label, "pt-BR", { sensitivity: "base" });
     });
-  }, [offers, flyerMap]);
+  }, [offers]);
 
   const visibleGroups = useMemo(() => {
     const q = fallbackKey(search);
@@ -756,7 +755,7 @@ export default function MarketBasketPage() {
       return { markets: [] as any[], bestSingle: null as any, split: null as any };
     }
 
-    const retailerNames = [...new Set(flyers.map((flyer) => flyer.retailer).filter(Boolean))];
+    const retailerNames = retailers;
     const bestOfferByGroup = new Map<string, OfferWithMarket>();
 
     for (const group of selectedGroups) {
@@ -860,7 +859,7 @@ export default function MarketBasketPage() {
       bestSingle: completeMarkets[0] ?? practicalMarkets[0] ?? null,
       split: { total: splitTotal, rows: splitRows, markets: splitMarkets },
     };
-  }, [selectedGroups, flyers]);
+  }, [selectedGroups, retailers]);
 
   const bestSingle = comparison.bestSingle;
   const split = comparison.split;
@@ -1087,12 +1086,12 @@ export default function MarketBasketPage() {
         </Card>
       )}
 
-      {!loadingFlyers && flyers.length < 2 && (
+      {!loadingFlyers && flyerCount < 2 && (
         <Card className="mb-4 border-amber-500/30 bg-amber-500/5">
           <CardContent className="p-4">
             <p className="font-semibold">Importe pelo menos dois tabloides vigentes</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Hoje há {flyers.length} supermercado(s) com tabloide vigente.
+              Hoje há {flyerCount} supermercado(s) com tabloide vigente.
             </p>
           </CardContent>
         </Card>
