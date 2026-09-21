@@ -11,6 +11,7 @@ import ProductVisual from "@/components/ProductVisual";
 import { normalizeSearchText } from "@/lib/flyerAnalysis";
 
 const db = supabase as any;
+const PAGE_SIZE = 24;
 
 type FlyerItemImageRow = {
   id: string;
@@ -23,7 +24,6 @@ type FlyerItemImageRow = {
   image_url?: string | null;
   image_source?: string | null;
   image_match_status?: string | null;
-  image_confidence?: number | string | null;
 };
 
 type AuditItem = FlyerItemImageRow & {
@@ -38,8 +38,6 @@ type AuditPageResponse = {
   filteredCount: number;
   flyerCount: number;
 };
-
-const PAGE_SIZE = 24;
 
 function localDateKey(date = new Date()) {
   const year = date.getFullYear();
@@ -76,9 +74,7 @@ export default function OfferImagesAuditPage() {
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setDebouncedQuery(query);
-    }, 180);
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 180);
     return () => window.clearTimeout(timer);
   }, [query]);
 
@@ -94,7 +90,7 @@ export default function OfferImagesAuditPage() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useInfiniteQuery<AuditPageResponse>({
+  } = useInfiniteQuery({
     queryKey: [
       "offer-images-audit-v2",
       user?.id,
@@ -107,14 +103,14 @@ export default function OfferImagesAuditPage() {
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
-    queryFn: async ({ pageParam, signal }) => {
+    queryFn: async ({ pageParam, signal }): Promise<AuditPageResponse> => {
       const { data: rows, error: rpcError } = await db
         .rpc("offer_images_audit_page_v2", {
           p_on_date: today,
           p_query: normalizedQuery,
           p_only_missing: onlyMissing,
           p_limit: PAGE_SIZE,
-          p_offset: Number(pageParam) || 0,
+          p_offset: pageParam,
         })
         .abortSignal(signal);
 
@@ -143,6 +139,7 @@ export default function OfferImagesAuditPage() {
     () => data?.pages.flatMap((page) => page.items) ?? [],
     [data],
   );
+
   const totalCount = stats?.totalCount ?? 0;
   const missingCount = stats?.missingCount ?? 0;
   const withImageCount = Math.max(0, totalCount - missingCount);
@@ -164,76 +161,6 @@ export default function OfferImagesAuditPage() {
     observer.observe(node);
     return () => observer.disconnect();
   }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
-
-  return ((rows ?? []) as FlyerItemImageRow[]).map((item) => {
-        const flyer = flyerById.get(item.flyer_id);
-        return {
-          ...item,
-          retailer: flyer?.retailer ?? "Supermercado",
-          valid_to: flyer?.valid_to ?? null,
-        };
-      });
-    },
-  });
-
-  const items = useMemo(
-    () => [...(data?.items ?? []), ...backgroundItems],
-    [data?.items, backgroundItems],
-  );
-  const missingCount = items.filter((item) => !item.image_url).length;
-  const withImageCount = items.length - missingCount;
-
-  const searchableItems = useMemo(
-    () =>
-      items.map((item) => ({
-        item,
-        searchText: normalizeSearchText(
-          `${item.raw_name} ${item.brand ?? ""} ${item.retailer}`,
-        ),
-      })),
-    [items],
-  );
-
-  const filteredItems = useMemo(() => {
-    const normalizedQuery = normalizeSearchText(query).trim();
-    const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
-
-    return searchableItems
-      .filter(({ item, searchText }) => {
-        if (onlyMissing && item.image_url) return false;
-        if (!tokens.length) return true;
-        return tokens.every((token) => searchText.includes(token));
-      })
-      .map(({ item }) => item);
-  }, [searchableItems, onlyMissing, query]);
-
-  useEffect(() => {
-    setVisibleLimit(60);
-  }, [query, onlyMissing]);
-
-  const visibleItems = useMemo(
-    () => filteredItems.slice(0, visibleLimit),
-    [filteredItems, visibleLimit],
-  );
-  const hasMore = visibleItems.length < filteredItems.length;
-
-  useEffect(() => {
-    if (!hasMore || !loadMoreRef.current) return;
-
-    const node = loadMoreRef.current;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries[0]?.isIntersecting) return;
-        setVisibleLimit((current) =>
-          Math.min(current + 60, filteredItems.length),
-        );
-      },
-      { rootMargin: "500px 0px" },
-    );
-
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [hasMore, filteredItems.length, visibleLimit]);
 
   return (
     <div className="page-container !pb-24 mx-auto w-full max-w-3xl">
@@ -416,7 +343,9 @@ export default function OfferImagesAuditPage() {
               ref={loadMoreRef}
               className="py-4 text-center text-xs text-muted-foreground"
             >
-              {isFetchingNextPage ? "Carregando mais produtos…" : "Role para carregar mais"}
+              {isFetchingNextPage
+                ? "Carregando mais produtos…"
+                : "Role para carregar mais"}
             </div>
           )}
         </div>
