@@ -115,6 +115,30 @@ function fallbackKey(value: string) {
     .trim();
 }
 
+function compactOfferName(label: string, rawName: string) {
+  const labelWords = label.trim().split(/\s+/);
+  const rawWords = rawName.trim().split(/\s+/);
+
+  let sharedPrefix = 0;
+  while (
+    sharedPrefix < labelWords.length &&
+    sharedPrefix < rawWords.length &&
+    fallbackKey(labelWords[sharedPrefix]) === fallbackKey(rawWords[sharedPrefix])
+  ) {
+    sharedPrefix += 1;
+  }
+
+  if (sharedPrefix === 0) return rawName;
+
+  let compact = rawWords.slice(sharedPrefix).join(" ").trim();
+
+  if (labelWords.length === 1) {
+    compact = compact.replace(/^(?:de|da|do|das|dos)\s+/i, "");
+  }
+
+  return compact || rawName;
+}
+
 function validClubPrice(offer: OfferWithMarket) {
   const regular = Number(offer.advertised_price);
   const club = Number(offer.club_advertised_price);
@@ -778,7 +802,9 @@ export default function MarketBasketPage() {
                               className="text-[13px] leading-[1.45]"
                             >
                               <span className="font-semibold text-foreground">{row.label}:</span>{" "}
-                              <span className="text-muted-foreground">{row.offer.raw_name}</span>
+                              <span className="text-muted-foreground">
+                                {compactOfferName(row.label, row.offer.raw_name)}
+                              </span>
                             </div>
                           ))}
                       </div>
@@ -903,7 +929,7 @@ export default function MarketBasketPage() {
                       </p>
                       {row.offer.raw_name !== row.label && (
                         <p className="mt-0.5 text-xs font-medium text-primary">
-                          Comprar: {row.offer.raw_name}
+                          Comprar: {compactOfferName(row.label, row.offer.raw_name)}
                         </p>
                       )}
                       <p className="text-xs text-muted-foreground">
@@ -1224,7 +1250,7 @@ export default function MarketBasketPage() {
                             <div className="min-w-0">
                               <span className="font-semibold">{row.label}</span>
                               <p className="truncate text-[11px] text-muted-foreground">
-                                {row.offer.raw_name}
+                                {compactOfferName(row.label, row.offer.raw_name)}
                               </p>
                             </div>
                             <div className="shrink-0 text-right">
