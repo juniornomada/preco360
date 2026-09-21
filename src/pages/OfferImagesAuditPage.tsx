@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { ArrowLeft, ImageOff, Search, Store } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -11,14 +11,6 @@ import ProductVisual from "@/components/ProductVisual";
 import { normalizeSearchText } from "@/lib/flyerAnalysis";
 
 const db = supabase as any;
-
-type FlyerRow = {
-  id: string;
-  retailer: string;
-  title?: string | null;
-  valid_from: string | null;
-  valid_to: string | null;
-};
 
 type FlyerItemImageRow = {
   id: string;
@@ -38,6 +30,16 @@ type AuditItem = FlyerItemImageRow & {
   retailer: string;
   valid_to: string | null;
 };
+
+type AuditPageResponse = {
+  items: AuditItem[];
+  totalCount: number;
+  missingCount: number;
+  filteredCount: number;
+  flyerCount: number;
+};
+
+const PAGE_SIZE = 24;
 
 function localDateKey(date = new Date()) {
   const year = date.getFullYear();
@@ -69,95 +71,101 @@ export default function OfferImagesAuditPage() {
   const navigate = useNavigate();
   const today = useMemo(() => localDateKey(), []);
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [onlyMissing, setOnlyMissing] = useState(false);
-  const [visibleLimit, setVisibleLimit] = useState(60);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedQuery(query);
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  const normalizedQuery = useMemo(
+    () => normalizeSearchText(debouncedQuery).trim(),
+    [debouncedQuery],
+  );
 
   const {
     data,
     isLoading,
     error,
-  } = useQuery({
-    queryKey: ["offer-images-audit", user?.id, today],
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery<AuditPageResponse>({
+    queryKey: [
+      "offer-images-audit-v2",
+      user?.id,
+      today,
+      normalizedQuery,
+      onlyMissing,
+    ],
     enabled: !!user,
+    initialPageParam: 0,
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
-    queryFn: async () => {
-      const { data: flyers, error: flyersError } = await db
-        .from("flyers")
-        .select("id,retailer,valid_to")
-        .eq("user_id", user!.id)
-        .lte("valid_from", today)
-        .gte("valid_to", today)
-        .order("created_at", { ascending: false });
+    queryFn: async ({ pageParam, signal }) => {
+      const { data: rows, error: rpcError } = await db
+        .rpc("offer_images_audit_page_v2", {
+          p_on_date: today,
+          p_query: normalizedQuery,
+          p_only_missing: onlyMissing,
+          p_limit: PAGE_SIZE,
+          p_offset: Number(pageParam) || 0,
+        })
+        .abortSignal(signal);
 
-      if (flyersError) throw flyersError;
+      if (rpcError) throw rpcError;
 
-      const activeFlyers = (flyers ?? []) as FlyerRow[];
-      const flyerIds = activeFlyers.map((flyer) => flyer.id);
-      if (!flyerIds.length) {
-        return { flyers: activeFlyers, items: [] as AuditItem[] };
-      }
-
-      const { data: items, error: itemsError } = await db
-        .from("flyer_items")
-        .select(
-          "id,flyer_id,raw_name,brand,package_quantity,package_unit,advertised_price,image_url,image_source,image_match_status",
-        )
-        .eq("user_id", user!.id)
-        .in("flyer_id", flyerIds)
-        .order("raw_name", { ascending: true })
-        .order("id", { ascending: true })
-        .range(0, 59);
-
-      if (itemsError) throw itemsError;
-
-      const flyerById = new Map(activeFlyers.map((flyer) => [flyer.id, flyer]));
-      const auditItems = ((items ?? []) as FlyerItemImageRow[]).map((item) => {
-        const flyer = flyerById.get(item.flyer_id);
-        return {
-          ...item,
-          retailer: flyer?.retailer ?? "Supermercado",
-          valid_to: flyer?.valid_to ?? null,
-        };
-      });
-
-      return { flyers: activeFlyers, items: auditItems };
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      return {
+        items: Array.isArray(row?.items) ? (row.items as AuditItem[]) : [],
+        totalCount: Number(row?.total_count ?? 0),
+        missingCount: Number(row?.missing_count ?? 0),
+        filteredCount: Number(row?.filtered_count ?? 0),
+        flyerCount: Number(row?.flyer_count ?? 0),
+      };
+    },
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce(
+        (sum, page) => sum + page.items.length,
+        0,
+      );
+      return loaded < lastPage.filteredCount ? loaded : undefined;
     },
   });
 
-  const activeFlyerIds = useMemo(
-    () => (data?.flyers ?? []).map((flyer) => flyer.id),
-    [data?.flyers],
+  const stats = data?.pages[0];
+  const items = useMemo(
+    () => data?.pages.flatMap((page) => page.items) ?? [],
+    [data],
   );
+  const totalCount = stats?.totalCount ?? 0;
+  const missingCount = stats?.missingCount ?? 0;
+  const withImageCount = Math.max(0, totalCount - missingCount);
+  const filteredCount = stats?.filteredCount ?? 0;
+  const flyerCount = stats?.flyerCount ?? 0;
 
-  const { data: backgroundItems = [] } = useQuery<AuditItem[]>({
-    queryKey: ["offer-images-audit-rest", user?.id, today, activeFlyerIds],
-    enabled: !!user && activeFlyerIds.length > 0,
-    staleTime: 10 * 60 * 1000,
-    gcTime: 30 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    queryFn: async ({ signal }) => {
-      const { data: rows, error: rowsError } = await db
-        .from("flyer_items")
-        .select(
-          "id,flyer_id,raw_name,brand,package_quantity,package_unit,advertised_price,image_url,image_source,image_match_status",
-        )
-        .eq("user_id", user!.id)
-        .in("flyer_id", activeFlyerIds)
-        .order("raw_name", { ascending: true })
-        .order("id", { ascending: true })
-        .range(60, 4999)
-        .abortSignal(signal);
+  useEffect(() => {
+    if (!hasNextPage || !loadMoreRef.current) return;
 
-      if (rowsError) throw rowsError;
+    const node = loadMoreRef.current;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting || isFetchingNextPage) return;
+        void fetchNextPage();
+      },
+      { rootMargin: "600px 0px" },
+    );
 
-      const flyerById = new Map(
-        (data?.flyers ?? []).map((flyer) => [flyer.id, flyer]),
-      );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
-      return ((rows ?? []) as FlyerItemImageRow[]).map((item) => {
+  return ((rows ?? []) as FlyerItemImageRow[]).map((item) => {
         const flyer = flyerById.get(item.flyer_id);
         return {
           ...item,
@@ -257,7 +265,6 @@ export default function OfferImagesAuditPage() {
           placeholder="Filtrar por produto, marca ou mercado..."
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          autoFocus
         />
       </div>
 
@@ -268,7 +275,7 @@ export default function OfferImagesAuditPage() {
           className="h-10 rounded-xl text-xs font-bold"
           onClick={() => setOnlyMissing(false)}
         >
-          Todos ({items.length})
+          Todos ({totalCount})
         </Button>
         <Button
           type="button"
@@ -283,7 +290,7 @@ export default function OfferImagesAuditPage() {
 
       <div className="mb-4 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
         <span className="rounded-full border bg-card px-2.5 py-1">
-          {data?.flyers.length ?? 0} tabloide(s) vigente(s)
+          {flyerCount} tabloide(s) vigente(s)
         </span>
         <span className="rounded-full border bg-card px-2.5 py-1">
           {withImageCount} com imagem
@@ -312,7 +319,7 @@ export default function OfferImagesAuditPage() {
         </Card>
       )}
 
-      {!isLoading && !error && filteredItems.length === 0 && (
+      {!isLoading && !error && filteredCount === 0 && (
         <Card className="border-dashed">
           <CardContent className="p-7 text-center">
             <ImageOff className="mx-auto h-8 w-8 text-primary" />
@@ -324,7 +331,7 @@ export default function OfferImagesAuditPage() {
         </Card>
       )}
 
-      {!isLoading && !error && filteredItems.length > 0 && (
+      {!isLoading && !error && filteredCount > 0 && (
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -332,18 +339,24 @@ export default function OfferImagesAuditPage() {
                 {onlyMissing ? "Produtos sem imagem" : "Todos os produtos"}
               </p>
               <p className="text-sm font-bold">
-                {filteredItems.length} produto(s) listado(s)
+                {filteredCount} produto(s) listado(s)
               </p>
             </div>
           </div>
 
-          {visibleItems.map((item) => {
+          {items.map((item) => {
             const price = Number(item.advertised_price) || 0;
             const pack = packageLabel(item);
             const hasImage = Boolean(item.image_url);
 
             return (
-              <Card key={item.id} className={!hasImage ? "border-amber-500/30" : ""}>
+              <Card
+                key={item.id}
+                className={
+                  (!hasImage ? "border-amber-500/30 " : "") +
+                  "[content-visibility:auto] [contain-intrinsic-size:84px]"
+                }
+              >
                 <CardContent className="p-3 sm:p-4">
                   <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 sm:gap-x-3">
                     <ProductVisual
@@ -398,12 +411,12 @@ export default function OfferImagesAuditPage() {
             );
           })}
 
-          {hasMore && (
+          {hasNextPage && (
             <div
               ref={loadMoreRef}
               className="py-4 text-center text-xs text-muted-foreground"
             >
-              Carregando mais produtos…
+              {isFetchingNextPage ? "Carregando mais produtos…" : "Role para carregar mais"}
             </div>
           )}
         </div>
