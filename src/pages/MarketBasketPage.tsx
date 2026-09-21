@@ -21,7 +21,34 @@ import { genericBasketFamilies } from "@/lib/flyerAnalysis";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
 
 const db = supabase as any;
-const STORAGE_KEY = "preco360-basket-selection-v2";
+const LEGACY_STORAGE_KEY = "preco360-basket-selection-v2";
+
+type BasketSelection = Record<string, number>;
+
+function basketStorageKey(userId: string) {
+  return `${LEGACY_STORAGE_KEY}:${userId}`;
+}
+
+function sanitizeBasketSelection(value: unknown): BasketSelection {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const next: BasketSelection = {};
+  for (const [key, rawValue] of Object.entries(value)) {
+    const quantity = Number(rawValue);
+    if (!key || !Number.isFinite(quantity) || quantity <= 0) continue;
+    next[key] = Math.max(1, Math.min(99, Math.round(quantity)));
+  }
+  return next;
+}
+
+function readStoredBasket(key: string) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? sanitizeBasketSelection(JSON.parse(raw)) : {};
+  } catch {
+    return {};
+  }
+}
 
 type Flyer = {
   id: string;
@@ -188,33 +215,162 @@ function compareOfferValue(a: OfferWithMarket, b: OfferWithMarket) {
 }
 
 export default function MarketBasketPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [selected, setSelected] = useState<Record<string, number>>({});
+  const [selected, setSelected] = useState<BasketSelection>({});
   const [selectionHydrated, setSelectionHydrated] = useState(false);
   const [showItems, setShowItems] = useState(true);
+  const lastSyncedSelectionRef = useRef<string | null>(null);
+  const activeBasketUserRef = useRef<string | null>(null);
+  const basketSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) setSelected(JSON.parse(saved));
-    } catch {
-      // Optional convenience only.
-    } finally {
+    if (authLoading) return;
+
+    let cancelled = false;
+    const userId = user?.id ?? null;
+    activeBasketUserRef.current = userId;
+    setSelectionHydrated(false);
+
+    const hydrateSelection = async () => {
+      const userStorageKey = userId
+        ? basketStorageKey(userId)
+        : LEGACY_STORAGE_KEY;
+      const userLocal = readStoredBasket(userStorageKey);
+      const legacyLocal =
+        userId && Object.keys(userLocal).length === 0
+          ? readStoredBasket(LEGACY_STORAGE_KEY)
+          : {};
+      const localSelection =
+        Object.keys(userLocal).length > 0 ? userLocal : legacyLocal;
+
+      if (cancelled) return;
+
+      if (!userId) {
+        setSelected(localSelection);
+        lastSyncedSelectionRef.current = JSON.stringify(localSelection);
+        setSelectionHydrated(true);
+        return;
+      }
+
+      // Show the local cache immediately while the cloud copy is loaded.
+      if (Object.keys(localSelection).length > 0) {
+        setSelected(localSelection);
+      }
+
+      const { data, error } = await db
+        .from("user_baskets")
+        .select("selection,updated_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (cancelled || activeBasketUserRef.current !== userId) return;
+
+      if (error) {
+        setSelected(localSelection);
+        // Keep this null so the next local change retries the cloud sync.
+        lastSyncedSelectionRef.current = null;
+        setSelectionHydrated(true);
+        return;
+      }
+
+      if (data) {
+        const cloudSelection = sanitizeBasketSelection(data.selection);
+        const serialized = JSON.stringify(cloudSelection);
+        setSelected(cloudSelection);
+        lastSyncedSelectionRef.current = serialized;
+
+        try {
+          localStorage.setItem(userStorageKey, serialized);
+          localStorage.removeItem(LEGACY_STORAGE_KEY);
+        } catch {
+          // Local cache is optional; Supabase remains the source of truth.
+        }
+
+        setSelectionHydrated(true);
+        return;
+      }
+
+      // First cloud sync: migrate the old desktop/browser basket if one exists.
+      if (Object.keys(localSelection).length > 0) {
+        const serialized = JSON.stringify(localSelection);
+        const { error: migrationError } = await db
+          .from("user_baskets")
+          .upsert(
+            { user_id: userId, selection: localSelection },
+            { onConflict: "user_id" },
+          );
+
+        if (cancelled || activeBasketUserRef.current !== userId) return;
+
+        if (!migrationError) {
+          lastSyncedSelectionRef.current = serialized;
+          try {
+            localStorage.setItem(userStorageKey, serialized);
+            localStorage.removeItem(LEGACY_STORAGE_KEY);
+          } catch {
+            // Local cache is optional.
+          }
+        } else {
+          lastSyncedSelectionRef.current = null;
+        }
+
+        setSelected(localSelection);
+      } else {
+        // Do not create an empty cloud row here. This prevents a new device
+        // from overwriting a basket that still only exists in another browser's
+        // legacy localStorage before that browser gets a chance to migrate it.
+        setSelected({});
+        lastSyncedSelectionRef.current = JSON.stringify({});
+      }
+
       setSelectionHydrated(true);
-    }
-  }, []);
+    };
+
+    void hydrateSelection();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, user?.id]);
 
   useEffect(() => {
-    if (!selectionHydrated) return;
+    if (authLoading || !selectionHydrated) return;
+
+    const userId = user?.id ?? null;
+    const cleanSelection = sanitizeBasketSelection(selected);
+    const serialized = JSON.stringify(cleanSelection);
+    const localKey = userId ? basketStorageKey(userId) : LEGACY_STORAGE_KEY;
+
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(selected));
+      localStorage.setItem(localKey, serialized);
     } catch {
-      // Optional convenience only.
+      // Local cache is optional.
     }
-  }, [selected, selectionHydrated]);
+
+    if (!userId || serialized === lastSyncedSelectionRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      basketSaveQueueRef.current = basketSaveQueueRef.current.then(async () => {
+        if (activeBasketUserRef.current !== userId) return;
+
+        const { error } = await db
+          .from("user_baskets")
+          .upsert(
+            { user_id: userId, selection: cleanSelection },
+            { onConflict: "user_id" },
+          );
+
+        if (!error && activeBasketUserRef.current === userId) {
+          lastSyncedSelectionRef.current = serialized;
+        }
+      });
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [selected, selectionHydrated, authLoading, user?.id]);
 
   const today = todayLocal();
 
