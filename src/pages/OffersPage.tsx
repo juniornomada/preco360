@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -569,19 +569,21 @@ function matchesSearch(
 
 function searchRelevance(
   entry: {
-    item: FlyerItemRow;
-    product: ProductForMatch | null;
-    searchText: string;
+    normalizedItemBrand: string;
+    normalizedProductBrand: string;
+    normalizedRawName: string;
+    normalizedProductName: string;
   },
-  query: string,
+  normalizedQuery: string,
 ) {
-  const normalizedQuery = normalizeSearchText(query).trim();
   if (!normalizedQuery) return 0;
 
-  const itemBrand = normalizeSearchText(entry.item.brand ?? "").trim();
-  const productBrand = normalizeSearchText(entry.product?.brand ?? "").trim();
-  const rawName = normalizeSearchText(entry.item.raw_name);
-  const productName = normalizeSearchText(entry.product?.name ?? "");
+  const {
+    normalizedItemBrand: itemBrand,
+    normalizedProductBrand: productBrand,
+    normalizedRawName: rawName,
+    normalizedProductName: productName,
+  } = entry;
 
   if (itemBrand === normalizedQuery || productBrand === normalizedQuery) return 100;
   if (rawName.split(/\s+/).includes(normalizedQuery)) return 90;
@@ -669,10 +671,18 @@ export default function OffersPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const deferredSearch = useDeferredValue(search);
-  const normalizedSearch = deferredSearch.trim();
+  const searchTimerRef = useRef<number | null>(null);
+  const normalizedSearch = search.trim();
   const hasSearch = normalizedSearch.length >= 2;
   const today = useMemo(() => localDateKey(), []);
+
+  useEffect(() => {
+    return () => {
+      if (searchTimerRef.current !== null) {
+        window.clearTimeout(searchTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -716,6 +726,7 @@ export default function OffersPage() {
       const { data, error } = await db
         .from("flyers")
         .select("id,retailer,title,valid_from,valid_to")
+        .eq("user_id", user!.id)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -749,6 +760,7 @@ export default function OffersPage() {
       const { count, error } = await db
         .from("flyer_items")
         .select("id", { count: "exact", head: true })
+        .eq("user_id", user!.id)
         .in("flyer_id", activeFlyerIds);
 
       if (error) throw error;
@@ -762,8 +774,9 @@ export default function OffersPage() {
     error: searchDataError,
   } = useQuery({
     queryKey: ["live-market-offers-search-base", user?.id, today],
-    enabled: !!user && hasSearch,
-    staleTime: 5 * 60 * 1000,
+    enabled: !!user,
+    staleTime: 15 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
     queryFn: async () => {
       const [
@@ -776,6 +789,7 @@ export default function OffersPage() {
           .select(
             "id,flyer_id,product_id,raw_name,brand,package_quantity,package_unit,advertised_price,normalized_price,base_unit,club_price,club_advertised_price,source_page,image_url,offer_notes",
           )
+          .eq("user_id", user!.id)
           .order("created_at", { ascending: false })
           .limit(5000),
         db
@@ -783,10 +797,12 @@ export default function OffersPage() {
           .select(
             "id,name,category,brand,package_size,unit,image_url,image_source,prices(price,date,supermarket)",
           )
+          .eq("user_id", user!.id)
           .order("name"),
         db
           .from("product_aliases")
-          .select("product_id,normalized_alias,retailer"),
+          .select("product_id,normalized_alias,retailer")
+          .eq("user_id", user!.id),
       ]);
 
       if (itemsError) throw itemsError;
@@ -869,6 +885,8 @@ export default function OffersPage() {
           comparablePurchaseProducts,
         );
 
+        const searchText = `${item.raw_name} ${item.brand ?? ""} ${product?.name ?? ""} ${product?.brand ?? ""} ${product?.category ?? ""}`;
+
         return {
           item,
           flyer,
@@ -877,7 +895,12 @@ export default function OffersPage() {
           candidate,
           verdict,
           family: inferOfferFamily(item, product),
-          searchText: `${item.raw_name} ${item.brand ?? ""} ${product?.name ?? ""} ${product?.brand ?? ""} ${product?.category ?? ""}`,
+          searchText,
+          searchTokens: searchTokens(searchText),
+          normalizedItemBrand: normalizeSearchText(item.brand ?? "").trim(),
+          normalizedProductBrand: normalizeSearchText(product?.brand ?? "").trim(),
+          normalizedRawName: normalizeSearchText(item.raw_name),
+          normalizedProductName: normalizeSearchText(product?.name ?? ""),
         };
       })
       .sort((a, b) => {
@@ -899,9 +922,27 @@ export default function OffersPage() {
   const analyzed = useMemo(() => {
     if (!hasSearch || !preparedOffers.length) return [];
 
-    const matches = preparedOffers.filter((entry) =>
-      matchesSearch(entry.searchText, normalizedSearch, entry.family),
+    const queryFamily = queryOfferFamily(normalizedSearch);
+    const semanticTokens = familySemanticTokens(queryFamily);
+    const wantedTokens = searchTokens(normalizedSearch).filter(
+      (token) => !semanticTokens.has(token),
     );
+    const normalizedQuery = normalizeSearchText(normalizedSearch).trim();
+
+    const matches = preparedOffers.filter((entry) => {
+      if (!familyMatchesIntent(entry.family, queryFamily)) return false;
+      if (!wantedTokens.length) return true;
+
+      return wantedTokens.every((needle) =>
+        entry.searchTokens.some((token) =>
+          token === needle ||
+          token.includes(needle) ||
+          (needle.length >= 4 &&
+            token.length >= 3 &&
+            needle.startsWith(token)),
+        ),
+      );
+    });
 
     // Build stable semantic groups first. A pairwise comparator alone is not
     // enough here because an unrelated item between two comparable offers can
@@ -925,8 +966,8 @@ export default function OffersPage() {
       .map((group, originalIndex) => {
         const sorted = [...group].sort((a, b) => {
           const relevanceDiff =
-            searchRelevance(b, normalizedSearch) -
-            searchRelevance(a, normalizedSearch);
+            searchRelevance(b, normalizedQuery) -
+            searchRelevance(a, normalizedQuery);
           if (relevanceDiff) return relevanceDiff;
 
           if (a.candidate.baseUnit === b.candidate.baseUnit) {
@@ -950,7 +991,7 @@ export default function OffersPage() {
           originalIndex,
           relevance: Math.max(
             ...group.map((entry) =>
-              searchRelevance(entry, normalizedSearch),
+              searchRelevance(entry, normalizedQuery),
             ),
           ),
           verdict: Math.min(
@@ -965,7 +1006,7 @@ export default function OffersPage() {
       });
 
     return sortedGroups.flatMap((group) => group.sorted);
-  }, [preparedOffers, hasSearch, normalizedSearch, search]);
+  }, [preparedOffers, hasSearch, normalizedSearch]);
 
   const explicitSearchFamily = useMemo(
     () => queryOfferFamily(normalizedSearch),
@@ -978,34 +1019,32 @@ export default function OffersPage() {
     explicitSearchFamily === "coffee";
 
   const bestOfferByFamily = useMemo(() => {
-    const best = new Map<OfferFamily, string>();
+    const bestEntry = new Map<
+      OfferFamily,
+      { id: string; normalizedPrice: number; packagePrice: number }
+    >();
 
     for (const entry of analyzed) {
-      const currentId = best.get(entry.family);
-      if (!currentId) {
-        best.set(entry.family, entry.item.id);
-        continue;
-      }
-
-      const current = analyzed.find((candidate) => candidate.item.id === currentId);
-      if (!current) {
-        best.set(entry.family, entry.item.id);
-        continue;
-      }
-
-      const currentPrice = current.candidate.normalizedPrice;
+      const current = bestEntry.get(entry.family);
       const candidatePrice = entry.candidate.normalizedPrice;
-      if (candidatePrice < currentPrice - 0.0001) {
-        best.set(entry.family, entry.item.id);
-      } else if (
-        Math.abs(candidatePrice - currentPrice) <= 0.0001 &&
-        entry.candidate.price < current.candidate.price
+
+      if (
+        !current ||
+        candidatePrice < current.normalizedPrice - 0.0001 ||
+        (Math.abs(candidatePrice - current.normalizedPrice) <= 0.0001 &&
+          entry.candidate.price < current.packagePrice)
       ) {
-        best.set(entry.family, entry.item.id);
+        bestEntry.set(entry.family, {
+          id: entry.item.id,
+          normalizedPrice: candidatePrice,
+          packagePrice: entry.candidate.price,
+        });
       }
     }
 
-    return best;
+    return new Map(
+      [...bestEntry.entries()].map(([family, entry]) => [family, entry.id]),
+    );
   }, [analyzed]);
 
   const resultFamilyCount = useMemo(
@@ -1035,8 +1074,16 @@ export default function OffersPage() {
         <Input
           className="h-12 pl-10 text-base"
           placeholder="Busque Nescau, café, leite, carne..."
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          defaultValue=""
+          onChange={(event) => {
+            const value = event.target.value;
+            if (searchTimerRef.current !== null) {
+              window.clearTimeout(searchTimerRef.current);
+            }
+            searchTimerRef.current = window.setTimeout(() => {
+              setSearch(value);
+            }, 90);
+          }}
           autoFocus
         />
       </div>
