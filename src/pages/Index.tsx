@@ -2,6 +2,20 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+
+const db = supabase as any;
+
+type ProductSummary = {
+  id: string;
+  name: string;
+  category: string | null;
+  created_at: string;
+  price_count: number | string;
+  latest_price: number | string | null;
+  latest_date: string | null;
+  latest_supermarket: string | null;
+  best_price: number | string | null;
+};
 import { useAuth } from "@/hooks/useAuth";
 import AddProductModal from "@/components/AddProductModal";
 import AdaptiveProductName from "@/components/AdaptiveProductName";
@@ -15,30 +29,28 @@ export default function Index() {
   const { user } = useAuth();
   const [showAdd, setShowAdd] = useState(false);
 
-  const { data: products, refetch, isLoading } = useQuery({
-    queryKey: ["products", user?.id],
+  const { data: products = [], refetch, isLoading } = useQuery<ProductSummary[]>({
+    queryKey: ["product-summaries", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from("products").select("*, prices(*)").order("created_at", { ascending: false });
+      const { data, error } = await db.rpc("product_summaries_v1");
       if (error) throw error;
-      return data;
+      return ((data ?? []) as ProductSummary[]).sort(
+        (a, b) => b.created_at.localeCompare(a.created_at),
+      );
     },
     enabled: !!user,
   });
 
   const totalPrices = useMemo(
-    () => products?.reduce((sum, product) => sum + (product.prices?.length ?? 0), 0) ?? 0,
+    () =>
+      products.reduce(
+        (sum, product) => sum + Number(product.price_count ?? 0),
+        0,
+      ),
     [products],
   );
 
-  const productRows = useMemo(() => {
-    if (!products) return [];
-    return products.map((product) => {
-      const prices = [...(product.prices ?? [])].sort((a, b) => b.date.localeCompare(a.date));
-      const latest = prices[0];
-      const best = prices.length ? Math.min(...prices.map((item) => item.price)) : null;
-      return { ...product, latest, best, priceCount: prices.length };
-    });
-  }, [products]);
+  const productRows = products;
 
   return (
     <div className="page-container mx-auto w-full max-w-3xl">
@@ -82,7 +94,7 @@ export default function Index() {
         <Card className="rounded-2xl">
           <CardContent className="p-3.5 sm:p-4">
             <PackageSearch className="mb-1.5 h-5 w-5 text-primary" />
-            <p className="text-[clamp(1.65rem,7vw,2rem)] font-extrabold leading-none">{products?.length ?? 0}</p>
+            <p className="text-[clamp(1.65rem,7vw,2rem)] font-extrabold leading-none">{products.length}</p>
             <p className="mt-1 text-[clamp(0.68rem,2.8vw,0.78rem)] leading-tight text-muted-foreground">produtos acompanhados</p>
           </CardContent>
         </Card>
@@ -101,14 +113,14 @@ export default function Index() {
             <p className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground sm:text-xs">Acompanhe</p>
             <h2 className="text-[clamp(1.1rem,5vw,1.3rem)] font-bold leading-tight">Seus produtos</h2>
           </div>
-          {products && products.length > 0 && (
+          {products.length > 0 && (
             <Button variant="ghost" size="sm" className="h-8 px-2 text-xs sm:text-sm" onClick={() => navigate("/search")}>Cotar preço</Button>
           )}
         </div>
 
         {isLoading && <p className="py-10 text-center text-sm text-muted-foreground">Carregando...</p>}
 
-        {!isLoading && products?.length === 0 && (
+        {!isLoading && products.length === 0 && (
           <Card className="rounded-2xl border-dashed"><CardContent className="flex flex-col items-center px-5 py-8 text-center sm:py-9">
             <PackageSearch className="mb-3 h-9 w-9 text-primary" />
             <h3 className="font-bold">Comece pelo primeiro produto</h3>
@@ -127,11 +139,15 @@ export default function Index() {
             >
               <div className="min-w-0 flex-1">
                 <AdaptiveProductName text={product.name} className="font-semibold" maxPx={16} desktopMaxPx={16} />
-                <p className="mt-0.5 truncate text-[clamp(0.66rem,2.8vw,0.75rem)] text-muted-foreground">{product.category} · {product.priceCount} registro(s)</p>
+                <p className="mt-0.5 truncate text-[clamp(0.66rem,2.8vw,0.75rem)] text-muted-foreground">{product.category ?? "Geral"} · {Number(product.price_count ?? 0)} registro(s)</p>
               </div>
               <div className="shrink-0 text-right">
-                <p className="text-[clamp(0.82rem,3.5vw,0.95rem)] font-extrabold">{product.latest ? formatBRL(product.latest.price) : "Sem preço"}</p>
-                <p className="text-[0.64rem] text-muted-foreground sm:text-[11px]">{product.best !== null ? `melhor ${formatBRL(product.best)}` : "sem histórico"}</p>
+                <p className="text-[clamp(0.82rem,3.5vw,0.95rem)] font-extrabold">
+                  {product.latest_price !== null ? formatBRL(Number(product.latest_price)) : "Sem preço"}
+                </p>
+                <p className="text-[0.64rem] text-muted-foreground sm:text-[11px]">
+                  {product.best_price !== null ? `melhor ${formatBRL(Number(product.best_price))}` : "sem histórico"}
+                </p>
               </div>
               <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
             </button>
