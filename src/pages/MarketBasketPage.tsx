@@ -799,12 +799,9 @@ export default function MarketBasketPage() {
                           .map((row: any) => (
                             <div
                               key={"best-" + row.key}
-                              className="text-[13px] leading-[1.45]"
+                              className="text-[13px] leading-[1.45] text-muted-foreground"
                             >
-                              <span className="font-semibold text-foreground">{row.label}:</span>{" "}
-                              <span className="text-muted-foreground">
-                                {compactOfferName(row.label, row.offer.raw_name)}
-                              </span>
+                              {row.offer.raw_name}
                             </div>
                           ))}
                       </div>
