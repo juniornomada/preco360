@@ -788,22 +788,41 @@ export default function MarketBasketPage() {
                     </p>
                   )}
 
-                  {bestSingle.rows?.some((row: any) => row.generic) && (
+                  {bestSingle.rows?.length > 0 && (
                     <div className="mt-3 rounded-lg border border-primary/15 bg-background/70 p-3">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                        O que comprar aqui
-                      </p>
-                      <div className="mt-2.5 space-y-2.5">
-                        {bestSingle.rows
-                          .filter((row: any) => row.generic)
-                          .map((row: any) => (
-                            <div
-                              key={"best-" + row.key}
-                              className="text-[13px] leading-[1.45] text-muted-foreground"
-                            >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                          O que comprar aqui
+                        </p>
+                        <span className="text-[10px] text-muted-foreground">
+                          {bestSingle.rows.length} item(ns)
+                        </span>
+                      </div>
+                      <div className="mt-2 divide-y divide-border/60">
+                        {bestSingle.rows.map((row: any) => (
+                          <div
+                            key={"best-" + row.key}
+                            className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0"
+                          >
+                            <p className="min-w-0 flex-1 text-[13px] font-medium leading-[1.4] text-foreground/90">
                               {row.offer.raw_name}
+                            </p>
+                            <div className="shrink-0 text-right">
+                              <p className="flex items-baseline justify-end gap-1.5 whitespace-nowrap text-[13px] font-bold text-foreground">
+                                {validClubPrice(row.offer) &&
+                                  requiresAppActivation(
+                                    row.offer.retailer,
+                                    row.offer.offer_notes,
+                                  ) && (
+                                    <span className="text-[8px] font-bold uppercase text-amber-500">
+                                      ativar desconto APP
+                                    </span>
+                                  )}
+                                <span>{brl(effectiveAdvertisedPrice(row.offer))}</span>
+                              </p>
                             </div>
-                          ))}
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )}
