@@ -108,7 +108,8 @@ export default function OfferImagesAuditPage() {
         .eq("user_id", user!.id)
         .in("flyer_id", flyerIds)
         .order("raw_name", { ascending: true })
-        .limit(5000);
+        .order("id", { ascending: true })
+        .range(0, 59);
 
       if (itemsError) throw itemsError;
 
@@ -126,7 +127,51 @@ export default function OfferImagesAuditPage() {
     },
   });
 
-  const items = data?.items ?? [];
+  const activeFlyerIds = useMemo(
+    () => (data?.flyers ?? []).map((flyer) => flyer.id),
+    [data?.flyers],
+  );
+
+  const { data: backgroundItems = [] } = useQuery<AuditItem[]>({
+    queryKey: ["offer-images-audit-rest", user?.id, today, activeFlyerIds],
+    enabled: !!user && activeFlyerIds.length > 0,
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    queryFn: async ({ signal }) => {
+      const { data: rows, error: rowsError } = await db
+        .from("flyer_items")
+        .select(
+          "id,flyer_id,raw_name,brand,package_quantity,package_unit,advertised_price,image_url,image_source,image_match_status",
+        )
+        .eq("user_id", user!.id)
+        .in("flyer_id", activeFlyerIds)
+        .order("raw_name", { ascending: true })
+        .order("id", { ascending: true })
+        .range(60, 4999)
+        .abortSignal(signal);
+
+      if (rowsError) throw rowsError;
+
+      const flyerById = new Map(
+        (data?.flyers ?? []).map((flyer) => [flyer.id, flyer]),
+      );
+
+      return ((rows ?? []) as FlyerItemImageRow[]).map((item) => {
+        const flyer = flyerById.get(item.flyer_id);
+        return {
+          ...item,
+          retailer: flyer?.retailer ?? "Supermercado",
+          valid_to: flyer?.valid_to ?? null,
+        };
+      });
+    },
+  });
+
+  const items = useMemo(
+    () => [...(data?.items ?? []), ...backgroundItems],
+    [data?.items, backgroundItems],
+  );
   const missingCount = items.filter((item) => !item.image_url).length;
   const withImageCount = items.length - missingCount;
 
