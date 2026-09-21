@@ -1642,15 +1642,9 @@ export default function MarketBasketPage() {
       )}
 
       <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">
-        Para produtos específicos, a quantidade representa número de embalagens. Para necessidades
-        genéricas (“leite em pó”, “molho de tomate”, etc.), a Cesta usa como referência o tamanho da
-        melhor oferta vigente e compara marcas e embalagens diferentes por R$/kg ou R$/L.
-        Quando existe preço-clube válido, ele é usado como seu preço efetivo tanto na embalagem
-        quanto no R$/kg ou R$/L. Itens por unidade usam o preço da própria embalagem. O comparador usa
-        somente preços dos tabloides importados e ainda vigentes. Itens adicionados manualmente podem
-        permanecer na cesta sem preço; se uma oferta compatível aparecer depois, ela passa a ser usada
-        automaticamente na comparação. Ausência de um item no tabloide não significa que o mercado não
-        venda o produto — apenas que não temos um preço promocional válido para ele.
+        A Cesta compara ofertas vigentes por R$/kg, R$/L ou embalagem e considera preços-clube válidos.
+        Itens sem preço podem permanecer na lista e serão associados automaticamente quando surgir uma
+        oferta compatível.
       </p>
     </div>
   );
