@@ -340,6 +340,70 @@ export type GenericBasketFamily = {
   label: string;
 };
 
+export type BasketNeed = GenericBasketFamily & {
+  category: "Cesta básica" | "Mimos e lanches" | "Bebidas" | "Higiene" | "Limpeza";
+  aliases: string[];
+  baseUnit: "kg" | "l" | "un";
+};
+
+/**
+ * Necessidades independentes de SKU/preço. A Cesta usa este catálogo mesmo
+ * quando nenhum tabloide ou compra anterior possui o item.
+ */
+export const basketNeedsCatalog: BasketNeed[] = [
+  { key: "graos:arroz", label: "Arroz", category: "Cesta básica", aliases: ["arroz branco", "arroz tipo 1"], baseUnit: "kg" },
+  { key: "graos:feijao", label: "Feijão", category: "Cesta básica", aliases: ["feijao carioca", "feijao preto"], baseUnit: "kg" },
+  { key: "mercearia:oleo-soja", label: "Óleo de soja", category: "Cesta básica", aliases: ["oleo", "óleo", "oleo vegetal"], baseUnit: "l" },
+  { key: "mercearia:acucar", label: "Açúcar", category: "Cesta básica", aliases: ["acucar", "açucar", "acucar cristal", "acucar refinado"], baseUnit: "kg" },
+  { key: "mercearia:cafe", label: "Café", category: "Cesta básica", aliases: ["cafe", "café em po", "cafe torrado e moido"], baseUnit: "kg" },
+  { key: "mercearia:sal", label: "Sal", category: "Cesta básica", aliases: ["sal refinado", "sal de cozinha"], baseUnit: "kg" },
+  { key: "farinha:trigo", label: "Farinha de trigo", category: "Cesta básica", aliases: ["farinha trigo"], baseUnit: "kg" },
+  { key: "farinha:mandioca", label: "Farinha de mandioca", category: "Cesta básica", aliases: ["farinha mandioca"], baseUnit: "kg" },
+  { key: "farinha:fuba", label: "Fubá", category: "Cesta básica", aliases: ["fuba", "fubá mimoso"], baseUnit: "kg" },
+  { key: "mercearia:macarrao", label: "Macarrão", category: "Cesta básica", aliases: ["macarrao", "massa macarrao", "massa seca"], baseUnit: "kg" },
+  { key: "tomate:molho", label: "Molho de tomate", category: "Cesta básica", aliases: ["molho tomate"], baseUnit: "kg" },
+  { key: "tomate:extrato", label: "Extrato de tomate", category: "Cesta básica", aliases: ["extrato tomate"], baseUnit: "kg" },
+  { key: "leite:liquido", label: "Leite", category: "Cesta básica", aliases: ["leite longa vida", "leite uht"], baseUnit: "l" },
+  { key: "leite:po", label: "Leite em pó", category: "Cesta básica", aliases: ["leite po"], baseUnit: "kg" },
+  { key: "laticinio:margarina", label: "Margarina", category: "Cesta básica", aliases: ["margarina com sal"], baseUnit: "kg" },
+  { key: "laticinio:manteiga", label: "Manteiga", category: "Cesta básica", aliases: ["manteiga com sal"], baseUnit: "kg" },
+  { key: "mercearia:ovos", label: "Ovos", category: "Cesta básica", aliases: ["ovo", "duzia de ovos", "dúzia de ovos"], baseUnit: "un" },
+  { key: "pao:forma", label: "Pão de forma", category: "Cesta básica", aliases: ["pao forma"], baseUnit: "kg" },
+  { key: "mercearia:sardinha", label: "Sardinha", category: "Cesta básica", aliases: ["sardinha lata", "sardinha em lata"], baseUnit: "kg" },
+  { key: "mercearia:atum", label: "Atum", category: "Cesta básica", aliases: ["atum lata", "atum em lata"], baseUnit: "kg" },
+
+  { key: "mimos:chocolate", label: "Chocolate", category: "Mimos e lanches", aliases: ["barra de chocolate", "chocolate barra"], baseUnit: "kg" },
+  { key: "mimos:biscoito-recheado", label: "Biscoito recheado", category: "Mimos e lanches", aliases: ["bolacha recheada", "biscoito recheado", "bolacha recheado"], baseUnit: "kg" },
+  { key: "mimos:cream-cracker", label: "Biscoito cream cracker", category: "Mimos e lanches", aliases: ["cream cracker", "biscoito agua e sal", "bolacha agua e sal", "água e sal"], baseUnit: "kg" },
+  { key: "mimos:maisena", label: "Biscoito maisena", category: "Mimos e lanches", aliases: ["bolacha maisena", "biscoito maizena", "bolacha maizena"], baseUnit: "kg" },
+  { key: "mimos:wafer", label: "Wafer", category: "Mimos e lanches", aliases: ["biscoito wafer", "bolacha wafer"], baseUnit: "kg" },
+  { key: "mimos:bombom", label: "Bombom", category: "Mimos e lanches", aliases: ["bombons", "caixa de bombom"], baseUnit: "kg" },
+  { key: "mimos:salgadinho", label: "Salgadinho", category: "Mimos e lanches", aliases: ["snack", "salgadinho de milho", "chips"], baseUnit: "kg" },
+  { key: "mimos:sorvete", label: "Sorvete", category: "Mimos e lanches", aliases: ["sorvete pote"], baseUnit: "l" },
+  { key: "mercearia:achocolatado-po", label: "Achocolatado em pó", category: "Mimos e lanches", aliases: ["achocolatado", "nescau em po", "toddy em po"], baseUnit: "kg" },
+
+  { key: "bebida:refrigerante", label: "Refrigerante", category: "Bebidas", aliases: ["refri"], baseUnit: "l" },
+  { key: "bebida:suco", label: "Suco", category: "Bebidas", aliases: ["suco pronto", "nectar"], baseUnit: "l" },
+  { key: "bebida:agua", label: "Água mineral", category: "Bebidas", aliases: ["agua", "água", "agua mineral"], baseUnit: "l" },
+  { key: "bebida:cerveja-sem-alcool", label: "Cerveja sem álcool", category: "Bebidas", aliases: ["cerveja zero", "cerveja 0 alcool", "cerveja zero alcool", "cerveja sem alcool"], baseUnit: "l" },
+
+  { key: "higiene:papel-higienico", label: "Papel higiênico", category: "Higiene", aliases: ["papel higienico"], baseUnit: "un" },
+  { key: "higiene:creme-dental", label: "Creme dental", category: "Higiene", aliases: ["pasta de dente", "pasta dental"], baseUnit: "kg" },
+  { key: "higiene:sabonete-barra", label: "Sabonete em barra", category: "Higiene", aliases: ["sabonete"], baseUnit: "un" },
+  { key: "higiene:sabonete-liquido", label: "Sabonete líquido", category: "Higiene", aliases: ["sabonete liquido"], baseUnit: "l" },
+  { key: "higiene:shampoo", label: "Shampoo", category: "Higiene", aliases: ["xampu"], baseUnit: "l" },
+  { key: "higiene:condicionador", label: "Condicionador", category: "Higiene", aliases: [], baseUnit: "l" },
+  { key: "higiene:desodorante", label: "Desodorante", category: "Higiene", aliases: [], baseUnit: "un" },
+
+  { key: "limpeza:detergente", label: "Detergente", category: "Limpeza", aliases: ["lava loucas", "lava louça"], baseUnit: "l" },
+  { key: "limpeza:sabao-po", label: "Sabão em pó", category: "Limpeza", aliases: ["sabao po", "lava roupas em po"], baseUnit: "kg" },
+  { key: "limpeza:amaciante", label: "Amaciante", category: "Limpeza", aliases: [], baseUnit: "l" },
+  { key: "limpeza:agua-sanitaria", label: "Água sanitária", category: "Limpeza", aliases: ["agua sanitaria", "alvejante clorado"], baseUnit: "l" },
+  { key: "limpeza:desinfetante", label: "Desinfetante", category: "Limpeza", aliases: [], baseUnit: "l" },
+  { key: "limpeza:multiuso", label: "Limpador multiuso", category: "Limpeza", aliases: ["multiuso", "limpador geral"], baseUnit: "l" },
+  { key: "limpeza:papel-toalha", label: "Papel toalha", category: "Limpeza", aliases: ["papel de cozinha"], baseUnit: "un" },
+];
+
 export function genericBasketFamily(value: string): GenericBasketFamily | null {
   const t = comparisonTokens(value);
   if (!t.length) return null;
@@ -517,6 +581,121 @@ export function genericBasketFamily(value: string): GenericBasketFamily | null {
   }
   if (startsComparison(t, "suco")) {
     return { key: "bebida:suco", label: "Suco" };
+  }
+
+  if (startsComparison(t, "sal")) {
+    return { key: "mercearia:sal", label: "Sal" };
+  }
+
+  if (startsComparison(t, "ovo") || startsComparison(t, "ovos")) {
+    return { key: "mercearia:ovos", label: "Ovos" };
+  }
+
+  if (startsComparison(t, "fuba")) {
+    return { key: "farinha:fuba", label: "Fubá" };
+  }
+
+  if (
+    startsComparison(t, "farinha") &&
+    hasComparisonToken(t, "mandioca")
+  ) {
+    return { key: "farinha:mandioca", label: "Farinha de mandioca" };
+  }
+
+  if (startsComparison(t, "pao") && hasComparisonToken(t, "forma")) {
+    return { key: "pao:forma", label: "Pão de forma" };
+  }
+
+  if (startsComparison(t, "sardinha")) {
+    return { key: "mercearia:sardinha", label: "Sardinha" };
+  }
+
+  if (startsComparison(t, "atum")) {
+    return { key: "mercearia:atum", label: "Atum" };
+  }
+
+  if (
+    (startsComparison(t, "biscoito") || startsComparison(t, "bolacha")) &&
+    hasComparisonToken(t, "recheado", "recheada")
+  ) {
+    return { key: "mimos:biscoito-recheado", label: "Biscoito recheado" };
+  }
+
+  if (
+    hasComparisonToken(t, "cream") &&
+    hasComparisonToken(t, "cracker")
+  ) {
+    return { key: "mimos:cream-cracker", label: "Biscoito cream cracker" };
+  }
+
+  if (
+    (startsComparison(t, "biscoito") || startsComparison(t, "bolacha")) &&
+    hasComparisonToken(t, "agua") &&
+    hasComparisonToken(t, "sal")
+  ) {
+    return { key: "mimos:cream-cracker", label: "Biscoito cream cracker" };
+  }
+
+  if (
+    (startsComparison(t, "biscoito") || startsComparison(t, "bolacha")) &&
+    hasComparisonToken(t, "maisena", "maizena")
+  ) {
+    return { key: "mimos:maisena", label: "Biscoito maisena" };
+  }
+
+  if (
+    startsComparison(t, "wafer") ||
+    ((startsComparison(t, "biscoito") || startsComparison(t, "bolacha")) &&
+      hasComparisonToken(t, "wafer"))
+  ) {
+    return { key: "mimos:wafer", label: "Wafer" };
+  }
+
+  if (
+    startsComparison(t, "chocolate") ||
+    (startsComparison(t, "barra") && hasComparisonToken(t, "chocolate"))
+  ) {
+    return { key: "mimos:chocolate", label: "Chocolate" };
+  }
+
+  if (startsComparison(t, "bombom") || startsComparison(t, "bombons")) {
+    return { key: "mimos:bombom", label: "Bombom" };
+  }
+
+  if (
+    startsComparison(t, "salgadinho") ||
+    startsComparison(t, "snack")
+  ) {
+    return { key: "mimos:salgadinho", label: "Salgadinho" };
+  }
+
+  if (startsComparison(t, "sorvete")) {
+    return { key: "mimos:sorvete", label: "Sorvete" };
+  }
+
+  if (startsComparison(t, "agua") && hasComparisonToken(t, "mineral")) {
+    return { key: "bebida:agua", label: "Água mineral" };
+  }
+
+  if (
+    startsComparison(t, "cerveja") &&
+    (
+      hasComparisonToken(t, "zero") ||
+      (hasComparisonToken(t, "sem") && hasComparisonToken(t, "alcool"))
+    )
+  ) {
+    return { key: "bebida:cerveja-sem-alcool", label: "Cerveja sem álcool" };
+  }
+
+  if (startsComparison(t, "desinfetante")) {
+    return { key: "limpeza:desinfetante", label: "Desinfetante" };
+  }
+
+  if (
+    startsComparison(t, "multiuso") ||
+    (startsComparison(t, "limpador") && hasComparisonToken(t, "multiuso"))
+  ) {
+    return { key: "limpeza:multiuso", label: "Limpador multiuso" };
   }
 
   return null;
