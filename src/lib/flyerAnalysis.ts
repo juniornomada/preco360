@@ -363,6 +363,7 @@ export const basketNeedsCatalog: BasketNeed[] = [
   { key: "mercearia:macarrao", label: "Macarrão", category: "Cesta básica", aliases: ["macarrao", "massa macarrao", "massa seca"], baseUnit: "kg" },
   { key: "tomate:molho", label: "Molho de tomate", category: "Cesta básica", aliases: ["molho tomate"], baseUnit: "kg" },
   { key: "tomate:extrato", label: "Extrato de tomate", category: "Cesta básica", aliases: ["extrato tomate"], baseUnit: "kg" },
+  { key: "milho:verde", label: "Milho verde", category: "Cesta básica", aliases: ["milho verde lata", "milho em lata", "milho lata", "milho verde em conserva"], baseUnit: "kg" },
   { key: "leite:liquido", label: "Leite", category: "Cesta básica", aliases: ["leite longa vida", "leite uht"], baseUnit: "l" },
   { key: "leite:po", label: "Leite em pó", category: "Cesta básica", aliases: ["leite po"], baseUnit: "kg" },
   { key: "laticinio:margarina", label: "Margarina", category: "Cesta básica", aliases: ["margarina com sal"], baseUnit: "kg" },
@@ -581,6 +582,13 @@ export function genericBasketFamily(value: string): GenericBasketFamily | null {
   }
   if (startsComparison(t, "suco")) {
     return { key: "bebida:suco", label: "Suco" };
+  }
+
+  if (
+    startsComparison(t, "milho") &&
+    hasComparisonToken(t, "verde", "conserva")
+  ) {
+    return { key: "milho:verde", label: "Milho verde" };
   }
 
   if (startsComparison(t, "sal")) {
