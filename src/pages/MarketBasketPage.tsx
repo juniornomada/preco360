@@ -658,7 +658,14 @@ export default function MarketBasketPage() {
                                 </p>
                               </div>
                               <div className="shrink-0 text-right">
-                                <p className="font-bold">
+                                <p
+                                  className={
+                                    "font-bold " +
+                                    (market.retailer === bestSingle.retailer
+                                      ? "text-primary"
+                                      : "text-foreground")
+                                  }
+                                >
                                   {market.complete ? "Total: " : "Parcial: "}
                                   {brl(market.total)}
                                 </p>
