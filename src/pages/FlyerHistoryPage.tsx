@@ -28,6 +28,7 @@ export default function FlyerHistoryPage() {
       const { data, error } = await db
         .from("flyers")
         .select("id,retailer,valid_from,valid_to,source_file_name,source_file_path,source_files,created_at,flyer_items(count)")
+        .eq("user_id", user!.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data ?? [];
@@ -56,7 +57,11 @@ export default function FlyerHistoryPage() {
         }
       }
 
-      const { error } = await db.from("flyers").delete().eq("id", flyer.id);
+      const { error } = await db
+        .from("flyers")
+        .delete()
+        .eq("id", flyer.id)
+        .eq("user_id", user!.id);
       if (error) throw error;
 
       await Promise.all([
