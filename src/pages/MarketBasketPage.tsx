@@ -397,6 +397,7 @@ export default function MarketBasketPage() {
       let covered = 0;
       let bestComparableTotal = 0;
       let premiumVsBest = 0;
+      const missingItems: string[] = [];
       const rows: Array<{
         key: string;
         label: string;
@@ -430,6 +431,8 @@ export default function MarketBasketPage() {
             bestComparableTotal += bestCost;
             premiumVsBest += offerCost - bestCost;
           }
+        } else {
+          missingItems.push(group.label);
         }
       }
 
@@ -442,6 +445,7 @@ export default function MarketBasketPage() {
         premiumVsBest,
         premiumPct: bestComparableTotal > 0 ? (premiumVsBest / bestComparableTotal) * 100 : 0,
         rows,
+        missingItems,
       };
     });
 
@@ -656,6 +660,11 @@ export default function MarketBasketPage() {
                                 <p className="text-[10px] text-muted-foreground">
                                   {market.covered}/{selectedGroups.length} itens com preço vigente
                                 </p>
+                                {!market.complete && market.missingItems?.length > 0 && (
+                                  <p className="mt-0.5 text-[10px] leading-snug text-amber-500">
+                                    Faltam: {market.missingItems.join(", ")}
+                                  </p>
+                                )}
                               </div>
                               <div className="shrink-0 text-right">
                                 <p
@@ -1039,6 +1048,17 @@ export default function MarketBasketPage() {
                         )}
                     </div>
                   </div>
+
+                  {!market.complete && market.missingItems?.length > 0 && (
+                    <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-amber-500">
+                        Itens sem preço vigente neste mercado
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {market.missingItems.join(" · ")}
+                      </p>
+                    </div>
+                  )}
 
                   {market.rows?.some((row: any) => row.generic) && (
                     <div className="mt-3 space-y-1.5 border-t pt-2.5">
