@@ -18,7 +18,8 @@ const specificRules: Rule[] = [
   // Product type wins over flavors/secondary words.
   { pattern: /barra de proteina|barra de prot\b|barra power proteina|protein bar/, visual: "__proteinbar__", forceIcon: true, confidence: 0.99 },
   { pattern: /100 whey|\bwhey\b|creatina|suplemento|sup bold/, visual: "__supplement__", confidence: 0.98 },
-  { pattern: /capsulas?.*dolce gusto|bebida.*dolce gusto|dolce gusto/, visual: "__dolcegusto__", forceIcon: true, confidence: 0.99 },
+  // Prefer a verified real packshot when available; keep this icon only as fallback.
+  { pattern: /capsulas?.*dolce gusto|bebida.*dolce gusto|dolce gusto/, visual: "__dolcegusto__", confidence: 0.99 },
   { pattern: /toddynho/, visual: "__toddynho__", forceIcon: true, confidence: 0.99 },
   { pattern: /listerine|antisseptico bucal/, visual: "__mouthwash__", forceIcon: true, confidence: 0.99 },
   { pattern: /probio2/, visual: "__yogurt__", forceIcon: true, confidence: 0.99 },
