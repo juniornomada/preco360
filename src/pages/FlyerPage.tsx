@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import ProductVisual from "@/components/ProductVisual";
+import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { ensureClubActivationNote } from "@/lib/clubOfferRules";
 import {
   ArrowDown,
@@ -1597,7 +1598,7 @@ export default function FlyerPage() {
                           <CardContent className="p-4">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <p className="truncate font-bold">{item.rawName}</p>
+                                <AdaptiveProductName text={item.rawName} className="font-bold" />
                                 <p className="mt-0.5 text-xs text-muted-foreground">
                                   {item.product?.name ? `↳ ${item.product.name}` : "Sem correspondência confirmada"}
                                 </p>
@@ -1802,9 +1803,10 @@ export default function FlyerPage() {
                                   />
 
                                   <div className="min-w-0 flex-1">
-                                    <p className="font-bold leading-snug">
-                                      {displayProductName(item.raw_name)}
-                                    </p>
+                                    <AdaptiveProductName
+                                      text={displayProductName(item.raw_name)}
+                                      className="font-bold"
+                                    />
                                     <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                                       <p className="font-extrabold">
                                         {offerPriceWithReference(
