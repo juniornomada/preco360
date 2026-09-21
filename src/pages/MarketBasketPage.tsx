@@ -816,11 +816,6 @@ export default function MarketBasketPage() {
                                 <p className="text-[10px] text-muted-foreground">
                                   {market.covered}/{selectedGroups.length} itens com preço vigente
                                 </p>
-                                {!market.complete && market.missingItems?.length > 0 && (
-                                  <p className="mt-0.5 text-[10px] leading-snug text-amber-500">
-                                    Faltam: {market.missingItems.join(", ")}
-                                  </p>
-                                )}
                               </div>
                               <div className="shrink-0 text-right">
                                 <p
@@ -847,11 +842,7 @@ export default function MarketBasketPage() {
                                       cesta completa
                                     </p>
                                   )
-                                ) : (
-                                  <p className="text-[10px] font-medium text-amber-500">
-                                    faltam {market.missing} item(ns)
-                                  </p>
-                                )}
+) : null}
                               </div>
                             </div>
                           );
