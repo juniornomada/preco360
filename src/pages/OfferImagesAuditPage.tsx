@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ImageOff, Search, Store } from "lucide-react";
@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import ProductVisual from "@/components/ProductVisual";
-import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { normalizeSearchText } from "@/lib/flyerAnalysis";
 
 const db = supabase as any;
@@ -71,6 +70,8 @@ export default function OfferImagesAuditPage() {
   const today = useMemo(() => localDateKey(), []);
   const [query, setQuery] = useState("");
   const [onlyMissing, setOnlyMissing] = useState(false);
+  const [visibleLimit, setVisibleLimit] = useState(60);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   const {
     data,
@@ -79,12 +80,14 @@ export default function OfferImagesAuditPage() {
   } = useQuery({
     queryKey: ["offer-images-audit", user?.id, today],
     enabled: !!user,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
     queryFn: async () => {
       const { data: flyers, error: flyersError } = await db
         .from("flyers")
-        .select("id,retailer,title,valid_from,valid_to")
+        .select("id,retailer,valid_to")
+        .eq("user_id", user!.id)
         .lte("valid_from", today)
         .gte("valid_to", today)
         .order("created_at", { ascending: false });
@@ -100,8 +103,9 @@ export default function OfferImagesAuditPage() {
       const { data: items, error: itemsError } = await db
         .from("flyer_items")
         .select(
-          "id,flyer_id,raw_name,brand,package_quantity,package_unit,advertised_price,image_url,image_source,image_match_status,image_confidence",
+          "id,flyer_id,raw_name,brand,package_quantity,package_unit,advertised_price,image_url,image_source,image_match_status",
         )
+        .eq("user_id", user!.id)
         .in("flyer_id", flyerIds)
         .order("raw_name", { ascending: true })
         .limit(5000);
@@ -126,21 +130,57 @@ export default function OfferImagesAuditPage() {
   const missingCount = items.filter((item) => !item.image_url).length;
   const withImageCount = items.length - missingCount;
 
+  const searchableItems = useMemo(
+    () =>
+      items.map((item) => ({
+        item,
+        searchText: normalizeSearchText(
+          `${item.raw_name} ${item.brand ?? ""} ${item.retailer}`,
+        ),
+      })),
+    [items],
+  );
+
   const filteredItems = useMemo(() => {
     const normalizedQuery = normalizeSearchText(query).trim();
-    return items.filter((item) => {
-      if (onlyMissing && item.image_url) return false;
-      if (!normalizedQuery) return true;
+    const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
 
-      const haystack = normalizeSearchText(
-        `${item.raw_name} ${item.brand ?? ""} ${item.retailer}`,
-      );
-      return normalizedQuery
-        .split(/\s+/)
-        .filter(Boolean)
-        .every((token) => haystack.includes(token));
-    });
-  }, [items, onlyMissing, query]);
+    return searchableItems
+      .filter(({ item, searchText }) => {
+        if (onlyMissing && item.image_url) return false;
+        if (!tokens.length) return true;
+        return tokens.every((token) => searchText.includes(token));
+      })
+      .map(({ item }) => item);
+  }, [searchableItems, onlyMissing, query]);
+
+  useEffect(() => {
+    setVisibleLimit(60);
+  }, [query, onlyMissing]);
+
+  const visibleItems = useMemo(
+    () => filteredItems.slice(0, visibleLimit),
+    [filteredItems, visibleLimit],
+  );
+  const hasMore = visibleItems.length < filteredItems.length;
+
+  useEffect(() => {
+    if (!hasMore || !loadMoreRef.current) return;
+
+    const node = loadMoreRef.current;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        setVisibleLimit((current) =>
+          Math.min(current + 60, filteredItems.length),
+        );
+      },
+      { rootMargin: "500px 0px" },
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, filteredItems.length, visibleLimit]);
 
   return (
     <div className="page-container !pb-24 mx-auto w-full max-w-3xl">
@@ -252,7 +292,7 @@ export default function OfferImagesAuditPage() {
             </div>
           </div>
 
-          {filteredItems.map((item) => {
+          {visibleItems.map((item) => {
             const price = Number(item.advertised_price) || 0;
             const pack = packageLabel(item);
             const hasImage = Boolean(item.image_url);
@@ -268,7 +308,12 @@ export default function OfferImagesAuditPage() {
                     />
 
                     <div className="min-w-0">
-                      <AdaptiveProductName text={item.raw_name} className="font-bold" />
+                      <p
+                        className="truncate text-sm font-bold leading-tight sm:text-base"
+                        title={item.raw_name}
+                      >
+                        {item.raw_name}
+                      </p>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-bold">
                           <Store className="h-3.5 w-3.5 shrink-0 text-primary" />
@@ -307,6 +352,15 @@ export default function OfferImagesAuditPage() {
               </Card>
             );
           })}
+
+          {hasMore && (
+            <div
+              ref={loadMoreRef}
+              className="py-4 text-center text-xs text-muted-foreground"
+            >
+              Carregando mais produtos…
+            </div>
+          )}
         </div>
       )}
     </div>
