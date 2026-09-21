@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import AddProductModal from "@/components/AddProductModal";
+import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { formatBRL } from "@/lib/priceAnalysis";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -125,7 +126,7 @@ export default function Index() {
               className="flex w-full items-center gap-2.5 rounded-2xl border bg-card px-3.5 py-3 text-left transition active:scale-[0.995] hover:border-primary/30 hover:shadow-sm sm:gap-3 sm:p-4"
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[clamp(0.88rem,3.8vw,1rem)] font-semibold leading-tight">{product.name}</p>
+                <AdaptiveProductName text={product.name} className="font-semibold" maxPx={16} desktopMaxPx={16} />
                 <p className="mt-0.5 truncate text-[clamp(0.66rem,2.8vw,0.75rem)] text-muted-foreground">{product.category} · {product.priceCount} registro(s)</p>
               </div>
               <div className="shrink-0 text-right">
