@@ -237,6 +237,7 @@ function compareOfferValue(a: OfferWithMarket, b: OfferWithMarket) {
   );
 }
 
+// Deploy refresh: no functional change.
 export default function MarketBasketPage() {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
