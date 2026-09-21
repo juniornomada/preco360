@@ -738,7 +738,7 @@ function historicalPackage(product: ProductForMatch) {
     : inferPackage(product.name);
 }
 
-export function findComparablePurchaseProducts(
+export function findComparableProducts(
   candidate: FlyerCandidate,
   products: ProductForMatch[],
 ) {
@@ -746,8 +746,6 @@ export function findComparablePurchaseProducts(
   if (!candidateKey || !candidate.packageInfo) return [];
 
   return products.filter((product) => {
-    if (!(product.prices ?? []).length) return false;
-
     const productKey = purchaseComparisonKey(product.name);
     if (!productKey || !purchaseKeysCompatible(candidateKey, productKey)) {
       return false;
@@ -769,6 +767,15 @@ export function findComparablePurchaseProducts(
 
     return true;
   });
+}
+
+export function findComparablePurchaseProducts(
+  candidate: FlyerCandidate,
+  products: ProductForMatch[],
+) {
+  return findComparableProducts(candidate, products).filter(
+    (product) => (product.prices ?? []).length > 0,
+  );
 }
 
 function median(values: number[]) {
