@@ -9,6 +9,7 @@ import {
   Search,
   ShoppingBasket,
   Plus,
+  Mic,
   Sparkles,
   Split,
 } from "lucide-react";
@@ -130,6 +131,83 @@ function manualBasketLabel(key: string) {
   } catch {
     return key.slice(2).trim();
   }
+}
+
+function containsVoicePhrase(text: string, phrase: string) {
+  const source = " " + fallbackKey(text) + " ";
+  const target = " " + fallbackKey(phrase) + " ";
+  return source.includes(target);
+}
+
+function voiceCatalogNeeds(transcript: string) {
+  const normalized = " " + fallbackKey(transcript) + " ";
+  const candidates: Array<{
+    key: string;
+    label: string;
+    baseUnit: "kg" | "l" | "un";
+    start: number;
+    end: number;
+    length: number;
+  }> = [];
+
+  for (const need of basketNeedsCatalog) {
+    for (const variant of [need.label, ...need.aliases]) {
+      const phrase = fallbackKey(variant);
+      if (!phrase) continue;
+      const needle = " " + phrase + " ";
+      let from = 0;
+      while (from < normalized.length) {
+        const index = normalized.indexOf(needle, from);
+        if (index < 0) break;
+        candidates.push({
+          key: need.key,
+          label: need.label,
+          baseUnit: need.baseUnit,
+          start: index + 1,
+          end: index + 1 + phrase.length,
+          length: phrase.length,
+        });
+        from = index + needle.length;
+      }
+    }
+  }
+
+  candidates.sort((a, b) => b.length - a.length || a.start - b.start);
+
+  const occupied: Array<[number, number]> = [];
+  const selected: typeof candidates = [];
+  const seenKeys = new Set<string>();
+
+  for (const candidate of candidates) {
+    if (seenKeys.has(candidate.key)) continue;
+    const overlaps = occupied.some(
+      ([start, end]) => candidate.start < end && candidate.end > start,
+    );
+    if (overlaps) continue;
+    occupied.push([candidate.start, candidate.end]);
+    selected.push(candidate);
+    seenKeys.add(candidate.key);
+  }
+
+  return selected.sort((a, b) => a.start - b.start);
+}
+
+function manualVoiceItems(transcript: string) {
+  let value = transcript
+    .replace(
+      /\b(?:adiciona|adicione|adicionar|coloca|coloque|bota|bote|inclui|inclua)\b/gi,
+      " ",
+    )
+    .replace(/\b(?:pra mim|para mim|na cesta|a cesta|por favor)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!value) return [];
+
+  return value
+    .split(/\s*[,;]\s*|\s+e\s+/i)
+    .map((item) => item.replace(/^[\s,.;:-]+|[\s,.;:-]+$/g, "").trim())
+    .filter((item) => item.length >= 2);
 }
 
 function compactOfferName(label: string, rawName: string) {
@@ -264,9 +342,23 @@ export default function MarketBasketPage() {
   const [selected, setSelected] = useState<BasketSelection>({});
   const [selectionHydrated, setSelectionHydrated] = useState(false);
   const [showItems, setShowItems] = useState(true);
+  const [listening, setListening] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceMessage, setVoiceMessage] = useState("");
+  const speechRecognitionRef = useRef<any>(null);
   const lastSyncedSelectionRef = useRef<string | null>(null);
   const activeBasketUserRef = useRef<string | null>(null);
   const basketSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    return () => {
+      try {
+        speechRecognitionRef.current?.abort?.();
+      } catch {
+        // Browser speech recognition cleanup is best-effort.
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -852,6 +944,108 @@ export default function MarketBasketPage() {
     requestAnimationFrame(() => searchInputRef.current?.focus());
   };
 
+  const applyVoiceCommand = (transcript: string) => {
+    const catalogMatches = voiceCatalogNeeds(transcript);
+    const labels: string[] = [];
+
+    setSelected((current) => {
+      const next = { ...current };
+
+      if (catalogMatches.length > 0) {
+        for (const match of catalogMatches) {
+          const key = `g:${match.key}|u:${match.baseUnit}`;
+          next[key] = Math.max(1, next[key] ?? 0);
+          labels.push(match.label);
+        }
+      } else {
+        for (const item of manualVoiceItems(transcript)) {
+          const normalized = fallbackKey(item);
+          const existing = Object.keys(next).find((key) => {
+            const label = manualBasketLabel(key);
+            return label && fallbackKey(label) === normalized;
+          });
+          const key = existing ?? manualBasketKey(item);
+          next[key] = Math.max(1, next[key] ?? 0);
+          labels.push(item);
+        }
+      }
+
+      return next;
+    });
+
+    setVoiceTranscript(transcript);
+    setSearch("");
+    setShowItems(false);
+
+    if (labels.length) {
+      setVoiceMessage(
+        `Adicionado${labels.length > 1 ? "s" : ""}: ${labels.join(", ")}.`,
+      );
+    } else {
+      setVoiceMessage(
+        "Não consegui identificar produtos nessa frase. Tente falar os itens separados por pequenas pausas.",
+      );
+    }
+  };
+
+  const toggleVoiceInput = () => {
+    if (listening) {
+      speechRecognitionRef.current?.stop?.();
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setVoiceMessage(
+        "O reconhecimento de voz não está disponível neste navegador. Você ainda pode digitar os itens normalmente.",
+      );
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    speechRecognitionRef.current = recognition;
+    recognition.lang = "pt-BR";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setListening(true);
+      setVoiceMessage("Ouvindo… fale os produtos normalmente.");
+    };
+
+    recognition.onresult = (event: any) => {
+      const transcript = String(
+        event?.results?.[0]?.[0]?.transcript ?? "",
+      ).trim();
+      if (transcript) applyVoiceCommand(transcript);
+    };
+
+    recognition.onerror = (event: any) => {
+      const code = String(event?.error ?? "");
+      setVoiceMessage(
+        code === "not-allowed" || code === "service-not-allowed"
+          ? "Permita o acesso ao microfone para adicionar produtos por voz."
+          : "Não consegui entender o áudio. Tente novamente falando um pouco mais devagar.",
+      );
+    };
+
+    recognition.onend = () => {
+      setListening(false);
+      speechRecognitionRef.current = null;
+    };
+
+    try {
+      recognition.start();
+    } catch {
+      setListening(false);
+      setVoiceMessage("Não foi possível iniciar o microfone agora. Tente novamente.");
+    }
+  };
+
   const handleSearchChange = (value: string) => {
     setSearch(value);
     if (value.trim().length >= 2) {
@@ -1142,12 +1336,41 @@ export default function MarketBasketPage() {
               value={search}
               onChange={(event) => handleSearchChange(event.target.value)}
               placeholder="Leite em pó, papel higiênico, azeite..."
-              className="h-11 pl-9"
+              className="h-11 pl-9 pr-12"
             />
+            <button
+              type="button"
+              onClick={toggleVoiceInput}
+              aria-label={listening ? "Parar reconhecimento de voz" : "Adicionar produtos por voz"}
+              title={listening ? "Parar microfone" : "Adicionar produtos por voz"}
+              className={
+                "absolute right-1 top-1 flex h-9 w-9 items-center justify-center rounded-lg border transition " +
+                (listening
+                  ? "border-primary bg-primary text-primary-foreground animate-pulse"
+                  : "border-border bg-background text-primary hover:bg-primary/10")
+              }
+            >
+              <Mic className="h-4 w-4" />
+            </button>
           </div>
           <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-            Procure pelo que você precisa, sem escolher uma marca. Se ainda não houver oferta ou histórico, você pode adicionar o item mesmo assim e deixá-lo na cesta como “sem preço”.
+            Digite ou toque no microfone e fale naturalmente. Ex.: “adiciona leite, açúcar, feijão, biscoito recheado e bombom”.
           </p>
+
+          {(voiceTranscript || voiceMessage) && (
+            <div className="mt-2 rounded-lg border bg-muted/30 px-3 py-2">
+              {voiceTranscript && (
+                <p className="text-[10px] text-muted-foreground">
+                  Você disse: “{voiceTranscript}”
+                </p>
+              )}
+              {voiceMessage && (
+                <p className="mt-0.5 text-xs font-medium text-foreground">
+                  {voiceMessage}
+                </p>
+              )}
+            </div>
+          )}
 
           {canAddManual && (
             <Button
@@ -1175,7 +1398,7 @@ export default function MarketBasketPage() {
             className="mt-3 flex w-full items-center justify-between text-sm font-semibold"
             onClick={() => setShowItems((value) => !value)}
           >
-            Escolher produtos das promoções vigentes
+            Escolher produtos e necessidades
             {showItems ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           </button>
 
