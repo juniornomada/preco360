@@ -679,10 +679,7 @@ export function genericBasketFamily(value: string): GenericBasketFamily | null {
 
   if (
     startsComparison(t, "cerveja") &&
-    (
-      hasComparisonToken(t, "zero") ||
-      (hasComparisonToken(t, "sem") && hasComparisonToken(t, "alcool"))
-    )
+    hasComparisonToken(t, "zero", "alcool")
   ) {
     return { key: "bebida:cerveja-sem-alcool", label: "Cerveja sem álcool" };
   }
