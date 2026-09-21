@@ -1076,18 +1076,18 @@ export default function MarketBasketPage() {
                               </p>
                             </div>
                             <div className="shrink-0 text-right">
-                              <p className="font-semibold">
-                                {brl(effectiveAdvertisedPrice(row.offer))}
+                              <p className="flex items-baseline justify-end gap-1.5 whitespace-nowrap font-semibold">
+                                {validClubPrice(row.offer) &&
+                                  requiresAppActivation(
+                                    row.offer.retailer,
+                                    row.offer.offer_notes,
+                                  ) && (
+                                    <span className="text-[9px] font-bold uppercase text-amber-500">
+                                      ativar desconto APP
+                                    </span>
+                                  )}
+                                <span>{brl(effectiveAdvertisedPrice(row.offer))}</span>
                               </p>
-                              {validClubPrice(row.offer) &&
-                                requiresAppActivation(
-                                  row.offer.retailer,
-                                  row.offer.offer_notes,
-                                ) && (
-                                  <p className="text-[9px] font-bold uppercase leading-tight text-amber-500">
-                                    ativar desconto APP
-                                  </p>
-                                )}
                               {normalizedPriceLabel(row.offer) && (
                                 <p className="text-[10px] text-muted-foreground">
                                   {normalizedPriceLabel(row.offer)}
