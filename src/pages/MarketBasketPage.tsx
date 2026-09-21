@@ -17,7 +17,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { genericBasketFamilies } from "@/lib/flyerAnalysis";
+import { basketNeedsCatalog, genericBasketFamilies } from "@/lib/flyerAnalysis";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
 
 const db = supabase as any;
@@ -86,6 +86,9 @@ type Group = {
   markets: string[];
   generic?: boolean;
   manual?: boolean;
+  catalog?: boolean;
+  category?: string;
+  aliases?: string[];
   optionCount?: number;
 };
 
@@ -517,6 +520,32 @@ export default function MarketBasketPage() {
       }
     }
 
+    for (const need of basketNeedsCatalog) {
+      const prefix = "g:" + need.key + "|u:";
+      const existing = [...genericMap.values()].find((group) =>
+        group.key.startsWith(prefix),
+      );
+
+      if (existing) {
+        existing.catalog = true;
+        existing.category = need.category;
+        existing.aliases = need.aliases;
+        continue;
+      }
+
+      genericMap.set(prefix + need.baseUnit, {
+        key: prefix + need.baseUnit,
+        label: need.label,
+        baseUnit: need.baseUnit,
+        offers: [],
+        markets: [],
+        generic: true,
+        catalog: true,
+        category: need.category,
+        aliases: need.aliases,
+      });
+    }
+
     const genericGroups = [...genericMap.values()].map((group) => ({
       ...group,
       optionCount: new Set(
@@ -527,6 +556,9 @@ export default function MarketBasketPage() {
     const specificGroups = [...specificMap.values()];
 
     return [...genericGroups, ...specificGroups].sort((a, b) => {
+      if (Boolean(a.catalog) !== Boolean(b.catalog)) {
+        return a.catalog ? -1 : 1;
+      }
       if (Boolean(a.generic) !== Boolean(b.generic)) {
         return a.generic ? -1 : 1;
       }
@@ -541,23 +573,41 @@ export default function MarketBasketPage() {
     const tokens = q.split(/\s+/);
     return groups
       .filter((group) => {
-        const haystack = fallbackKey(group.label);
+        const haystack = fallbackKey(
+          [
+            group.label,
+            group.category ?? "",
+            ...(group.aliases ?? []),
+          ].join(" "),
+        );
         return tokens.every((token) => haystack.includes(token));
       })
       .sort((a, b) => {
         const aLabel = fallbackKey(a.label);
         const bLabel = fallbackKey(b.label);
-        const aExact = aLabel === q ? 1 : 0;
-        const bExact = bLabel === q ? 1 : 0;
+        const aAliases = (a.aliases ?? []).map(fallbackKey);
+        const bAliases = (b.aliases ?? []).map(fallbackKey);
+        const aExact = aLabel === q || aAliases.includes(q) ? 1 : 0;
+        const bExact = bLabel === q || bAliases.includes(q) ? 1 : 0;
         if (aExact !== bExact) return bExact - aExact;
+
+        const aStarts =
+          aLabel.startsWith(q) || aAliases.some((alias) => alias.startsWith(q))
+            ? 1
+            : 0;
+        const bStarts =
+          bLabel.startsWith(q) || bAliases.some((alias) => alias.startsWith(q))
+            ? 1
+            : 0;
+        if (aStarts !== bStarts) return bStarts - aStarts;
+
+        if (Boolean(a.catalog) !== Boolean(b.catalog)) {
+          return a.catalog ? -1 : 1;
+        }
 
         if (Boolean(a.generic) !== Boolean(b.generic)) {
           return a.generic ? -1 : 1;
         }
-
-        const aStarts = aLabel.startsWith(q) ? 1 : 0;
-        const bStarts = bLabel.startsWith(q) ? 1 : 0;
-        if (aStarts !== bStarts) return bStarts - aStarts;
 
         return a.label.localeCompare(b.label, "pt-BR", {
           sensitivity: "base",
@@ -1053,7 +1103,7 @@ export default function MarketBasketPage() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold">{group.label}</p>
                       <p className="text-[11px] text-muted-foreground">
-                        {group.manual && !reference
+                        {!reference
                           ? `${qty}× item · sem preço vigente`
                           : group.generic
                             ? `${qty}× referência de ${reference ? packageLabel(reference) : "embalagem"} · qualquer marca`
@@ -1161,27 +1211,35 @@ export default function MarketBasketPage() {
                               Qualquer marca
                             </span>
                           )}
+                          {group.catalog && !best && (
+                            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+                              Sem preço
+                            </span>
+                          )}
                         </div>
                         <p className="mt-0.5 text-xs text-muted-foreground">
-                          {group.generic
-                            ? `${group.optionCount ?? group.offers.length} opção(ões) em ${group.markets.length} mercado(s)`
-                            : `${group.markets.length} mercado(s)`}
-                          {" · "}
-                          {best && normalizedPriceLabel(best)
-                            ? "melhor custo " + normalizedPriceLabel(best) +
+                          {!best
+                            ? `${group.category ?? "Necessidade"} · sem preço vigente`
+                            : (
+                              (group.generic
+                                ? `${group.optionCount ?? group.offers.length} opção(ões) em ${group.markets.length} mercado(s)`
+                                : `${group.markets.length} mercado(s)`) +
                               " · " +
-                              (validClubPrice(best)
-                                ? "clube " +
-                                  brl(effectiveAdvertisedPrice(best)) +
-                                  (requiresAppActivation(
-                                    best.retailer,
-                                    best.offer_notes,
-                                  )
-                                    ? " · ativar desconto APP"
-                                    : "")
-                                : "embalagem " + brl(Number(best.advertised_price)))
-                            : "melhor oferta " +
-                              (best ? brl(effectiveAdvertisedPrice(best)) : brl(0))}
+                              (normalizedPriceLabel(best)
+                                ? "melhor custo " + normalizedPriceLabel(best) +
+                                  " · " +
+                                  (validClubPrice(best)
+                                    ? "clube " +
+                                      brl(effectiveAdvertisedPrice(best)) +
+                                      (requiresAppActivation(
+                                        best.retailer,
+                                        best.offer_notes,
+                                      )
+                                        ? " · ativar desconto APP"
+                                        : "")
+                                    : "embalagem " + brl(Number(best.advertised_price)))
+                                : "melhor oferta " + brl(effectiveAdvertisedPrice(best)))
+                            )}
                         </p>
                         {best && (
                           <p className="mt-1 text-[11px] text-muted-foreground">
