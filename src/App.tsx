@@ -11,6 +11,7 @@ import AuthPage from "./pages/AuthPage";
 import ProductDetail from "./pages/ProductDetail";
 import SearchPage from "./pages/SearchPage";
 import OffersPage from "./pages/OffersPage";
+import OfferImagesAuditPage from "./pages/OfferImagesAuditPage";
 import ReceiptImportPage from "./pages/ReceiptImportPage";
 import FlyerPage from "./pages/FlyerPage";
 import FlyerHistoryPage from "./pages/FlyerHistoryPage";
@@ -42,6 +43,7 @@ function AppRoutes() {
         <Route path="/search" element={<SearchPage />} />
         <Route path="/upload" element={<ReceiptImportPage />} />
         <Route path="/offers" element={<OffersPage />} />
+        <Route path="/offers/images" element={<OfferImagesAuditPage />} />
         <Route path="/offers/basket" element={<MarketBasketPage />} />
         <Route path="/radar" element={<FlyerPage />} />
         <Route path="/radar/history" element={<FlyerHistoryPage />} />
