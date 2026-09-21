@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
@@ -6,21 +7,38 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import BottomNav from "@/components/BottomNav";
-import Index from "./pages/Index";
-import AuthPage from "./pages/AuthPage";
-import ProductDetail from "./pages/ProductDetail";
-import SearchPage from "./pages/SearchPage";
-import OffersPage from "./pages/OffersPage";
-import OfferImagesAuditPage from "./pages/OfferImagesAuditPage";
-import ReceiptImportPage from "./pages/ReceiptImportPage";
-import FlyerPage from "./pages/FlyerPage";
-import FlyerHistoryPage from "./pages/FlyerHistoryPage";
-import MarketBasketPage from "./pages/MarketBasketPage";
-import ProfilePage from "./pages/ProfilePage";
-import QrLabPage from "./pages/QrLabPage";
-import NotFound from "./pages/NotFound";
+const Index = lazy(() => import("./pages/Index"));
+const AuthPage = lazy(() => import("./pages/AuthPage"));
+const ProductDetail = lazy(() => import("./pages/ProductDetail"));
+const SearchPage = lazy(() => import("./pages/SearchPage"));
+const OffersPage = lazy(() => import("./pages/OffersPage"));
+const OfferImagesAuditPage = lazy(() => import("./pages/OfferImagesAuditPage"));
+const ReceiptImportPage = lazy(() => import("./pages/ReceiptImportPage"));
+const FlyerPage = lazy(() => import("./pages/FlyerPage"));
+const FlyerHistoryPage = lazy(() => import("./pages/FlyerHistoryPage"));
+const MarketBasketPage = lazy(() => import("./pages/MarketBasketPage"));
+const ProfilePage = lazy(() => import("./pages/ProfilePage"));
+const QrLabPage = lazy(() => import("./pages/QrLabPage"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 2 * 60 * 1000,
+      gcTime: 30 * 60 * 1000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
+
+function PageFallback() {
+  return (
+    <div className="flex min-h-[45vh] items-center justify-center">
+      <div className="h-7 w-7 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+    </div>
+  );
+}
 
 function AppRoutes() {
   const { user, loading } = useAuth();
@@ -33,10 +51,11 @@ function AppRoutes() {
     );
   }
 
-  if (!user) return <AuthPage />;
+  if (!user) return <Suspense fallback={<PageFallback />}><AuthPage /></Suspense>;
 
   return (
     <>
+      <Suspense fallback={<PageFallback />}>
       <Routes>
         <Route path="/" element={<Index />} />
         <Route path="/product/:id" element={<ProductDetail />} />
@@ -52,6 +71,7 @@ function AppRoutes() {
         <Route path="/qr-lab" element={<QrLabPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
+      </Suspense>
       <BottomNav />
     </>
   );
