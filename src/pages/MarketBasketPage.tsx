@@ -584,7 +584,7 @@ export default function MarketBasketPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {bestSingle.complete ? "Melhor mercado único" : "Melhor opção prática"}
+                    {bestSingle.complete ? "Melhor mercado para a cesta completa" : "Maior cobertura em um único mercado"}
                   </p>
                   <h2 className="mt-1 text-xl font-extrabold">{bestSingle.retailer}</h2>
                   <p className="mt-1 text-sm">
@@ -624,10 +624,10 @@ export default function MarketBasketPage() {
                     <div className="mt-3 rounded-lg border border-primary/15 bg-background/70 p-2.5">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                          Comparação rápida
+                          Quanto custa em cada supermercado
                         </p>
                         <span className="text-[10px] text-muted-foreground">
-                          valor + cobertura
+                          preços do tabloide
                         </span>
                       </div>
                       <div className="mt-1.5 divide-y divide-border/60">
@@ -658,7 +658,10 @@ export default function MarketBasketPage() {
                                 </p>
                               </div>
                               <div className="shrink-0 text-right">
-                                <p className="font-bold">{brl(market.total)}</p>
+                                <p className="font-bold">
+                                  {market.complete ? "Total: " : "Parcial: "}
+                                  {brl(market.total)}
+                                </p>
                                 {market.complete ? (
                                   completeDifference !== null && completeDifference > 0 ? (
                                     <p className="text-[10px] text-muted-foreground">
@@ -673,8 +676,8 @@ export default function MarketBasketPage() {
                                     </p>
                                   )
                                 ) : (
-                                  <p className="text-[10px] text-muted-foreground">
-                                    total parcial
+                                  <p className="text-[10px] font-medium text-amber-500">
+                                    faltam {market.missing} item(ns)
                                   </p>
                                 )}
                               </div>
@@ -683,6 +686,7 @@ export default function MarketBasketPage() {
                         })}
                       </div>
                       <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+                        “Parcial” soma apenas os itens com preço vigente naquele mercado. Não representa o custo da cesta completa.
                         Se a diferença for pequena, distância, combustível e tempo podem tornar outro mercado mais conveniente.
                       </p>
                     </div>
@@ -693,13 +697,33 @@ export default function MarketBasketPage() {
           </Card>
 
           {split && split.markets.length > 1 && (
-            <details className="rounded-xl border bg-card">
-              <summary className="flex cursor-pointer list-none items-center gap-2 p-4 font-semibold">
-                <Split className="h-4 w-4 text-primary" />
-                Menor custo equivalente dividindo a compra
-                <span className="ml-auto font-extrabold">{brl(split.total)}</span>
+            <details className="rounded-xl border border-primary/25 bg-card">
+              <summary className="flex cursor-pointer list-none items-center gap-3 p-4">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Split className="h-4 w-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold leading-tight">
+                    Cesta completa pelo menor preço
+                  </p>
+                  <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                    Cada item é comprado no supermercado onde está mais barato · {split.markets.length} mercados
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+                    Total
+                  </p>
+                  <p className="text-lg font-extrabold leading-none text-primary">
+                    {brl(split.total)}
+                  </p>
+                </div>
               </summary>
               <div className="space-y-2 border-t p-3">
+                <p className="rounded-lg bg-primary/5 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                  Este é o custo da <span className="font-semibold text-foreground">cesta inteira</span>.
+                  Já os valores “Parcial” acima somam somente os itens encontrados no tabloide de cada supermercado.
+                </p>
                 {split.rows.map((row) => (
                   <div key={row.key} className="flex items-start justify-between gap-3 rounded-lg bg-muted/40 p-3">
                     <div className="min-w-0">
