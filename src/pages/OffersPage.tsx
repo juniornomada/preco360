@@ -147,11 +147,48 @@ function expiryLabel(value: string | null | undefined, today: string) {
   return `até ${dateBr(value)}`;
 }
 
+function packageLabel(item: FlyerItemRow) {
+  const quantity = Number(item.package_quantity);
+  const rawUnit = String(item.package_unit ?? "").trim().toLowerCase();
+
+  if (Number.isFinite(quantity) && quantity > 0 && rawUnit) {
+    const unit =
+      rawUnit === "l" || rawUnit === "lt"
+        ? "L"
+        : rawUnit === "unid" || rawUnit === "und"
+          ? "un"
+          : rawUnit;
+    const value = quantity.toLocaleString("pt-BR", {
+      maximumFractionDigits: 3,
+    });
+    return `${value} ${unit}`;
+  }
+
+  const trailing = item.raw_name.match(
+    /(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|lt|un|und|unid)\s*$/i,
+  );
+  if (!trailing) return null;
+
+  const unit = trailing[2].toLowerCase();
+  const displayUnit =
+    unit === "l" || unit === "lt"
+      ? "L"
+      : unit === "unid" || unit === "und"
+        ? "un"
+        : unit;
+
+  return `${trailing[1]} ${displayUnit}`;
+}
+
 function compactOfferName(item: FlyerItemRow) {
   return item.raw_name
     .trim()
     .replace(
       /\b(?:pacote|pct|embalagem|garrafa|lata|caixa|frasco|pote)\s+(?=\d+(?:[.,]\d+)?\s*(?:kg|g|ml|l|un|und|unid)\b)/gi,
+      "",
+    )
+    .replace(
+      /\s+\d+(?:[.,]\d+)?\s*(?:kg|g|ml|l|lt|un|und|unid)\s*$/i,
       "",
     )
     .replace(/\s{2,}/g, " ")
@@ -1145,6 +1182,7 @@ export default function OffersPage() {
               regularPackage,
             );
             const displayTitle = compactOfferName(item);
+            const packLabel = packageLabel(item);
             const isFamilyBest =
               bestOfferByFamily.get(entry.family) === item.id;
             const isTopResult = isBroadFamilySearch
@@ -1166,15 +1204,31 @@ export default function OffersPage() {
                     </p>
                   )}
 
-                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-1.5 sm:gap-x-3">
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-1 sm:gap-x-3">
                     <ProductVisual
                       name={item.raw_name}
                       category={entry.product?.category}
                       imageUrl={item.image_url}
+                      compact
                     />
 
                     <div className="min-w-0">
-                      <AdaptiveProductName text={displayTitle} className="font-bold" />
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <div className="min-w-0 flex-1">
+                          <AdaptiveProductName
+                            text={displayTitle}
+                            className="font-bold"
+                            minPx={11}
+                            maxPx={15}
+                            desktopMaxPx={16}
+                          />
+                        </div>
+                        {packLabel && (
+                          <span className="shrink-0 rounded-md border border-white/10 bg-muted/55 px-1.5 py-0.5 text-[10px] font-extrabold leading-none text-foreground/90 sm:text-[11px]">
+                            {packLabel}
+                          </span>
+                        )}
+                      </div>
 
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-bold">
@@ -1196,7 +1250,7 @@ export default function OffersPage() {
                       </div>
                     </div>
 
-                    <div className="min-w-[88px] max-w-[150px] shrink-0 text-right">
+                    <div className="min-w-[80px] max-w-[142px] shrink-0 text-right sm:min-w-[88px] sm:max-w-[150px]">
                       {clubPrice ? (
                         <>
                           <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-primary">
@@ -1207,7 +1261,7 @@ export default function OffersPage() {
                               * ativar desconto APP
                             </p>
                           )}
-                          <p className="text-xl font-extrabold leading-tight text-primary">
+                          <p className="text-lg font-extrabold leading-tight sm:text-xl text-primary">
                             {brl(candidate.price)}
                           </p>
                           {candidate.baseUnit !== "un" && (
@@ -1231,7 +1285,7 @@ export default function OffersPage() {
                         </>
                       ) : (
                         <>
-                          <p className="text-xl font-extrabold leading-tight">
+                          <p className="text-lg font-extrabold leading-tight sm:text-xl">
                             {brl(candidate.price)}
                           </p>
                           {candidate.baseUnit !== "un" && (
