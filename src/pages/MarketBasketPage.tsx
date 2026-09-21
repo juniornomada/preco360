@@ -765,18 +765,23 @@ export default function MarketBasketPage() {
                   )}
 
                   {bestSingle.rows?.some((row: any) => row.generic) && (
-                    <div className="mt-3 space-y-1.5 rounded-lg border border-primary/15 bg-background/70 p-2.5">
+                    <div className="mt-3 rounded-lg border border-primary/15 bg-background/70 p-3">
                       <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
                         O que comprar aqui
                       </p>
-                      {bestSingle.rows
-                        .filter((row: any) => row.generic)
-                        .map((row: any) => (
-                          <div key={"best-" + row.key} className="text-xs">
-                            <span className="font-semibold">{row.label}:</span>{" "}
-                            <span className="text-muted-foreground">{row.offer.raw_name}</span>
-                          </div>
-                        ))}
+                      <div className="mt-2.5 space-y-2.5">
+                        {bestSingle.rows
+                          .filter((row: any) => row.generic)
+                          .map((row: any) => (
+                            <div
+                              key={"best-" + row.key}
+                              className="text-[13px] leading-[1.45]"
+                            >
+                              <span className="font-semibold text-foreground">{row.label}:</span>{" "}
+                              <span className="text-muted-foreground">{row.offer.raw_name}</span>
+                            </div>
+                          ))}
+                      </div>
                     </div>
                   )}
 
