@@ -8,6 +8,7 @@ import {
   ChevronUp,
   Search,
   ShoppingBasket,
+  Plus,
   Sparkles,
   Split,
 } from "lucide-react";
@@ -84,6 +85,7 @@ type Group = {
   offers: OfferWithMarket[];
   markets: string[];
   generic?: boolean;
+  manual?: boolean;
   optionCount?: number;
 };
 
@@ -112,6 +114,19 @@ function fallbackKey(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function manualBasketKey(label: string) {
+  return "m:" + encodeURIComponent(label.trim());
+}
+
+function manualBasketLabel(key: string) {
+  if (!key.startsWith("m:")) return null;
+  try {
+    return decodeURIComponent(key.slice(2)).trim();
+  } catch {
+    return key.slice(2).trim();
+  }
 }
 
 function compactOfferName(label: string, rawName: string) {
@@ -551,13 +566,48 @@ export default function MarketBasketPage() {
       .slice(0, 30);
   }, [groups, search]);
 
-  const selectedGroups = useMemo(
-    () =>
-      groups
-        .filter((group) => (selected[group.key] ?? 0) > 0)
-        .map((group) => ({ ...group, quantity: selected[group.key] })),
-    [groups, selected],
-  );
+  const selectedGroups = useMemo(() => {
+    const normal = groups
+      .filter((group) => (selected[group.key] ?? 0) > 0)
+      .map((group) => ({ ...group, quantity: selected[group.key] }));
+
+    const manual = Object.entries(selected)
+      .filter(([key, quantity]) => key.startsWith("m:") && quantity > 0)
+      .map(([key, quantity]) => {
+        const label = manualBasketLabel(key) || "Item manual";
+        const wanted = fallbackKey(label);
+        const wantedTokens = wanted.split(/\s+/).filter(Boolean);
+
+        const compatibleGroups = groups.filter((group) => {
+          const candidate = fallbackKey(group.label);
+          if (!candidate) return false;
+          return wantedTokens.every((token) => candidate.includes(token));
+        });
+
+        const offersById = new Map<string, OfferWithMarket>();
+        for (const group of compatibleGroups) {
+          for (const offer of group.offers) {
+            offersById.set(offer.id, offer);
+          }
+        }
+        const matchedOffers = [...offersById.values()];
+        const markets = [...new Set(matchedOffers.map((offer) => offer.retailer))];
+
+        return {
+          key,
+          label,
+          baseUnit: matchedOffers[0]?.base_unit ?? ("un" as const),
+          offers: matchedOffers,
+          markets,
+          generic: true,
+          manual: true,
+          optionCount: matchedOffers.length,
+          quantity,
+        };
+      });
+
+    return [...normal, ...manual];
+  }, [groups, selected]);
 
   const comparison = useMemo(() => {
     if (!selectedGroups.length) {
@@ -672,6 +722,24 @@ export default function MarketBasketPage() {
 
   const bestSingle = comparison.bestSingle;
   const split = comparison.split;
+  const splitIsComplete =
+    Boolean(split) && split.rows.length === selectedGroups.length;
+  const unpricedSelectedCount =
+    selectedGroups.length - (split?.rows.length ?? 0);
+
+  const normalizedManualSearch = fallbackKey(search);
+  const exactVisibleGroup = visibleGroups.some(
+    (group) => fallbackKey(group.label) === normalizedManualSearch,
+  );
+  const manualAlreadySelected = Object.keys(selected).some((key) => {
+    const label = manualBasketLabel(key);
+    return label && fallbackKey(label) === normalizedManualSearch;
+  });
+  const canAddManual =
+    search.trim().length >= 2 &&
+    normalizedManualSearch.length >= 2 &&
+    !exactVisibleGroup &&
+    !manualAlreadySelected;
   const rankedMarkets = useMemo(
     () =>
       [...comparison.markets].sort(
@@ -696,6 +764,35 @@ export default function MarketBasketPage() {
       ...current,
       [key]: Math.max(1, current[key] ?? 0),
     }));
+    setSearch("");
+    setShowItems(false);
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
+
+  const addManualToBasket = () => {
+    const label = search.trim().replace(/\s+/g, " ");
+    if (label.length < 2) return;
+
+    setSelected((current) => {
+      const normalized = fallbackKey(label);
+      const existingManualKey = Object.keys(current).find((key) => {
+        const existingLabel = manualBasketLabel(key);
+        return existingLabel && fallbackKey(existingLabel) === normalized;
+      });
+
+      if (existingManualKey) {
+        return {
+          ...current,
+          [existingManualKey]: Math.max(1, current[existingManualKey] ?? 0),
+        };
+      }
+
+      return {
+        ...current,
+        [manualBasketKey(label)]: 1,
+      };
+    });
+
     setSearch("");
     setShowItems(false);
     requestAnimationFrame(() => searchInputRef.current?.focus());
@@ -762,10 +859,15 @@ export default function MarketBasketPage() {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="font-bold leading-tight">
-                  Cesta completa pelo menor preço
+                  {splitIsComplete
+                    ? "Cesta completa pelo menor preço"
+                    : "Menor preço dos itens encontrados"}
                 </p>
                 <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-                  Cada item é comprado no supermercado onde está mais barato · {split.markets.length} mercado{split.markets.length === 1 ? "" : "s"}
+                  Cada item com preço é comprado onde está mais barato · {split.markets.length} mercado{split.markets.length === 1 ? "" : "s"}
+                  {!splitIsComplete && unpricedSelectedCount > 0
+                    ? ` · ${unpricedSelectedCount} item(ns) sem preço`
+                    : ""}
                 </p>
               </div>
               <div className="shrink-0 text-right">
@@ -951,9 +1053,11 @@ export default function MarketBasketPage() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold">{group.label}</p>
                       <p className="text-[11px] text-muted-foreground">
-                        {group.generic
-                          ? `${qty}× referência de ${reference ? packageLabel(reference) : "embalagem"} · qualquer marca`
-                          : `${qty} pacote${qty > 1 ? "s" : ""} · ${reference ? packageLabel(reference) : "embalagem"}`}
+                        {group.manual && !reference
+                          ? `${qty}× item · sem preço vigente`
+                          : group.generic
+                            ? `${qty}× referência de ${reference ? packageLabel(reference) : "embalagem"} · qualquer marca`
+                            : `${qty} pacote${qty > 1 ? "s" : ""} · ${reference ? packageLabel(reference) : "embalagem"}`}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1 rounded-lg border bg-background p-1">
@@ -988,8 +1092,29 @@ export default function MarketBasketPage() {
             />
           </div>
           <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-            Procure pelo que você precisa, sem escolher uma marca. Ex.: “papel higiênico”, “azeite” ou “achocolatado em pó”. Se quiser uma marca, “Nescau” também reúne os tamanhos disponíveis.
+            Procure pelo que você precisa, sem escolher uma marca. Se ainda não houver oferta ou histórico, você pode adicionar o item mesmo assim e deixá-lo na cesta como “sem preço”.
           </p>
+
+          {canAddManual && (
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-2 h-auto min-h-10 w-full justify-start whitespace-normal px-3 py-2 text-left"
+              onClick={addManualToBasket}
+            >
+              <Plus className="mr-2 h-4 w-4 shrink-0 text-primary" />
+              <span>
+                Adicionar <span className="font-bold">“{search.trim()}”</span> à cesta
+                <span className="ml-1 text-muted-foreground">mesmo sem preço</span>
+              </span>
+            </Button>
+          )}
+
+          {manualAlreadySelected && search.trim().length >= 2 && (
+            <p className="mt-2 text-xs font-medium text-primary">
+              Esse item manual já está na sua cesta.
+            </p>
+          )}
 
           <button
             type="button"
@@ -1115,7 +1240,7 @@ export default function MarketBasketPage() {
                 search.trim().length >= 2 &&
                 visibleGroups.length === 0 && (
                   <p className="py-6 text-center text-sm text-muted-foreground">
-                    Nenhuma oferta vigente encontrada para essa busca.
+                    Nenhuma oferta vigente encontrada. Você ainda pode adicionar esse item manualmente à cesta acima.
                   </p>
                 )}
             </div>
@@ -1237,9 +1362,10 @@ export default function MarketBasketPage() {
         melhor oferta vigente e compara marcas e embalagens diferentes por R$/kg ou R$/L.
         Quando existe preço-clube válido, ele é usado como seu preço efetivo tanto na embalagem
         quanto no R$/kg ou R$/L. Itens por unidade usam o preço da própria embalagem. O comparador usa
-        somente preços dos tabloides importados e ainda vigentes. Ausência de um item no tabloide
-        não significa que o mercado não venda o produto — apenas que não temos um preço promocional
-        válido para ele.
+        somente preços dos tabloides importados e ainda vigentes. Itens adicionados manualmente podem
+        permanecer na cesta sem preço; se uma oferta compatível aparecer depois, ela passa a ser usada
+        automaticamente na comparação. Ausência de um item no tabloide não significa que o mercado não
+        venda o produto — apenas que não temos um preço promocional válido para ele.
       </p>
     </div>
   );
