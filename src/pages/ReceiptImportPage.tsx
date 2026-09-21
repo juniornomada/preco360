@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { QrScanner } from "@/components/QrScanner";
 import { extractAccessKey, validateAccessKey, validateNfceUrl } from "@/lib/nfceKey";
+import { inferPackage } from "@/lib/flyerAnalysis";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,7 +12,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertCircle, Camera, CheckCircle2, ExternalLink, Key, Loader2, QrCode, ReceiptText, RefreshCw, Save, Trash2 } from "lucide-react";
 
-type ParsedItem = { name: string; price: string };
+type ParsedItem = {
+  name: string;
+  price: string;
+  quantity?: string;
+  unit?: string;
+  unitPrice?: string;
+  totalPrice?: string;
+};
 type ImportSource = "qr" | "key";
 type Diagnostics = {
   htmlLength?: number;
@@ -67,6 +75,67 @@ function blockedTitle(code: string) {
   return "A consulta precisa de ajuda";
 }
 
+function decimalValue(value?: string | null) {
+  if (!value) return null;
+  const parsed = Number(String(value).replace(",", "."));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function brl(value: number) {
+  return value.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
+function normalizedReceiptPrice(item: ParsedItem) {
+  const price = decimalValue(item.unitPrice ?? item.price);
+  if (!price) return null;
+
+  const saleUnit = String(item.unit ?? "").toUpperCase();
+  if (saleUnit === "KG") return { value: price, unit: "kg" };
+  if (saleUnit === "L") return { value: price, unit: "L" };
+  if (saleUnit === "G") return { value: price * 1000, unit: "kg" };
+  if (saleUnit === "ML") return { value: price * 1000, unit: "L" };
+
+  const pkg = inferPackage(item.name);
+  if (!pkg || pkg.baseQuantity <= 0) return null;
+  return {
+    value: price / pkg.baseQuantity,
+    unit: pkg.baseUnit === "kg" ? "kg" : pkg.baseUnit === "l" ? "L" : "un",
+  };
+}
+
+function packageMetadata(item: ParsedItem) {
+  const saleUnit = String(item.unit ?? "").toUpperCase();
+  if (saleUnit === "KG") return { package_size: 1, unit: "kg" };
+  if (saleUnit === "L") return { package_size: 1, unit: "l" };
+  if (saleUnit === "G") return { package_size: 1, unit: "g" };
+  if (saleUnit === "ML") return { package_size: 1, unit: "ml" };
+
+  const pkg = inferPackage(item.name);
+  return pkg ? { package_size: pkg.quantity, unit: pkg.unit } : null;
+}
+
+function receiptItemSummary(item: ParsedItem) {
+  const quantity = decimalValue(item.quantity);
+  const unitPrice = decimalValue(item.unitPrice ?? item.price);
+  const total = decimalValue(item.totalPrice);
+  const normalized = normalizedReceiptPrice(item);
+  const unit = String(item.unit ?? "").toUpperCase();
+
+  const parts: string[] = [];
+  if (quantity && unit && unitPrice) {
+    parts.push(
+      `${quantity.toLocaleString("pt-BR", { maximumFractionDigits: 4 })} ${unit.toLowerCase()} × ${brl(unitPrice)}`,
+    );
+  }
+  if (total) parts.push(`total ${brl(total)}`);
+  if (normalized) parts.push(`${brl(normalized.value)}/${normalized.unit}`);
+
+  return [...new Set(parts)].join(" · ");
+}
+
 export default function ReceiptImportPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -113,7 +182,14 @@ export default function ReceiptImportPage() {
 
     const parsed = Array.isArray(data?.items)
       ? data.items
-          .map((item: any) => ({ name: String(item?.name ?? "").trim(), price: String(item?.price ?? "") }))
+          .map((item: any) => ({
+            name: String(item?.name ?? "").trim(),
+            price: String(item?.price ?? ""),
+            quantity: item?.quantity ? String(item.quantity) : undefined,
+            unit: item?.unit ? String(item.unit) : undefined,
+            unitPrice: item?.unitPrice ? String(item.unitPrice) : undefined,
+            totalPrice: item?.totalPrice ? String(item.totalPrice) : undefined,
+          }))
           .filter((item: ParsedItem) => item.name && Number(item.price.replace(",", ".")) > 0)
       : [];
 
@@ -196,12 +272,13 @@ export default function ReceiptImportPage() {
       const date = receiptDate || new Date().toISOString().slice(0, 10);
       for (const item of items) {
         const name = item.name.trim();
-        const price = Number(item.price.replace(",", "."));
-        if (!name || !Number.isFinite(price) || price <= 0) continue;
+        const price = decimalValue(item.unitPrice ?? item.price);
+        if (!name || !price) continue;
 
+        const metadata = packageMetadata(item);
         const { data: found, error: findError } = await supabase
           .from("products")
-          .select("id")
+          .select("id,package_size,unit")
           .eq("user_id", user.id)
           .ilike("name", name)
           .limit(1);
@@ -211,12 +288,39 @@ export default function ReceiptImportPage() {
         if (!productId) {
           const { data: created, error: createError } = await supabase
             .from("products")
-            .insert({ name, category: "Geral", user_id: user.id })
+            .insert({
+              name,
+              category: "Geral",
+              user_id: user.id,
+              ...(metadata ?? {}),
+            })
             .select("id")
             .single();
           if (createError) throw createError;
           productId = created.id;
+        } else if (
+          metadata &&
+          (!found?.[0]?.package_size || !found?.[0]?.unit)
+        ) {
+          const { error: metadataError } = await supabase
+            .from("products")
+            .update(metadata)
+            .eq("id", productId)
+            .eq("user_id", user.id);
+          if (metadataError) throw metadataError;
         }
+
+        const quantity = decimalValue(item.quantity);
+        const total = decimalValue(item.totalPrice);
+        const unit = String(item.unit ?? "").toUpperCase();
+        const details = [
+          source === "qr"
+            ? "Importado via QR Code NFC-e"
+            : "Importado via chave NFC-e",
+          quantity && unit ? `quantidade ${quantity} ${unit}` : null,
+          unit ? `preço unitário ${price.toFixed(2)}/${unit}` : null,
+          total ? `total do item ${total.toFixed(2)}` : null,
+        ].filter(Boolean).join(" | ");
 
         const { error: priceError } = await supabase.from("prices").insert({
           product_id: productId,
@@ -224,7 +328,7 @@ export default function ReceiptImportPage() {
           price,
           date,
           user_id: user.id,
-          receipt_text: source === "qr" ? "Importado via QR Code NFC-e" : "Importado via chave NFC-e",
+          receipt_text: details,
         });
         if (priceError) throw priceError;
       }
@@ -348,13 +452,29 @@ export default function ReceiptImportPage() {
               <div><label className="mb-1 block text-xs font-medium text-muted-foreground">Data da compra</label><Input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} /></div>
             </div>
             <div className="space-y-2">
-              {items.map((item, index) => (
-                <div key={`${item.name}-${index}`} className="flex gap-2 rounded-lg border p-2">
-                  <Input value={item.name} onChange={(e) => updateItem(index, "name", e.target.value)} className="flex-1" />
-                  <Input value={item.price} onChange={(e) => updateItem(index, "price", e.target.value)} className="w-24" inputMode="decimal" />
-                  <Button variant="ghost" size="icon" onClick={() => setItems((current) => current.filter((_, i) => i !== index))}><Trash2 className="h-4 w-4 text-destructive" /></Button>
-                </div>
-              ))}
+              {items.map((item, index) => {
+                const summary = receiptItemSummary(item);
+                return (
+                  <div key={`${item.name}-${index}`} className="rounded-lg border p-2">
+                    <div className="flex gap-2">
+                      <Input value={item.name} onChange={(e) => updateItem(index, "name", e.target.value)} className="flex-1" />
+                      <Input
+                        value={item.price}
+                        onChange={(e) => updateItem(index, "price", e.target.value)}
+                        className="w-24"
+                        inputMode="decimal"
+                        aria-label="Preço unitário"
+                      />
+                      <Button variant="ghost" size="icon" onClick={() => setItems((current) => current.filter((_, i) => i !== index))}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                    </div>
+                    {summary && (
+                      <p className="mt-1.5 px-1 text-[11px] font-medium text-muted-foreground">
+                        {summary}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
             <Button className="w-full" onClick={() => void saveAll()} disabled={saving}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
