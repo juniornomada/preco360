@@ -63,6 +63,14 @@ type FlyerItemRow = {
   offer_notes?: string[] | null;
 };
 
+type SearchOfferItemRow = FlyerItemRow & {
+  normalized_name?: string | null;
+  retailer: string;
+  valid_from: string | null;
+  valid_to: string | null;
+  is_active: boolean;
+};
+
 type AliasRow = {
   product_id: string;
   normalized_alias: string;
@@ -727,24 +735,16 @@ export default function OffersPage() {
         .from("flyers")
         .select("id,retailer,title,valid_from,valid_to")
         .eq("user_id", user!.id)
-        .order("created_at", { ascending: false });
+        .lte("valid_from", today)
+        .gte("valid_to", today)
+        .order("retailer");
 
       if (error) throw error;
       return (data ?? []) as FlyerRow[];
     },
   });
 
-  const activeFlyers = useMemo(
-    () =>
-      flyers.filter(
-        (flyer) =>
-          !!flyer.valid_from &&
-          !!flyer.valid_to &&
-          flyer.valid_from <= today &&
-          flyer.valid_to >= today,
-      ),
-    [flyers, today],
-  );
+  const activeFlyers = flyers;
 
   const activeFlyerIds = useMemo(
     () => activeFlyers.map((flyer) => flyer.id),
@@ -769,77 +769,95 @@ export default function OffersPage() {
   });
 
   const {
-    data: searchData,
-    isLoading: loadingSearchData,
-    error: searchDataError,
+    data: productContext,
+    isLoading: loadingProductContext,
+    error: productContextError,
   } = useQuery({
-    queryKey: ["live-market-offers-search-base", user?.id, today],
+    queryKey: ["live-market-product-context", user?.id],
     enabled: !!user,
-    staleTime: 15 * 60 * 1000,
-    gcTime: 30 * 60 * 1000,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
     refetchOnWindowFocus: false,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const [
-        { data: items, error: itemsError },
         { data: products, error: productsError },
         { data: aliases, error: aliasesError },
       ] = await Promise.all([
-        db
-          .from("flyer_items")
-          .select(
-            "id,flyer_id,product_id,raw_name,brand,package_quantity,package_unit,advertised_price,normalized_price,base_unit,club_price,club_advertised_price,source_page,image_url,offer_notes",
-          )
-          .eq("user_id", user!.id)
-          .order("created_at", { ascending: false })
-          .limit(5000),
         db
           .from("products")
           .select(
             "id,name,category,brand,package_size,unit,image_url,image_source,prices(price,date,supermarket)",
           )
           .eq("user_id", user!.id)
-          .order("name"),
+          .order("name")
+          .abortSignal(signal),
         db
           .from("product_aliases")
           .select("product_id,normalized_alias,retailer")
-          .eq("user_id", user!.id),
+          .eq("user_id", user!.id)
+          .abortSignal(signal),
       ]);
 
-      if (itemsError) throw itemsError;
       if (productsError) throw productsError;
       if (aliasesError) throw aliasesError;
 
       return {
-        items: (items ?? []) as FlyerItemRow[],
         products: (products ?? []) as ProductForMatch[],
         aliases: (aliases ?? []) as AliasRow[],
       };
     },
   });
 
-  const isLoading = loadingFlyers || (hasSearch && loadingSearchData);
-  const error = flyersError || searchDataError;
+  const searchRequest = useMemo(
+    () => searchTokens(normalizedSearch).join(" "),
+    [normalizedSearch],
+  );
+
+  const {
+    data: searchRows = [],
+    isLoading: loadingSearchRows,
+    isFetching: fetchingSearchRows,
+    error: searchRowsError,
+  } = useQuery<SearchOfferItemRow[]>({
+    queryKey: ["live-market-offer-search-v1", user?.id, today, searchRequest],
+    enabled: !!user && hasSearch && searchRequest.length >= 2,
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: 1,
+    queryFn: async ({ signal }) => {
+      const { data, error } = await db
+        .rpc("search_offer_items_v1", {
+          p_query: searchRequest,
+          p_on_date: today,
+          p_active_limit: 120,
+          p_history_limit: 180,
+        })
+        .abortSignal(signal);
+
+      if (error) throw error;
+      return (data ?? []) as SearchOfferItemRow[];
+    },
+  });
+
+  const isLoading =
+    loadingFlyers ||
+    (hasSearch && (loadingProductContext || loadingSearchRows));
+  const error = flyersError || productContextError || searchRowsError;
 
   const preparedOffers = useMemo(() => {
-    if (!hasSearch || !searchData) return [];
+    if (!hasSearch || !productContext || !searchRows.length) return [];
 
-    const flyerById = new Map(flyers.map((flyer) => [flyer.id, flyer]));
-    const activeIds = new Set(activeFlyerIds);
-    const historicalIds = new Set(
-      flyers
-        .filter((flyer) => !!flyer.valid_to && flyer.valid_to < today)
-        .map((flyer) => flyer.id),
-    );
     const productMap = new Map(
-      searchData.products.map((product) => [product.id, product]),
+      productContext.products.map((product) => [product.id, product]),
     );
-    const paidProducts = searchData.products.filter(
+    const paidProducts = productContext.products.filter(
       (product) => (product.prices ?? []).length > 0,
     );
 
-    const historicalItems = searchData.items.filter((item) =>
-      historicalIds.has(item.flyer_id),
-    );
+    const historicalItems = searchRows.filter((item) => !item.is_active);
+    const activeItems = searchRows.filter((item) => item.is_active);
+
     const historyByProduct = new Map<string, FlyerItemRow[]>();
     for (const previous of historicalItems) {
       if (!previous.product_id) continue;
@@ -848,19 +866,23 @@ export default function OffersPage() {
       historyByProduct.set(previous.product_id, rows);
     }
 
-    return searchData.items
-      .filter((item) => activeIds.has(item.flyer_id))
+    return activeItems
       .map((item) => {
-        const flyer = flyerById.get(item.flyer_id);
+        const flyer: FlyerRow = {
+          id: item.flyer_id,
+          retailer: item.retailer,
+          valid_from: item.valid_from,
+          valid_to: item.valid_to,
+        };
         const candidate = candidateFromItem(item);
 
         let productId = item.product_id;
         if (!productId) {
           productId = matchFlyerItem(
             candidate,
-            searchData.products,
-            searchData.aliases,
-            flyer?.retailer,
+            productContext.products,
+            productContext.aliases,
+            item.retailer,
           ).productId;
         }
         const product = productId ? productMap.get(productId) ?? null : null;
@@ -917,7 +939,7 @@ export default function OffersPage() {
         }
         return a.candidate.price - b.candidate.price;
       });
-  }, [hasSearch, searchData, flyers, activeFlyerIds, today]);
+  }, [hasSearch, productContext, searchRows]);
 
   const analyzed = useMemo(() => {
     if (!hasSearch || !preparedOffers.length) return [];
@@ -1082,7 +1104,7 @@ export default function OffersPage() {
             }
             searchTimerRef.current = window.setTimeout(() => {
               setSearch(value);
-            }, 90);
+            }, 140);
           }}
           autoFocus
         />
