@@ -9,7 +9,6 @@ import {
   Search,
   ShoppingBasket,
   Sparkles,
-  Store,
   Split,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -672,11 +671,6 @@ export default function MarketBasketPage() {
 
   const bestSingle = comparison.bestSingle;
   const split = comparison.split;
-  const exactSavings =
-    bestSingle?.complete && split
-      ? Math.max(0, bestSingle.total - split.total)
-      : null;
-
   const rankedMarkets = useMemo(
     () =>
       [...comparison.markets].sort(
@@ -758,229 +752,166 @@ export default function MarketBasketPage() {
         </Card>
       )}
 
-      {selectedGroups.length > 0 && bestSingle && (
+      {selectedGroups.length > 0 && split && split.rows.length > 0 && (
         <div className="mb-4 space-y-3">
-          <Card className="border-primary/35 bg-primary/5">
-            <CardContent className="p-5">
-              <div className="flex items-start gap-3">
-                <div className="rounded-xl bg-primary/15 p-2.5 text-primary">
-                  <Store className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {bestSingle.complete ? "Melhor mercado para a cesta completa" : "Maior cobertura em um único mercado"}
-                  </p>
-                  <h2 className="mt-1 text-xl font-extrabold">{bestSingle.retailer}</h2>
-                  <p className="mt-1 text-sm">
-                    {bestSingle.covered}/{selectedGroups.length} itens da sua lista em promoção
-                    {bestSingle.complete ? " · total " + brl(bestSingle.total) : ""}
-                  </p>
-                  {!bestSingle.complete && (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {bestSingle.missing} item(ns) não aparecem no tabloide vigente deste mercado.
-                      O Radar não inventa preço para completar a cesta.
-                    </p>
-                  )}
-                  {exactSavings !== null && exactSavings > 0 && (
-                    <p className="mt-2 text-xs font-medium text-muted-foreground">
-                      Dividir a compra entre os mercados mais baratos economizaria {brl(exactSavings)},
-                      mas exigiria {split?.markets.length ?? 0} mercado(s).
-                    </p>
-                  )}
-
-                  {bestSingle.rows?.length > 0 && (
-                    <div className="mt-3 rounded-lg border border-primary/15 bg-background/70 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                          O que comprar aqui
-                        </p>
-                        <span className="text-[10px] text-muted-foreground">
-                          {bestSingle.rows.length} item(ns)
-                        </span>
-                      </div>
-                      <div className="mt-2 divide-y divide-border/60">
-                        {bestSingle.rows.map((row: any) => (
-                          <div
-                            key={"best-" + row.key}
-                            className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0"
-                          >
-                            <p className="min-w-0 flex-1 text-[13px] font-medium leading-[1.4] text-foreground/90">
-                              {row.offer.raw_name}
-                            </p>
-                            <div className="shrink-0 text-right">
-                              <p className="flex items-baseline justify-end gap-1.5 whitespace-nowrap text-[13px] font-bold text-foreground">
-                                {validClubPrice(row.offer) &&
-                                  requiresAppActivation(
-                                    row.offer.retailer,
-                                    row.offer.offer_notes,
-                                  ) && (
-                                    <span className="text-[8px] font-bold uppercase text-amber-500">
-                                      ativar desconto APP
-                                    </span>
-                                  )}
-                                <span>{brl(effectiveAdvertisedPrice(row.offer))}</span>
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {rankedMarkets.length > 1 && (
-                    <div className="mt-3 rounded-lg border border-primary/15 bg-background/70 p-2.5">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                          Quanto custa em cada supermercado
-                        </p>
-                        <span className="text-[10px] text-muted-foreground">
-                          preços do tabloide
-                        </span>
-                      </div>
-                      <div className="mt-1.5 divide-y divide-border/60">
-                        {rankedMarkets.map((market) => {
-                          const completeDifference =
-                            bestSingle.complete && market.complete
-                              ? Math.max(0, market.total - bestSingle.total)
-                              : null;
-                          const completeDifferencePct =
-                            completeDifference !== null && bestSingle.total > 0
-                              ? (completeDifference / bestSingle.total) * 100
-                              : null;
-
-                          return (
-                            <div
-                              key={"quick-" + market.retailer}
-                              className="flex items-center justify-between gap-3 py-1.5 text-xs"
-                            >
-                              <div className="min-w-0">
-                                <p className={
-                                  "truncate font-semibold " +
-                                  (market.retailer === bestSingle.retailer ? "text-primary" : "")
-                                }>
-                                  {market.retailer}
-                                </p>
-                                <p className="text-[10px] text-muted-foreground">
-                                  {market.covered}/{selectedGroups.length} itens com preço vigente
-                                </p>
-                              </div>
-                              <div className="shrink-0 text-right">
-                                <p
-                                  className={
-                                    "font-bold " +
-                                    (market.retailer === bestSingle.retailer
-                                      ? "text-primary"
-                                      : "text-foreground")
-                                  }
-                                >
-                                  {market.complete ? "Total: " : "Parcial: "}
-                                  {brl(market.total)}
-                                </p>
-                                {market.complete ? (
-                                  completeDifference !== null && completeDifference > 0 ? (
-                                    <p className="text-[10px] text-muted-foreground">
-                                      +{brl(completeDifference)}
-                                      {completeDifferencePct !== null
-                                        ? " · +" + completeDifferencePct.toFixed(1).replace(".", ",") + "%"
-                                        : ""}
-                                    </p>
-                                  ) : (
-                                    <p className="text-[10px] font-medium text-primary">
-                                      cesta completa
-                                    </p>
-                                  )
-) : null}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
-                        “Parcial” soma apenas os itens com preço vigente naquele mercado. Não representa o custo da cesta completa.
-                        Se a diferença for pequena, distância, combustível e tempo podem tornar outro mercado mais conveniente.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {split && split.markets.length > 1 && (
-            <details className="rounded-xl border border-primary/25 bg-card">
-              <summary className="flex cursor-pointer list-none items-center gap-3 p-4">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Split className="h-4 w-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="font-bold leading-tight">
-                    Cesta completa pelo menor preço
-                  </p>
-                  <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-                    Cada item é comprado no supermercado onde está mais barato · {split.markets.length} mercados
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
-                    Total
-                  </p>
-                  <p className="text-lg font-extrabold leading-none text-primary">
-                    {brl(split.total)}
-                  </p>
-                </div>
-              </summary>
-              <div className="space-y-2 border-t p-3">
-                <p className="rounded-lg bg-primary/5 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-                  Este é o custo da <span className="font-semibold text-foreground">cesta inteira</span>.
-                  Já os valores “Parcial” acima somam somente os itens encontrados no tabloide de cada supermercado.
+          <details className="rounded-xl border border-primary/25 bg-card">
+            <summary className="flex cursor-pointer list-none items-center gap-3 p-4">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Split className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="font-bold leading-tight">
+                  Cesta completa pelo menor preço
                 </p>
-                {split.rows.map((row) => (
-                  <div key={row.key} className="flex items-start justify-between gap-3 rounded-lg bg-muted/40 p-3">
-                    <div className="min-w-0">
-                      <p className="font-medium">
-                        {row.quantity}× {row.label}
-                        <span className="ml-1 text-xs font-normal text-muted-foreground">
-                          ({row.quantity} pacote{row.quantity > 1 ? "s" : ""})
-                        </span>
-                      </p>
-                      {row.offer.raw_name !== row.label && (
-                        <p className="mt-0.5 text-xs font-medium text-primary">
-                          Comprar: {compactOfferName(row.label, row.offer.raw_name)}
-                        </p>
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        {row.offer.retailer} · válido até {dateBr(row.offer.validTo)}
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p className="font-bold">{brl(row.subtotal)}</p>
-                      {normalizedPriceLabel(row.offer) ? (
-                        <>
-                          <p className="text-[11px] text-muted-foreground">
-                            equivalente · {normalizedPriceLabel(row.offer)}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {validClubPrice(row.offer)
-                              ? "clube " +
-                                brl(effectiveAdvertisedPrice(row.offer)) +
-                                (requiresAppActivation(
-                                  row.offer.retailer,
-                                  row.offer.offer_notes,
-                                )
-                                  ? " · ativar desconto APP"
-                                  : "") +
-                                " · normal " +
-                                brl(Number(row.offer.advertised_price))
-                              : "embalagem " +
-                                brl(Number(row.offer.advertised_price))}
-                          </p>
-                        </>
-                      ) : null}
-                    </div>
-                  </div>
-                ))}
+                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                  Cada item é comprado no supermercado onde está mais barato · {split.markets.length} mercado{split.markets.length === 1 ? "" : "s"}
+                </p>
               </div>
-            </details>
+              <div className="shrink-0 text-right">
+                <p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+                  Total
+                </p>
+                <p className="text-lg font-extrabold leading-none text-primary">
+                  {brl(split.total)}
+                </p>
+              </div>
+            </summary>
+            <div className="space-y-2 border-t p-3">
+              <p className="rounded-lg bg-primary/5 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                Este é o custo da <span className="font-semibold text-foreground">cesta inteira</span>.
+                Os valores “Parcial” abaixo somam somente os itens encontrados no tabloide de cada supermercado.
+              </p>
+              {split.rows.map((row) => (
+                <div key={row.key} className="flex items-start justify-between gap-3 rounded-lg bg-muted/40 p-3">
+                  <div className="min-w-0">
+                    <p className="font-medium">
+                      {row.quantity}× {row.label}
+                      <span className="ml-1 text-xs font-normal text-muted-foreground">
+                        ({row.quantity} pacote{row.quantity > 1 ? "s" : ""})
+                      </span>
+                    </p>
+                    {row.offer.raw_name !== row.label && (
+                      <p className="mt-0.5 text-xs font-medium text-primary">
+                        Comprar: {compactOfferName(row.label, row.offer.raw_name)}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      {row.offer.retailer} · válido até {dateBr(row.offer.validTo)}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="font-bold">{brl(row.subtotal)}</p>
+                    {normalizedPriceLabel(row.offer) ? (
+                      <>
+                        <p className="text-[11px] text-muted-foreground">
+                          equivalente · {normalizedPriceLabel(row.offer)}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {validClubPrice(row.offer)
+                            ? "clube " +
+                              brl(effectiveAdvertisedPrice(row.offer)) +
+                              (requiresAppActivation(
+                                row.offer.retailer,
+                                row.offer.offer_notes,
+                              )
+                                ? " · ativar desconto APP"
+                                : "") +
+                              " · normal " +
+                              brl(Number(row.offer.advertised_price))
+                            : "embalagem " +
+                              brl(Number(row.offer.advertised_price))}
+                        </p>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
+
+          {bestSingle && rankedMarkets.length > 0 && (
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                    Quanto custa em cada supermercado
+                  </p>
+                  <span className="text-[10px] text-muted-foreground">
+                    preços do tabloide
+                  </span>
+                </div>
+                <div className="mt-2 divide-y divide-border/60">
+                  {rankedMarkets.map((market) => {
+                    const completeDifference =
+                      bestSingle.complete && market.complete
+                        ? Math.max(0, market.total - bestSingle.total)
+                        : null;
+                    const completeDifferencePct =
+                      completeDifference !== null && bestSingle.total > 0
+                        ? (completeDifference / bestSingle.total) * 100
+                        : null;
+
+                    return (
+                      <div
+                        key={"quick-" + market.retailer}
+                        className="flex items-center justify-between gap-3 py-2 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <p
+                            className={
+                              "truncate font-semibold " +
+                              (market.retailer === bestSingle.retailer
+                                ? "text-primary"
+                                : "text-foreground")
+                            }
+                          >
+                            {market.retailer}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {market.covered}/{selectedGroups.length} itens com preço vigente
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p
+                            className={
+                              "font-bold " +
+                              (market.retailer === bestSingle.retailer
+                                ? "text-primary"
+                                : "text-foreground")
+                            }
+                          >
+                            {market.complete ? "Total: " : "Parcial: "}
+                            {brl(market.total)}
+                          </p>
+                          {market.complete ? (
+                            completeDifference !== null && completeDifference > 0 ? (
+                              <p className="text-[10px] text-muted-foreground">
+                                +{brl(completeDifference)}
+                                {completeDifferencePct !== null
+                                  ? " · +" +
+                                    completeDifferencePct
+                                      .toFixed(1)
+                                      .replace(".", ",") +
+                                    "%"
+                                  : ""}
+                              </p>
+                            ) : (
+                              <p className="text-[10px] font-medium text-primary">
+                                cesta completa
+                              </p>
+                            )
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                  “Parcial” soma apenas os itens com preço vigente naquele mercado. Não representa o custo da cesta completa.
+                  Se a diferença for pequena, distância, combustível e tempo podem tornar outro mercado mais conveniente.
+                </p>
+              </CardContent>
+            </Card>
           )}
         </div>
       )}
