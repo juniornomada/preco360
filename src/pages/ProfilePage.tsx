@@ -2,6 +2,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
 import { supabase } from "@/integrations/supabase/client";
+
+const db = supabase as any;
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DollarSign, Laptop, LogOut, Moon, Package, Store, Sun } from "lucide-react";
@@ -11,22 +13,15 @@ export default function ProfilePage() {
   const { theme, setTheme } = useTheme();
 
   const { data: stats } = useQuery({
-    queryKey: ["stats", user?.id],
+    queryKey: ["profile-stats-v1", user?.id],
     queryFn: async () => {
-      const { count: productCount } = await supabase
-        .from("products")
-        .select("*", { count: "exact", head: true });
-      const { count: priceCount } = await supabase
-        .from("prices")
-        .select("*", { count: "exact", head: true });
-      const { data: supermarkets } = await supabase
-        .from("prices")
-        .select("supermarket");
-      const uniqueSupermarkets = new Set(supermarkets?.map((s) => s.supermarket));
+      const { data, error } = await db.rpc("profile_stats_v1");
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
       return {
-        products: productCount ?? 0,
-        prices: priceCount ?? 0,
-        supermarkets: uniqueSupermarkets.size,
+        products: Number(row?.product_count ?? 0),
+        prices: Number(row?.price_count ?? 0),
+        supermarkets: Number(row?.supermarket_count ?? 0),
       };
     },
     enabled: !!user,
