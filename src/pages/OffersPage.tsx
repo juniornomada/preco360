@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import {
   evaluateFlyerOffer,
+  findComparableProducts,
   findComparablePurchaseProducts,
   formatNormalizedPrice,
   inferPackage,
@@ -75,6 +76,13 @@ type AliasRow = {
   product_id: string;
   normalized_alias: string;
   retailer?: string | null;
+};
+
+type PurchasePriceRow = {
+  product_id: string;
+  price: number | string;
+  date?: string | null;
+  supermarket?: string | null;
 };
 
 const verdictOrder = {
@@ -786,7 +794,7 @@ export default function OffersPage() {
         db
           .from("products")
           .select(
-            "id,name,category,brand,package_size,unit,image_url,image_source,prices(price,date,supermarket)",
+            "id,name,category,brand,package_size,unit,image_url,image_source",
           )
           .eq("user_id", user!.id)
           .order("name")
@@ -816,7 +824,6 @@ export default function OffersPage() {
   const {
     data: searchRows = [],
     isLoading: loadingSearchRows,
-    isFetching: fetchingSearchRows,
     error: searchRowsError,
   } = useQuery<SearchOfferItemRow[]>({
     queryKey: ["live-market-offer-search-v1", user?.id, today, searchRequest],
@@ -845,14 +852,11 @@ export default function OffersPage() {
     (hasSearch && (loadingProductContext || loadingSearchRows));
   const error = flyersError || productContextError || searchRowsError;
 
-  const preparedOffers = useMemo(() => {
+  const baseOffers = useMemo(() => {
     if (!hasSearch || !productContext || !searchRows.length) return [];
 
     const productMap = new Map(
       productContext.products.map((product) => [product.id, product]),
-    );
-    const paidProducts = productContext.products.filter(
-      (product) => (product.prices ?? []).length > 0,
     );
 
     const historicalItems = searchRows.filter((item) => !item.is_active);
@@ -866,63 +870,140 @@ export default function OffersPage() {
       historyByProduct.set(previous.product_id, rows);
     }
 
-    return activeItems
-      .map((item) => {
-        const flyer: FlyerRow = {
-          id: item.flyer_id,
-          retailer: item.retailer,
-          valid_from: item.valid_from,
-          valid_to: item.valid_to,
-        };
-        const candidate = candidateFromItem(item);
+    return activeItems.map((item) => {
+      const flyer: FlyerRow = {
+        id: item.flyer_id,
+        retailer: item.retailer,
+        valid_from: item.valid_from,
+        valid_to: item.valid_to,
+      };
+      const candidate = candidateFromItem(item);
 
-        let productId = item.product_id;
-        if (!productId) {
-          productId = matchFlyerItem(
-            candidate,
-            productContext.products,
-            productContext.aliases,
-            item.retailer,
-          ).productId;
-        }
-        const product = productId ? productMap.get(productId) ?? null : null;
+      let productId = item.product_id;
+      if (!productId) {
+        productId = matchFlyerItem(
+          candidate,
+          productContext.products,
+          productContext.aliases,
+          item.retailer,
+        ).productId;
+      }
+      const product = productId ? productMap.get(productId) ?? null : null;
 
-        const linkedHistory = productId
-          ? historyByProduct.get(productId) ?? []
-          : [];
+      const linkedHistory = productId
+        ? historyByProduct.get(productId) ?? []
+        : [];
 
-        const previousAdvertised = linkedHistory.length
-          ? linkedHistory
-          : historicalItems.filter((previous) =>
-              comparableOfferIdentity(item, previous),
-            );
+      const previousAdvertised = linkedHistory.length
+        ? linkedHistory
+        : historicalItems.filter((previous) =>
+            comparableOfferIdentity(item, previous),
+          );
+
+      const searchText = `${item.raw_name} ${item.brand ?? ""} ${product?.name ?? ""} ${product?.brand ?? ""} ${product?.category ?? ""}`;
+
+      return {
+        item,
+        flyer,
+        product,
+        productId,
+        candidate,
+        previousAdvertised,
+        family: inferOfferFamily(item, product),
+        searchText,
+        searchTokens: searchTokens(searchText),
+        normalizedItemBrand: normalizeSearchText(item.brand ?? "").trim(),
+        normalizedProductBrand: normalizeSearchText(product?.brand ?? "").trim(),
+        normalizedRawName: normalizeSearchText(item.raw_name),
+        normalizedProductName: normalizeSearchText(product?.name ?? ""),
+      };
+    });
+  }, [hasSearch, productContext, searchRows]);
+
+  const relevantProductIds = useMemo(() => {
+    if (!productContext || !baseOffers.length) return [];
+
+    const ids = new Set<string>();
+    for (const entry of baseOffers) {
+      if (entry.productId) ids.add(entry.productId);
+      for (const product of findComparableProducts(
+        entry.candidate,
+        productContext.products,
+      )) {
+        ids.add(product.id);
+      }
+    }
+
+    return [...ids].sort();
+  }, [baseOffers, productContext]);
+
+  const relevantProductIdsKey = relevantProductIds.join(",");
+
+  const { data: purchasePrices = [] } = useQuery<PurchasePriceRow[]>({
+    queryKey: [
+      "live-market-purchase-history-v1",
+      user?.id,
+      relevantProductIdsKey,
+    ],
+    enabled: !!user && relevantProductIds.length > 0,
+    staleTime: 15 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: 1,
+    queryFn: async ({ signal }) => {
+      const { data, error } = await db
+        .rpc("get_product_price_history_v1", {
+          p_product_ids: relevantProductIds,
+          p_per_product_limit: 24,
+        })
+        .abortSignal(signal);
+
+      if (error) throw error;
+      return (data ?? []) as PurchasePriceRow[];
+    },
+  });
+
+  const preparedOffers = useMemo(() => {
+    if (!productContext || !baseOffers.length) return [];
+
+    const pricesByProduct = new Map<string, PurchasePriceRow[]>();
+    for (const row of purchasePrices) {
+      const rows = pricesByProduct.get(row.product_id) ?? [];
+      rows.push(row);
+      pricesByProduct.set(row.product_id, rows);
+    }
+
+    const productsWithPrices = productContext.products.map((product) => ({
+      ...product,
+      prices: pricesByProduct.get(product.id) ?? [],
+    }));
+    const pricedProductMap = new Map(
+      productsWithPrices.map((product) => [product.id, product]),
+    );
+
+    return baseOffers
+      .map((entry) => {
+        const product = entry.productId
+          ? pricedProductMap.get(entry.productId) ?? entry.product
+          : entry.product;
 
         const comparablePurchaseProducts =
-          findComparablePurchaseProducts(candidate, paidProducts);
+          findComparablePurchaseProducts(
+            entry.candidate,
+            productsWithPrices,
+          );
 
         const verdict = evaluateFlyerOffer(
-          candidate,
+          entry.candidate,
           product,
-          previousAdvertised,
+          entry.previousAdvertised,
           comparablePurchaseProducts,
         );
 
-        const searchText = `${item.raw_name} ${item.brand ?? ""} ${product?.name ?? ""} ${product?.brand ?? ""} ${product?.category ?? ""}`;
-
         return {
-          item,
-          flyer,
+          ...entry,
           product,
-          productId,
-          candidate,
           verdict,
-          family: inferOfferFamily(item, product),
-          searchText,
-          searchTokens: searchTokens(searchText),
-          normalizedItemBrand: normalizeSearchText(item.brand ?? "").trim(),
-          normalizedProductBrand: normalizeSearchText(product?.brand ?? "").trim(),
-          normalizedRawName: normalizeSearchText(item.raw_name),
-          normalizedProductName: normalizeSearchText(product?.name ?? ""),
         };
       })
       .sort((a, b) => {
@@ -939,7 +1020,7 @@ export default function OffersPage() {
         }
         return a.candidate.price - b.candidate.price;
       });
-  }, [hasSearch, productContext, searchRows]);
+  }, [baseOffers, productContext, purchasePrices]);
 
   const analyzed = useMemo(() => {
     if (!hasSearch || !preparedOffers.length) return [];
