@@ -277,11 +277,12 @@ export default function FlyerPage() {
       const { data, error } = await db
         .from("products")
         .select("id,name,category,brand,package_size,unit,stockable,image_url,image_source,prices(price,date,supermarket)")
+        .eq("user_id", user!.id)
         .order("name");
       if (error) throw error;
       return data ?? [];
     },
-    enabled: !!user,
+    enabled: !!user && (view === "import" || !!selectedHistoryId || items.length > 0),
   });
 
   const { data: aliases = [] } = useQuery<any[]>({
@@ -289,11 +290,12 @@ export default function FlyerPage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("product_aliases")
-        .select("product_id,normalized_alias,retailer");
+        .select("product_id,normalized_alias,retailer")
+        .eq("user_id", user!.id);
       if (error) throw error;
       return data ?? [];
     },
-    enabled: !!user,
+    enabled: !!user && view === "import",
   });
 
   const { data: previousOffers = [] } = useQuery<any[]>({
@@ -302,13 +304,14 @@ export default function FlyerPage() {
       const { data, error } = await db
         .from("flyer_items")
         .select("flyer_id,product_id,normalized_price,base_unit,advertised_price,created_at")
+        .eq("user_id", user!.id)
         .not("product_id", "is", null)
         .order("created_at", { ascending: false })
         .limit(1500);
       if (error) throw error;
       return data ?? [];
     },
-    enabled: !!user,
+    enabled: !!user && (items.length > 0 || !!selectedHistoryId),
   });
 
   const { data: flyerHistory = [] } = useQuery<any[]>({
@@ -317,12 +320,13 @@ export default function FlyerPage() {
       const { data, error } = await db
         .from("flyers")
         .select("id,retailer,title,valid_from,valid_to,source_file_name,source_file_path,created_at,flyer_items(count)")
+        .eq("user_id", user!.id)
         .order("created_at", { ascending: false })
         .limit(30);
       if (error) throw error;
       return data ?? [];
     },
-    enabled: !!user,
+    enabled: !!user && view === "history",
   });
 
   const { data: selectedHistoryItems = [], isLoading: historyItemsLoading } = useQuery<any[]>({
@@ -331,6 +335,7 @@ export default function FlyerPage() {
       const { data, error } = await db
         .from("flyer_items")
         .select("id,product_id,raw_name,brand,package_quantity,package_unit,advertised_price,normalized_price,base_unit,club_advertised_price,excluded_types,included_types,purchase_limit,store_restrictions,offer_notes,source_page,image_url,image_source,image_confidence,image_match_status")
+        .eq("user_id", user!.id)
         .eq("flyer_id", selectedHistoryId)
         .order("source_page", { ascending: true })
         .order("raw_name", { ascending: true });
@@ -366,7 +371,7 @@ export default function FlyerPage() {
   });
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || view !== "import") return;
 
     let cancelled = false;
     const recoverImport = async () => {
@@ -443,7 +448,7 @@ export default function FlyerPage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [user?.id, view]);
 
   const productMap = useMemo(
     () => new Map(products.map((product) => [product.id, product])),
