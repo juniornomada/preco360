@@ -779,7 +779,11 @@ export default function MarketBasketPage() {
 
   const normalizedManualSearch = fallbackKey(search);
   const exactVisibleGroup = visibleGroups.some(
-    (group) => fallbackKey(group.label) === normalizedManualSearch,
+    (group) =>
+      fallbackKey(group.label) === normalizedManualSearch ||
+      (group.aliases ?? []).some(
+        (alias) => fallbackKey(alias) === normalizedManualSearch,
+      ),
   );
   const manualAlreadySelected = Object.keys(selected).some((key) => {
     const label = manualBasketLabel(key);
