@@ -233,17 +233,19 @@ export default function ProductVisual({
   name,
   category,
   imageUrl,
+  compact = false,
 }: {
   name: string;
   category?: string | null;
   imageUrl?: string | null;
+  compact?: boolean;
 }) {
   const visual = productVisual(name, category);
   const useRuleIcon = forceProductVisual(name, category);
   const safeImageUrl = useRuleIcon ? null : imageUrl;
 
   return (
-    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-muted/50">
+    <div className={`flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-muted/50 ${compact ? "h-[52px] w-[52px] sm:h-14 sm:w-14" : "h-14 w-14"}`}>
       {safeImageUrl ? (
         <img
           src={safeImageUrl}
