@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import ProductVisual from "@/components/ProductVisual";
+import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
 import {
   BadgeCheck,
@@ -1173,7 +1174,7 @@ export default function OffersPage() {
                     />
 
                     <div className="min-w-0">
-                      <h2 className="text-[15px] font-bold leading-[1.22] sm:text-base sm:leading-snug">{displayTitle}</h2>
+                      <AdaptiveProductName text={displayTitle} className="font-bold" />
 
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-bold">
