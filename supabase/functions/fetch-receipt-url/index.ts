@@ -6,7 +6,14 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-type Item = { name: string; price: string };
+type Item = {
+  name: string;
+  price: string;
+  quantity?: string;
+  unit?: string;
+  unitPrice?: string;
+  totalPrice?: string;
+};
 type Diagnostics = {
   htmlLength?: number;
   lineCount?: number;
@@ -120,7 +127,7 @@ function dedupe(items: Item[]) {
     const key = `${name.toLowerCase()}|${price}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ name, price });
+    out.push({ ...raw, name, price });
   }
   return out.slice(0, 300);
 }
@@ -141,6 +148,61 @@ function totalPriceFromText(text: string) {
   return money(
     text.match(/(?:Vl\.?\s*Total|Valor\s*Total|V\.\s*Total)\s*:?\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i)?.[1],
   );
+}
+
+function numberValue(raw?: string | null) {
+  if (!raw) return null;
+  const normalized = raw.trim().replace(/\./g, "").replace(",", ".");
+  const value = Number(normalized.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function normalizeUnit(raw?: string | null) {
+  const unit = String(raw ?? "").trim().toUpperCase();
+  if (!unit) return undefined;
+  if (unit === "UND" || unit === "UNID") return "UN";
+  if (unit === "LT") return "L";
+  return unit;
+}
+
+function itemDetailsFromText(text: string) {
+  const multiplied = text.match(
+    /\b(\d{1,6}(?:[.,]\d{1,4})?)\s*(KG|G|UN|UND|UNID|L|LT|ML|CX|PCT|PC)\s*(?:X|×)\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i,
+  );
+
+  const quantityRaw =
+    text.match(/(?:Qtde\.?|Qtd\.?|Quantidade)\s*:?\s*(\d{1,6}(?:[.,]\d{1,4})?)/i)?.[1] ??
+    multiplied?.[1] ??
+    null;
+  const unitRaw =
+    text.match(/(?:\bUN\b|Unidade|Un\.)\s*:?\s*(KG|G|UN|UND|UNID|L|LT|ML|CX|PCT|PC)\b/i)?.[1] ??
+    multiplied?.[2] ??
+    null;
+
+  const quantity = numberValue(quantityRaw);
+  const unit = normalizeUnit(unitRaw);
+  const labeledUnitPrice = unitPriceFromText(text);
+  const totalPrice = totalPriceFromText(text);
+
+  let unitPrice = labeledUnitPrice;
+  if (!unitPrice && totalPrice && quantity) {
+    const derived = Number(totalPrice) / quantity;
+    if (Number.isFinite(derived) && derived > 0) unitPrice = derived.toFixed(2);
+  }
+
+  const finalTotal =
+    totalPrice ??
+    (unitPrice && quantity
+      ? (Number(unitPrice) * quantity).toFixed(2)
+      : null);
+
+  return {
+    quantity: quantity ? String(quantity) : undefined,
+    unit,
+    unitPrice: unitPrice ?? undefined,
+    totalPrice: finalTotal ?? undefined,
+    price: unitPrice ?? finalTotal ?? null,
+  };
 }
 
 // Parser principal para o layout exibido pela SEFAZ/SP: produto em uma linha,
@@ -174,10 +236,8 @@ function parseRenderedItems(lines: string[]): Item[] {
     }
 
     const block = lines.slice(i, end).join(" ");
-    const unit = unitPriceFromText(block);
-    const total = totalPriceFromText(block);
-    const price = unit ?? total;
-    if (price) items.push({ name, price });
+    const details = itemDetailsFromText(block);
+    if (details.price) items.push({ name, ...details, price: details.price });
   }
 
   return dedupe(items);
@@ -204,11 +264,19 @@ function parseNfceRows(markup: string): Item[] {
 
     const rowText = strip(row).replace(/\s+/g, " ");
     const unitHtml = spanByClass(row, "RvlUnit");
-    const unit = unitPriceFromText(rowText) ?? money(unitHtml ? strip(unitHtml) : null);
-    const total = totalPriceFromText(rowText);
-    const price = unit ?? total;
+    const details = itemDetailsFromText(rowText);
+    const htmlUnitPrice = money(unitHtml ? strip(unitHtml) : null);
+    const unitPrice = details.unitPrice ?? htmlUnitPrice ?? undefined;
+    const price = unitPrice ?? details.totalPrice ?? null;
 
-    if (price) items.push({ name, price });
+    if (price) {
+      items.push({
+        name,
+        ...details,
+        unitPrice,
+        price,
+      });
+    }
   }
   return dedupe(items);
 }
@@ -227,8 +295,8 @@ function parseTitleBlocks(markup: string): Item[] {
   hits.forEach((hit, index) => {
     const end = hits[index + 1]?.start ?? Math.min(markup.length, hit.end + 5000);
     const block = strip(markup.slice(hit.end, end)).replace(/\s+/g, " ");
-    const price = unitPriceFromText(block) ?? totalPriceFromText(block);
-    if (price) items.push({ name: hit.name, price });
+    const details = itemDetailsFromText(block);
+    if (details.price) items.push({ name: hit.name, ...details, price: details.price });
   });
 
   return dedupe(items);
