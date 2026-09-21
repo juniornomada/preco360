@@ -2,6 +2,26 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+
+const db = supabase as any;
+
+type ProductSummary = {
+  id: string;
+  name: string;
+  category: string | null;
+  price_count: number | string;
+  latest_price: number | string | null;
+  latest_date: string | null;
+  latest_supermarket: string | null;
+  best_price: number | string | null;
+};
+
+type PriceHistoryRow = {
+  product_id: string;
+  price: number | string;
+  date: string;
+  supermarket: string;
+};
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { analyzePrice, formatBRL } from "@/lib/priceAnalysis";
@@ -81,15 +101,14 @@ export default function SearchPage() {
   const [supermarket, setSupermarket] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const { data: products, isLoading } = useQuery({
-    queryKey: ["products-quote", user?.id],
+  const { data: products = [], isLoading } = useQuery<ProductSummary[]>({
+    queryKey: ["product-summaries", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("products")
-        .select("*, prices(*)")
-        .order("name");
+      const { data, error } = await db.rpc("product_summaries_v1");
       if (error) throw error;
-      return data;
+      return ((data ?? []) as ProductSummary[]).sort((a, b) =>
+        a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }),
+      );
     },
     enabled: !!user,
   });
@@ -100,18 +119,43 @@ export default function SearchPage() {
   }, [products, search]);
 
   const selected = useMemo(
-    () => products?.find((product) => product.id === selectedId) ?? null,
+    () => products.find((product) => product.id === selectedId) ?? null,
     [products, selectedId],
   );
 
-  const selectedLatest = useMemo(() => {
-    if (!selected?.prices?.length) return null;
-    return [...selected.prices].sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
-  }, [selected]);
+  const { data: selectedHistory = [] } = useQuery<PriceHistoryRow[]>({
+    queryKey: ["selected-price-history", user?.id, selectedId],
+    enabled: !!user && !!selectedId,
+    queryFn: async ({ signal }) => {
+      const { data, error } = await db
+        .rpc("get_product_price_history_v1", {
+          p_product_ids: [selectedId],
+          p_per_product_limit: 60,
+        })
+        .abortSignal(signal);
+      if (error) throw error;
+      return (data ?? []) as PriceHistoryRow[];
+    },
+  });
+
+  const selectedLatest =
+    selected?.latest_price !== null && selected?.latest_price !== undefined
+      ? {
+          price: Number(selected.latest_price),
+          date: selected.latest_date,
+          supermarket: selected.latest_supermarket ?? "",
+        }
+      : null;
 
   const numericPrice = Number(currentPrice.replace(",", "."));
   const analysis = selected && numericPrice > 0
-    ? analyzePrice(numericPrice, selected.prices ?? [])
+    ? analyzePrice(
+        numericPrice,
+        selectedHistory.map((row) => ({
+          ...row,
+          price: Number(row.price),
+        })),
+      )
     : null;
   const style = analysis ? verdictStyle[analysis.verdict] : null;
   const VerdictIcon = style?.Icon;
@@ -140,7 +184,8 @@ export default function SearchPage() {
         description: `${selected.name} por ${formatBRL(numericPrice)} em ${supermarket.trim()}.`,
       });
       setCurrentPrice("");
-      queryClient.invalidateQueries({ queryKey: ["products-quote"] });
+      queryClient.invalidateQueries({ queryKey: ["product-summaries", user.id] });
+      queryClient.invalidateQueries({ queryKey: ["selected-price-history", user.id, selected.id] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
       queryClient.invalidateQueries({ queryKey: ["product", selected.id] });
     } catch (error: any) {
@@ -167,7 +212,6 @@ export default function SearchPage() {
           className="h-11 pl-9"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          autoFocus
         />
       </div>
 
@@ -175,7 +219,7 @@ export default function SearchPage() {
         <div className="space-y-2">
           {isLoading && <p className="py-8 text-center text-sm text-muted-foreground">Carregando produtos...</p>}
 
-          {!isLoading && products?.length === 0 && (
+          {!isLoading && products.length === 0 && (
             <Card className="border-dashed">
               <CardContent className="p-5 text-center">
                 <p className="font-semibold">Você ainda não acompanha nenhum produto.</p>
@@ -188,8 +232,13 @@ export default function SearchPage() {
           )}
 
           {filtered.map((product) => {
-            const prices = [...(product.prices ?? [])].sort((a, b) => b.date.localeCompare(a.date));
-            const latest = prices[0];
+            const latest =
+              product.latest_price !== null && product.latest_price !== undefined
+                ? {
+                    price: Number(product.latest_price),
+                    date: product.latest_date,
+                  }
+                : null;
             return (
               <button
                 type="button"
@@ -202,7 +251,7 @@ export default function SearchPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-semibold">{product.name}</p>
-                  <p className="text-xs text-muted-foreground">{product.prices?.length ?? 0} preço(s) no histórico</p>
+                  <p className="text-xs text-muted-foreground">{Number(product.price_count ?? 0)} preço(s) no histórico</p>
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-bold">{latest ? formatBRL(latest.price) : "Sem preço"}</p>
@@ -213,7 +262,7 @@ export default function SearchPage() {
             );
           })}
 
-          {search && filtered.length === 0 && products && products.length > 0 && (
+          {search && filtered.length === 0 && products.length > 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">Nenhum produto encontrado para “{search}”.</p>
           )}
         </div>
