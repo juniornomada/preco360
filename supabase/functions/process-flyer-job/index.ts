@@ -1,20 +1,28 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import {
-  Density,
-  ImageMagick,
-  initializeImageMagick,
-  MagickFormat,
-  MagickReadSettings,
-} from "npm:@imagemagick/magick-wasm@0.0.43";
+type MagickModule = typeof import("npm:@imagemagick/magick-wasm@0.0.43");
+let magickModulePromise: Promise<MagickModule> | null = null;
 
-const magickWasmBytes = await Deno.readFile(
-  new URL(
-    "magick.wasm",
-    import.meta.resolve("npm:@imagemagick/magick-wasm@0.0.43"),
-  ),
-);
-await initializeImageMagick(magickWasmBytes);
+async function loadImageMagick(): Promise<MagickModule> {
+  if (!magickModulePromise) {
+    magickModulePromise = (async () => {
+      const magick = await import("npm:@imagemagick/magick-wasm@0.0.43");
+      const wasmBytes = await Deno.readFile(
+        new URL(
+          "magick.wasm",
+          import.meta.resolve("npm:@imagemagick/magick-wasm@0.0.43"),
+        ),
+      );
+      await magick.initializeImageMagick(wasmBytes);
+      return magick;
+    })().catch((error) => {
+      magickModulePromise = null;
+      throw error;
+    });
+  }
+
+  return magickModulePromise;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -876,6 +884,12 @@ async function downloadJobFile(job: JobRow, pageNo?: number) {
 
 async function renderPdfPages(pdfFile: File, pageNos: number[]) {
   const startedAt = performance.now();
+  const {
+    Density,
+    ImageMagick,
+    MagickFormat,
+    MagickReadSettings,
+  } = await loadImageMagick();
   const wanted = new Set(
     pageNos
       .map((value) => Math.max(1, Math.trunc(Number(value) || 1)))
