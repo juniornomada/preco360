@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import ProductVisual from "@/components/ProductVisual";
+import { BEEF_SEMANTIC_TOKENS, isBeefOfferText, isBroadBeefSearch } from "@/lib/beefSearch";
 import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
 import {
@@ -256,6 +257,7 @@ type OfferFamily =
   | "coffeeSoluble"
   | "coffeeCapsule"
   | "cake"
+  | "beef"
   | "other";
 
 type SearchFamilyIntent = OfferFamily | "milk" | "corn" | "coffee";
@@ -265,6 +267,8 @@ function hasAny(tokens: Set<string>, values: string[]) {
 }
 
 function queryOfferFamily(query: string): SearchFamilyIntent | null {
+  if (isBroadBeefSearch(query)) return "beef";
+
   const tokens = new Set(searchTokens(query));
   const hasMilk = hasAny(tokens, ["leite", "leites"]);
   const hasTomato = hasAny(tokens, ["tomate", "tomates"]);
@@ -377,6 +381,7 @@ function inferOfferFamily(
 
   // Product-head rules: the beginning of the name is more reliable than a
   // keyword appearing later as flavor, ingredient or accompaniment.
+  if (isBeefOfferText(raw)) return "beef";
   if (/^bolos?\b/.test(raw)) return "cake";
 
   if (/^(?:mistura de )?creme de leite\b/.test(raw)) return "milkCream";
@@ -472,6 +477,7 @@ function familyLabel(family: OfferFamily) {
   if (family === "coffeeSoluble") return "Café solúvel";
   if (family === "coffeeCapsule") return "Café em cápsula";
   if (family === "cake") return "Bolo";
+  if (family === "beef") return "Carne bovina";
   return "Produto";
 }
 
@@ -530,6 +536,7 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   if (intent === "refrigerante") add("refrigerante", "refrigerantes");
   if (intent === "juice") add("suco", "sucos");
   if (intent === "cake") add("bolo", "bolos");
+  if (intent === "beef") add(...BEEF_SEMANTIC_TOKENS);
 
   return result;
 }
@@ -554,6 +561,7 @@ function familyMatchesIntent(family: OfferFamily, intent: SearchFamilyIntent | n
       family === "coffeeCapsule"
     );
   }
+  if (intent === "beef") return family === "beef";
   return family === intent;
 }
 
@@ -1120,7 +1128,8 @@ export default function OffersPage() {
     explicitSearchFamily === null ||
     explicitSearchFamily === "milk" ||
     explicitSearchFamily === "corn" ||
-    explicitSearchFamily === "coffee";
+    explicitSearchFamily === "coffee" ||
+    explicitSearchFamily === "beef";
 
   const bestOfferByFamily = useMemo(() => {
     const bestEntry = new Map<
