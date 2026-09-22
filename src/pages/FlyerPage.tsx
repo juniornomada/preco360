@@ -113,9 +113,33 @@ type PendingImportRecovery = {
 const IMPORT_JOB_KEY = "preco360-active-flyer-import-job";
 
 const isTransientImportError = (message?: string | null) =>
-  /timed out|timeout|429|resource exhausted|overloaded|temporar|502|503|504/i.test(
+  /timed out|timeout|429|resource exhausted|overloaded|temporar|502|503|504|failed to send a request|edge function/i.test(
     message ?? "",
   );
+
+async function invokeFlyerWorker(
+  jobId: string,
+  mode: "start" | "resume" | "refine" | "page",
+) {
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { error } = await supabase.functions.invoke("process-flyer-job", {
+      body: { job_id: jobId, mode },
+    });
+
+    if (!error) return;
+
+    lastError = error;
+    if (attempt < 2) {
+      await new Promise((resolve) =>
+        window.setTimeout(resolve, 1200 * (attempt + 1)),
+      );
+    }
+  }
+
+  throw lastError ?? new Error("Não foi possível contatar o servidor de importação.");
+}
 
 const rank = { exceptional: 0, good: 1, normal: 2, high: 3, unknown: 4 } as const;
 const cardTone = {
@@ -674,19 +698,20 @@ export default function FlyerPage() {
 
       void (async () => {
         try {
-          const { error: invokeError } = await supabase.functions.invoke(
-            "process-flyer-job",
-            { body: { job_id: activeJob.id, mode: "resume" } },
-          );
-          if (invokeError) throw invokeError;
+          await invokeFlyerWorker(activeJob.id, "resume");
 
           await queryClient.invalidateQueries({
             queryKey: ["flyer-import-job", user?.id, activeJob.id],
           });
         } catch (error) {
-          // Keep the job queued so the visible "Tentar novamente" action remains
-          // available. Do not create a second job or re-upload the PDF.
+          // Keep the job queued and allow another automatic attempt later.
           console.error("Automatic queued flyer resume failed", error);
+          queuedResumeRef.current = null;
+          window.setTimeout(() => {
+            void queryClient.invalidateQueries({
+              queryKey: ["flyer-import-job", user?.id, activeJob.id],
+            });
+          }, 5000);
         }
       })();
     }, 5000);
@@ -732,11 +757,7 @@ export default function FlyerPage() {
               .eq("id", activeJob.id);
             if (resetError) throw resetError;
 
-            const { error: invokeError } = await supabase.functions.invoke(
-              "process-flyer-job",
-              { body: { job_id: activeJob.id, mode: "resume" } },
-            );
-            if (invokeError) throw invokeError;
+            await invokeFlyerWorker(activeJob.id, "resume");
 
             await queryClient.invalidateQueries({
               queryKey: ["flyer-import-job", user?.id, activeJob.id],
@@ -882,11 +903,7 @@ export default function FlyerPage() {
       if (resetError) throw resetError;
 
       localStorage.setItem(IMPORT_JOB_KEY, activeJobId);
-      const { error: invokeError } = await supabase.functions.invoke(
-        "process-flyer-job",
-        { body: { job_id: activeJobId, mode: "resume" } },
-      );
-      if (invokeError) throw invokeError;
+      await invokeFlyerWorker(activeJobId, "resume");
 
       setProgress({
         current: Math.max(0, Number(activeJob.progress_current) || 0),
@@ -901,11 +918,27 @@ export default function FlyerPage() {
         description: "O servidor vai continuar a partir da primeira página que ainda não foi concluída.",
       });
     } catch (error: any) {
-      setProcessing(false);
+      setProcessing(true);
+      queuedResumeRef.current = null;
+      await db
+        .from("flyer_import_jobs")
+        .update({
+          status: "queued",
+          progress_label: "Aguardando nova tentativa automática…",
+          error_message: null,
+          warning_message:
+            "O servidor não respondeu agora, mas o arquivo continua salvo e será tentado novamente.",
+          completed_at: null,
+        })
+        .eq("id", activeJobId);
+
       toast({
-        title: "Não consegui retomar a importação",
-        description: error?.message ?? "Tente novamente.",
-        variant: "destructive",
+        title: "Importação continua na fila",
+        description:
+          "O arquivo já está salvo. O Radar tentará novamente automaticamente.",
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["flyer-import-job", user?.id, activeJobId],
       });
     } finally {
       setJobActioning(false);
@@ -1153,20 +1186,34 @@ export default function FlyerPage() {
       localStorage.setItem(IMPORT_JOB_KEY, jobId);
       setProgress({ current: 3, total: 3, label: "Importação iniciada no servidor…" });
 
-      const { error: invokeError } = await supabase.functions.invoke("process-flyer-job", {
-        body: { job_id: jobId, mode: "start" },
-      });
-      if (invokeError) {
+      try {
+        await invokeFlyerWorker(jobId, "start");
+      } catch (invokeError: any) {
         await db
           .from("flyer_import_jobs")
           .update({
-            status: "failed",
-            progress_label: "Não foi possível iniciar o processamento.",
-            error_message: invokeError.message || "Falha ao chamar o servidor.",
-            completed_at: new Date().toISOString(),
+            status: "queued",
+            progress_label:
+              "Arquivo recebido. Aguardando o servidor de importação…",
+            error_message: null,
+            warning_message:
+              "O servidor não respondeu de imediato. O Radar tentará novamente automaticamente.",
+            completed_at: null,
           })
           .eq("id", jobId);
-        throw invokeError;
+
+        setProgress({
+          current: 0,
+          total: detectedPages,
+          label: "Arquivo salvo. Aguardando o servidor de importação…",
+        });
+
+        toast({
+          title: "Importação ficou na fila",
+          description:
+            "O arquivo já está salvo. O Radar tentará iniciar novamente sem precisar reenviar.",
+        });
+        return;
       }
 
       setProgress({
@@ -1174,7 +1221,7 @@ export default function FlyerPage() {
         total: detectedPages,
         label:
           detectedPages > 1
-            ? `${detectedPages} páginas preparadas. A IA processa até 2 em paralelo.`
+            ? `${detectedPages} páginas enviadas. A análise continua no servidor.`
             : "Arquivo enviado. A IA continua no servidor; você pode trocar de tela.",
       });
     } catch (error: any) {
