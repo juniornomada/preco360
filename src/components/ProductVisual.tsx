@@ -10,6 +10,22 @@ function ProductVisualIcon({
 }: {
   visual: string | null;
 }) {
+  if (visual === "__zucchini__" || visual === "__zucchini_italiana__" || visual === "__zucchini_paulista__") return simple(<>
+    {visual === "__zucchini_paulista__" ? (
+      <>
+        <path d="M7 29c5-9 15-15 27-14 5 0 8 3 7 7-1 5-8 10-17 12-8 2-15 1-17-5Z" fill="#6fae55" />
+        <path d="M12 28c6-5 14-8 23-8" stroke="#a7d482" strokeWidth="2.4" strokeLinecap="round" fill="none" />
+        <path d="M35 16c2-4 5-6 8-5-1 4-4 7-8 8Z" fill="#4e8f3d" />
+      </>
+    ) : (
+      <>
+        <path d="M9 31c4-10 13-19 24-21 5-1 8 2 7 6-2 8-11 17-21 21-6 2-11 0-10-6Z" fill="#4f9f4b" />
+        <path d="M15 31c5-7 11-12 19-15" stroke="#9fd37b" strokeWidth="2.4" strokeLinecap="round" fill="none" />
+        <path d="M35 12c1-4 4-7 7-7 0 4-2 7-6 9Z" fill="#3f7f39" />
+      </>
+    )}
+  </>);
+
   if (visual === "__beet__") {
     return (
       <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
