@@ -201,6 +201,45 @@ const visualTone = (key: "exceptional" | "good" | "normal" | "high" | "unknown")
   return "unknown";
 };
 
+type FlyerVerdict = ReturnType<typeof evaluateFlyerOffer>;
+
+const fallbackVerdict = (product: ProductForMatch | null): FlyerVerdict => ({
+  key: "unknown",
+  label: product ? "Pouco histórico" : "Novo no radar",
+  message: product
+    ? "O item foi relacionado, mas não foi possível montar uma referência histórica comparável."
+    : "Ainda não há preços anteriores comparáveis para este produto.",
+  deltaPct: null,
+  referencePrice: null,
+  bestPurchase: null,
+  bestAdvertised: null,
+  purchaseCount: 0,
+  advertisedCount: 0,
+  confidence: "baixa",
+});
+
+const safeEvaluateFlyerOffer = (
+  candidate: FlyerCandidate,
+  product: ProductForMatch | null,
+  previous: Array<any> = [],
+  comparableProducts: ProductForMatch[] = [],
+): FlyerVerdict => {
+  try {
+    return evaluateFlyerOffer(
+      candidate,
+      product,
+      Array.isArray(previous) ? previous : [],
+      Array.isArray(comparableProducts) ? comparableProducts : [],
+    );
+  } catch (error) {
+    console.error("Flyer verdict fallback", {
+      product: candidate?.rawName,
+      error,
+    });
+    return fallbackVerdict(product);
+  }
+};
+
 const normalizeProduceOcr = (value: string) =>
   value
     .replace(/\bbeteroba\b/gi, "beterraba")
@@ -659,7 +698,11 @@ export default function FlyerPage() {
           const previous = item.productId
             ? previousOffers.filter((offer) => offer.product_id === item.productId)
             : [];
-          return { ...item, product, verdict: evaluateFlyerOffer(item, product, previous) };
+          return {
+            ...item,
+            product,
+            verdict: safeEvaluateFlyerOffer(item, product, previous),
+          };
         })
         .sort(
           (a, b) =>
@@ -704,7 +747,7 @@ export default function FlyerPage() {
         return {
           ...item,
           product,
-          verdict: evaluateFlyerOffer(candidate, product, previous),
+          verdict: safeEvaluateFlyerOffer(candidate, product, previous),
         };
       }),
     [selectedHistoryItems, productMap, previousOffers, selectedHistoryId],
