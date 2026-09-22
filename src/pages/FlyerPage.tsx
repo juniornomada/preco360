@@ -274,6 +274,7 @@ export default function FlyerPage() {
   const appliedJobRef = useRef<string | null>(null);
   const autoRetryJobRef = useRef<string | null>(null);
   const queuedResumeRef = useRef<string | null>(null);
+  const staleResumeRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (view !== "history") return;
@@ -944,6 +945,29 @@ export default function FlyerPage() {
       setJobActioning(false);
     }
   };
+
+  useEffect(() => {
+    if (
+      !activeJobStale ||
+      !activeJobId ||
+      !activeJob ||
+      jobActioning
+    ) {
+      return;
+    }
+
+    const signature = `${activeJob.id}:${activeJob.updated_at ?? ""}`;
+    if (staleResumeRef.current === signature) return;
+    staleResumeRef.current = signature;
+
+    void retryActiveJob();
+  }, [
+    activeJobStale,
+    activeJobId,
+    activeJob?.id,
+    activeJob?.updated_at,
+    jobActioning,
+  ]);
 
   const cancelActiveJob = async () => {
     if (!activeJobId) return;
