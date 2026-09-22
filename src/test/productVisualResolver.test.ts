@@ -16,6 +16,10 @@ describe("product visual resolver", () => {
     expect(productVisual("Papel Higiênico Familiar Maciez 12un")).toBe("🧻");
     expect(productVisual("Uva Verde sem Semente 500g")).toBe("__greengrapes__");
     expect(productVisual("Uva Vitória 500g")).toBe("🍇");
+    expect(productVisual("Abobrinha Paulista Verde Kg")).toBe("__zucchini_paulista__");
+    expect(productVisual("Abobrinha Italiana")).toBe("__zucchini_italiana__");
+    expect(productVisual("Abobrinha Verde Kg")).toBe("__zucchini__");
+    expect(productVisual("Abóbora Cabotiá Kg")).toBe("🎃");
   });
 
   it("covers specific audited products", () => {
@@ -40,6 +44,8 @@ describe("product visual resolver", () => {
     expect(forceProductVisual("Cápsulas de Bebida Dolce Gusto")).toBe(true);
     expect(forceProductVisual("Sabonete Dove Original 90g")).toBe(false);
     expect(forceProductVisual("Uva Verde sem Semente 500g")).toBe(true);
+    expect(forceProductVisual("Abobrinha Paulista Verde Kg")).toBe(true);
+    expect(forceProductVisual("Abobrinha Italiana")).toBe(true);
     expect(forceProductVisual("Café em Pó Pilão 500g")).toBe(false);
   });
 });
