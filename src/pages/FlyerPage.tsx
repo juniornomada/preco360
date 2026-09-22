@@ -307,6 +307,20 @@ export default function FlyerPage() {
   const appliedJobRef = useRef<string | null>(null);
   const autoRetryJobRef = useRef<string | null>(null);
 
+  useEffect(() => {
+    if (view !== "history") return;
+
+    // Switching tabs does not remount this route, so the browser otherwise
+    // keeps the previous scroll position (for example after saving a flyer).
+    const frame = requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [view]);
+
   const resetImportForm = () => {
     setFile(null);
     setFiles([]);
