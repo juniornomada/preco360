@@ -907,6 +907,7 @@ async function extractPhysicalPage(
   pageNo: number,
   knownRetailers: string[] = [],
 ) {
+  const startedAt = Date.now();
   const file = await downloadJobFile(job, pageNo);
   const multiImagePages =
     Array.isArray(job.source_files) && job.source_files.length > 1;
@@ -943,7 +944,13 @@ async function extractPhysicalPage(
     image_box_confidence: 0,
   }));
 
-  return { pageNo, parsed, model, pageOffers };
+  return {
+    pageNo,
+    parsed,
+    model,
+    pageOffers,
+    durationMs: Date.now() - startedAt,
+  };
 }
 
 async function processPage(jobId: string, requestedPage: number) {
@@ -1097,6 +1104,16 @@ async function processPage(jobId: string, requestedPage: number) {
       }
     }
 
+    const pageTimings =
+      job.result?.page_timings_ms &&
+      typeof job.result.page_timings_ms === "object"
+        ? { ...job.result.page_timings_ms }
+        : {};
+
+    for (const success of successes) {
+      pageTimings[String(success.pageNo)] = success.durationMs;
+    }
+
     const result = {
       ...(job.result ?? {}),
       ok: true,
@@ -1108,6 +1125,7 @@ async function processPage(jobId: string, requestedPage: number) {
       page_count: total,
       processed_pages: completedPages,
       page_retry_counts: retryCounts,
+      page_timings_ms: pageTimings,
       raw_offer_count: rawOfferCount,
       deduplicated_count: Math.max(0, rawOfferCount - offers.length),
       offers,
