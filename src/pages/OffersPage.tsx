@@ -18,6 +18,7 @@ import {
   Search,
   ShoppingBasket,
   Sparkles,
+  Upload,
   Store,
   Tags,
   TrendingDown,
@@ -1191,7 +1192,7 @@ export default function OffersPage() {
         />
       </div>
 
-      <div className="mb-2 grid grid-cols-2 gap-2">
+      <div className="mb-2 grid grid-cols-3 gap-2">
         <Button
           type="button"
           variant="outline"
@@ -1200,6 +1201,15 @@ export default function OffersPage() {
         >
           <Radar className="h-3.5 w-3.5 text-primary" />
           Radar
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-9 gap-1.5 rounded-xl text-xs font-bold"
+          onClick={() => navigate("/radar?view=import")}
+        >
+          <Upload className="h-3.5 w-3.5 text-primary" />
+          Importar
         </Button>
         <Button
           type="button"
@@ -1248,8 +1258,9 @@ export default function OffersPage() {
             <p className="mt-1 text-sm text-muted-foreground">
               Importe os tabloides atuais no Radar para liberar a consulta.
             </p>
-            <Button className="mt-4" onClick={() => navigate("/radar")}>
-              Abrir Radar
+            <Button className="mt-4" onClick={() => navigate("/radar?view=import")}>
+              <Upload className="mr-2 h-4 w-4" />
+              Importar tabloide
             </Button>
           </CardContent>
         </Card>
