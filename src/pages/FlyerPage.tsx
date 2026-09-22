@@ -249,6 +249,7 @@ export default function FlyerPage() {
   const [safeReviewMode, setSafeReviewMode] = useState(false);
   const appliedJobRef = useRef<string | null>(null);
   const autoRetryJobRef = useRef<string | null>(null);
+  const queuedResumeRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (view !== "history") return;
@@ -280,6 +281,7 @@ export default function FlyerPage() {
     setProgress({ current: 0, total: 0, label: "" });
     appliedJobRef.current = null;
     autoRetryJobRef.current = null;
+    queuedResumeRef.current = null;
     localStorage.removeItem(IMPORT_JOB_KEY);
     if (fileRef.current) fileRef.current.value = "";
   };
@@ -656,6 +658,41 @@ export default function FlyerPage() {
       matchType: match.type,
     };
   };
+
+  useEffect(() => {
+    if (
+      !activeJob ||
+      activeJob.status !== "queued" ||
+      jobActioning ||
+      queuedResumeRef.current === activeJob.id
+    ) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      queuedResumeRef.current = activeJob.id;
+
+      void (async () => {
+        try {
+          const { error: invokeError } = await supabase.functions.invoke(
+            "process-flyer-job",
+            { body: { job_id: activeJob.id, mode: "resume" } },
+          );
+          if (invokeError) throw invokeError;
+
+          await queryClient.invalidateQueries({
+            queryKey: ["flyer-import-job", user?.id, activeJob.id],
+          });
+        } catch (error) {
+          // Keep the job queued so the visible "Tentar novamente" action remains
+          // available. Do not create a second job or re-upload the PDF.
+          console.error("Automatic queued flyer resume failed", error);
+        }
+      })();
+    }, 5000);
+
+    return () => window.clearTimeout(timer);
+  }, [activeJob, jobActioning, queryClient, user?.id]);
 
   useEffect(() => {
     if (!activeJob) return;
