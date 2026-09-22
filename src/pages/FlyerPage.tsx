@@ -421,11 +421,12 @@ export default function FlyerPage() {
       return data ?? null;
     },
     enabled: !!user && !!activeJobId,
-    refetchInterval: (query) => {
-      const status = (query.state.data as FlyerImportJob | null | undefined)?.status;
-      return status && ["queued", "processing", "refining"].includes(status) ? 1500 : false;
-    },
+    // Keep polling while an active job id exists. Depending on query.state.data
+    // here could stop the interval before the first successful refresh on mobile.
+    refetchInterval: activeJobId ? 1500 : false,
+    refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
+    retry: 3,
   });
 
   useEffect(() => {
@@ -875,6 +876,7 @@ export default function FlyerPage() {
       appliedJobRef.current = activeJob.id;
       setItems(matched);
       setProcessing(false);
+      setActiveJobId(null);
       setView(safeReviewMode ? "import" : "radar");
       // Keep the completed job id until the offers are actually saved. This makes
       // an analyzed flyer recoverable after a browser refresh or Android tab suspension.
