@@ -303,6 +303,7 @@ export default function FlyerPage() {
   const [jobActioning, setJobActioning] = useState(false);
   const [pendingRecovery, setPendingRecovery] =
     useState<PendingImportRecovery | null>(null);
+  const [safeReviewMode, setSafeReviewMode] = useState(false);
   const appliedJobRef = useRef<string | null>(null);
   const autoRetryJobRef = useRef<string | null>(null);
 
@@ -317,6 +318,7 @@ export default function FlyerPage() {
     setProcessedSource(null);
     setActiveJobId(null);
     setPendingRecovery(null);
+    setSafeReviewMode(false);
     setProcessing(false);
     setProgress({ current: 0, total: 0, label: "" });
     appliedJobRef.current = null;
@@ -597,6 +599,7 @@ export default function FlyerPage() {
   const continuePendingImport = () => {
     if (!pendingRecovery) return;
     appliedJobRef.current = null;
+    setSafeReviewMode(true);
     localStorage.setItem(IMPORT_JOB_KEY, pendingRecovery.id);
     setActiveJobId(pendingRecovery.id);
     setPendingRecovery(null);
@@ -622,7 +625,9 @@ export default function FlyerPage() {
 
   const analyzed = useMemo(
     () =>
-      items
+      safeReviewMode
+        ? []
+        : items
         .map((item) => {
           const product = item.productId ? productMap.get(item.productId) ?? null : null;
           const previous = item.productId
@@ -635,7 +640,7 @@ export default function FlyerPage() {
             rank[a.verdict.key] - rank[b.verdict.key] ||
             (a.verdict.deltaPct ?? 999) - (b.verdict.deltaPct ?? 999),
         ),
-    [items, productMap, previousOffers],
+    [items, productMap, previousOffers, safeReviewMode],
   );
 
   const summary = useMemo(
@@ -826,7 +831,7 @@ export default function FlyerPage() {
       appliedJobRef.current = activeJob.id;
       setItems(matched);
       setProcessing(false);
-      setView("radar");
+      setView(safeReviewMode ? "import" : "radar");
       // Keep the completed job id until the offers are actually saved. This makes
       // an analyzed flyer recoverable after a browser refresh or Android tab suspension.
       localStorage.setItem(IMPORT_JOB_KEY, activeJob.id);
@@ -854,6 +859,7 @@ export default function FlyerPage() {
     retailer,
     validFrom,
     validTo,
+    safeReviewMode,
   ]);
 
   const activeJobStale =
@@ -1454,7 +1460,127 @@ export default function FlyerPage() {
         <span className="text-primary">›</span>
       </Button>
 
-      {view === "import" && (
+      {view === "import" && safeReviewMode && items.length > 0 && (
+        <div className="space-y-3">
+          <Card className="border-primary/30">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl bg-primary/15 p-2 text-primary">
+                  <CheckCircle2 className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold">Revisão recuperada</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {items.length} ofertas preservadas no servidor. Confira os dados abaixo e salve.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-muted-foreground">
+                    Mercado
+                  </label>
+                  <Input
+                    value={retailer}
+                    onChange={(event) => setRetailer(event.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-muted-foreground">
+                    Válido de
+                  </label>
+                  <Input
+                    type="date"
+                    value={validFrom}
+                    onChange={(event) => setValidFrom(event.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-muted-foreground">
+                    Até
+                  </label>
+                  <Input
+                    type="date"
+                    value={validTo}
+                    onChange={(event) => setValidTo(event.target.value)}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-3">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    Itens recuperados
+                  </p>
+                  <p className="font-bold">{items.length} ofertas</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSafeReviewMode(false);
+                    setItems([]);
+                    setActiveJobId(null);
+                  }}
+                >
+                  Voltar
+                </Button>
+              </div>
+
+              <div className="max-h-[52vh] space-y-2 overflow-y-auto pr-1">
+                {items.map((item) => (
+                  <div
+                    key={item.localId}
+                    className="grid grid-cols-[minmax(0,1fr)_92px] gap-2 rounded-xl border bg-background p-2.5"
+                  >
+                    <Input
+                      value={item.rawName}
+                      className="h-9 min-w-0 text-sm"
+                      onChange={(event) =>
+                        updateName(item.localId, event.target.value)
+                      }
+                    />
+                    <Input
+                      inputMode="decimal"
+                      className="h-9 text-right text-sm font-bold"
+                      value={
+                        item.price
+                          ? String(item.price).replace(".", ",")
+                          : ""
+                      }
+                      onChange={(event) =>
+                        updatePrice(item.localId, event.target.value)
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Button
+            type="button"
+            className="h-12 w-full text-sm font-bold"
+            disabled={saving || !retailer.trim()}
+            onClick={() => void saveFlyer()}
+          >
+            {saving ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            {saving ? "Salvando…" : `Confirmar e salvar ${items.length} ofertas`}
+          </Button>
+        </div>
+      )}
+
+      {view === "import" && !(safeReviewMode && items.length > 0) && (
         <div className="space-y-3">
           {pendingRecovery && (
             <Card className="border-primary/35 bg-primary/5">
