@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { normalizedUnitPrice, type BaseUnit, type FlyerCandidate, type PackageInfo } from "@/lib/flyerAnalysis";
 import { readFlyerFileSmart as readFlyerLocal } from "@/lib/flyerOcrV6";
+import { loadPdfJsBrowser } from "@/lib/pdfJsBrowser";
 
 type Progress = (page: number, total: number, label: string) => void;
 
@@ -468,9 +469,7 @@ function isQuotaError(error: unknown) {
 }
 
 async function pdfPageCount(file: File) {
-  const pdfjs = await import("pdfjs-dist");
-  pdfjs.GlobalWorkerOptions.workerSrc =
-    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+  const pdfjs = await loadPdfJsBrowser();
   const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
   return pdf.numPages;
 }
@@ -584,9 +583,7 @@ async function analyzePdfByPage(
     model?: string;
   },
 ) {
-  const pdfjs = await import("pdfjs-dist");
-  pdfjs.GlobalWorkerOptions.workerSrc =
-    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+  const pdfjs = await loadPdfJsBrowser();
 
   const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
   const totalPages = pdf.numPages;
