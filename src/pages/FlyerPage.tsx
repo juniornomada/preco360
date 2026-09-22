@@ -47,6 +47,7 @@ import {
   type ProductForMatch,
 } from "@/lib/flyerAnalysis";
 import {
+  countFlyerPages,
   visionResponseToFlyerResult,
   type VisionResponse,
 } from "@/lib/flyerOcr";
@@ -215,64 +216,6 @@ async function sha256Files(selected: File[]) {
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-}
-
-async function pdfToUploadPages(
-  file: File,
-  onProgress: (page: number, total: number) => void,
-) {
-  const pdfjs = await import("pdfjs-dist");
-  pdfjs.GlobalWorkerOptions.workerSrc =
-    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
-
-  const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
-  const pages: File[] = [];
-
-  for (let pageNo = 1; pageNo <= pdf.numPages; pageNo += 1) {
-    onProgress(pageNo, pdf.numPages);
-    const page = await pdf.getPage(pageNo);
-    const baseViewport = page.getViewport({ scale: 1 });
-    const targetWidth = Math.min(
-      2600,
-      Math.max(2200, baseViewport.width * 3.7),
-    );
-    const viewport = page.getViewport({
-      scale: targetWidth / baseViewport.width,
-    });
-
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(viewport.width);
-    canvas.height = Math.round(viewport.height);
-    const context = canvas.getContext("2d", { alpha: false });
-    if (!context) {
-      throw new Error(`Não foi possível preparar a página ${pageNo} do PDF.`);
-    }
-
-    context.fillStyle = "#fff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    await page.render({ canvasContext: context, viewport } as any).promise;
-
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/jpeg", 0.9),
-    );
-    canvas.width = 1;
-    canvas.height = 1;
-
-    if (!blob) {
-      throw new Error(`Não foi possível compactar a página ${pageNo} do PDF.`);
-    }
-
-    const baseName = file.name.replace(/\.pdf$/i, "") || "tabloide";
-    pages.push(
-      new File(
-        [blob],
-        `${baseName}-pagina-${String(pageNo).padStart(3, "0")}.jpg`,
-        { type: "image/jpeg" },
-      ),
-    );
-  }
-
-  return pages;
 }
 
 export default function FlyerPage() {
@@ -1061,22 +1004,21 @@ export default function FlyerPage() {
       const fileHashPromise = sha256Files(selected);
       let uploadPages: File[] = selected;
 
+      let detectedPages = selected.length > 1 ? selected.length : 1;
       if (isPdf) {
-        uploadPages = await pdfToUploadPages(file, (pageNo, total) => {
-          setProgress({
-            current: pageNo,
-            total,
-            label: `Preparando página ${pageNo}/${total} do PDF…`,
-          });
+        setProgress({
+          current: 1,
+          total: 3,
+          label: "Lendo estrutura do PDF…",
         });
+        detectedPages = await countFlyerPages(file);
+
+        // The server now rasterizes PDF pages itself. Avoid rendering every page
+        // on the phone and avoid uploading the same document plus JPEG copies.
+        uploadPages = [];
       }
 
       const fileHash = await fileHashPromise;
-      const detectedPages = isPdf
-        ? uploadPages.length
-        : selected.length > 1
-          ? selected.length
-          : 1;
       setPageCount(detectedPages);
 
       const jobId = crypto.randomUUID();
@@ -1087,7 +1029,7 @@ export default function FlyerPage() {
         current: 2,
         total: 3,
         label: isPdf
-          ? `Enviando PDF e ${detectedPages} página(s) otimizadas…`
+          ? `Enviando PDF de ${detectedPages} página(s)…`
           : selected.length > 1
             ? `Enviando ${selected.length} páginas para o servidor…`
             : "Enviando o tabloide para o servidor…",
