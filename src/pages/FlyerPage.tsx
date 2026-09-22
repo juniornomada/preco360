@@ -110,6 +110,15 @@ type PendingImportRecovery = {
   offerCount: number;
   completedAt: string | null;
 };
+
+type DuplicateFlyer = {
+  id: string;
+  retailer: string | null;
+  validFrom: string | null;
+  validTo: string | null;
+  sourceFileName: string | null;
+  itemCount: number;
+};
 const IMPORT_JOB_KEY = "preco360-active-flyer-import-job";
 
 const isTransientImportError = (message?: string | null) =>
@@ -271,6 +280,8 @@ export default function FlyerPage() {
   const [pendingRecovery, setPendingRecovery] =
     useState<PendingImportRecovery | null>(null);
   const [safeReviewMode, setSafeReviewMode] = useState(false);
+  const [duplicateFlyer, setDuplicateFlyer] = useState<DuplicateFlyer | null>(null);
+  const [allowDuplicateReprocess, setAllowDuplicateReprocess] = useState(false);
   const appliedJobRef = useRef<string | null>(null);
   const autoRetryJobRef = useRef<string | null>(null);
   const queuedResumeRef = useRef<string | null>(null);
@@ -302,6 +313,8 @@ export default function FlyerPage() {
     setActiveJobId(null);
     setPendingRecovery(null);
     setSafeReviewMode(false);
+    setDuplicateFlyer(null);
+    setAllowDuplicateReprocess(false);
     setProcessing(false);
     setProgress({ current: 0, total: 0, label: "" });
     appliedJobRef.current = null;
@@ -1035,6 +1048,8 @@ export default function FlyerPage() {
     setActiveJobId(null);
     setProcessing(false);
     setProgress({ current: 0, total: 0, label: "" });
+    setDuplicateFlyer(null);
+    setAllowDuplicateReprocess(false);
     appliedJobRef.current = null;
     setTimeout(() => fileRef.current?.click(), 0);
   };
@@ -1059,6 +1074,8 @@ export default function FlyerPage() {
     const primary = selected[0] ?? null;
     setFiles(selected);
     setFile(primary);
+    setDuplicateFlyer(null);
+    setAllowDuplicateReprocess(false);
     setItems([]);
     setPageCount(selected.length > 1 ? selected.length : null);
     setProcessedSource(null);
@@ -1076,25 +1093,93 @@ export default function FlyerPage() {
 
     try {
       const fileHash = await sha256Files(selected);
-      const { data: knownFlyer, error } = await db
+
+      const { data: knownFlyer, error: flyerError } = await db
         .from("flyers")
-        .select("retailer,valid_from,valid_to")
+        .select("id,retailer,valid_from,valid_to,source_file_name,flyer_items(count)")
+        .eq("user_id", user.id)
         .eq("file_hash", fileHash)
         .maybeSingle();
 
-      if (error) throw error;
-      if (!knownFlyer) return;
+      if (flyerError) throw flyerError;
 
-      setRetailer(knownFlyer.retailer ?? "");
-      setValidFrom(knownFlyer.valid_from ?? "");
-      setValidTo(knownFlyer.valid_to ?? "");
+      if (knownFlyer) {
+        const countValue = Array.isArray(knownFlyer.flyer_items)
+          ? Number(knownFlyer.flyer_items[0]?.count ?? 0)
+          : 0;
 
+        setRetailer(knownFlyer.retailer ?? "");
+        setValidFrom(knownFlyer.valid_from ?? "");
+        setValidTo(knownFlyer.valid_to ?? "");
+        setDuplicateFlyer({
+          id: knownFlyer.id,
+          retailer: knownFlyer.retailer ?? null,
+          validFrom: knownFlyer.valid_from ?? null,
+          validTo: knownFlyer.valid_to ?? null,
+          sourceFileName: knownFlyer.source_file_name ?? null,
+          itemCount: countValue,
+        });
+
+        toast({
+          title: "Este tabloide já foi importado",
+          description:
+            "O mesmo arquivo já existe no histórico. Ele não será analisado novamente automaticamente.",
+        });
+        return;
+      }
+
+      const { data: existingJobs, error: jobLookupError } = await db
+        .from("flyer_import_jobs")
+        .select("id,status,source_file_name,retailer,result,completed_at,progress_current,progress_total,progress_label")
+        .eq("user_id", user.id)
+        .eq("file_hash", fileHash)
+        .in("status", ["queued", "processing", "refining", "completed"])
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (jobLookupError) throw jobLookupError;
+
+      const existingJob = existingJobs?.[0];
+      if (!existingJob) return;
+
+      if (existingJob.status === "completed") {
+        const offerCount = Array.isArray(existingJob.result?.offers)
+          ? existingJob.result.offers.length
+          : 0;
+        setPendingRecovery({
+          id: existingJob.id,
+          sourceFileName: existingJob.source_file_name || primary.name,
+          retailer: existingJob.retailer ?? existingJob.result?.retailer ?? null,
+          offerCount,
+          completedAt: existingJob.completed_at ?? null,
+        });
+        localStorage.setItem(IMPORT_JOB_KEY, existingJob.id);
+        toast({
+          title: "Análise já concluída",
+          description:
+            "Este arquivo já foi analisado. Continue a revisão existente em vez de processá-lo novamente.",
+        });
+        return;
+      }
+
+      localStorage.setItem(IMPORT_JOB_KEY, existingJob.id);
+      setActiveJobId(existingJob.id);
+      setProcessing(true);
+      setProgress({
+        current: Math.max(0, Number(existingJob.progress_current) || 0),
+        total: Math.max(1, Number(existingJob.progress_total) || 1),
+        label:
+          existingJob.progress_label ||
+          "Recuperando importação existente…",
+      });
       toast({
-        title: "Dados reconhecidos",
-        description: "Mercado e validade foram preenchidos pelo histórico deste mesmo tabloide.",
+        title: "Importação já em andamento",
+        description:
+          "O Radar retomou o processamento existente sem reenviar o arquivo.",
       });
     } catch {
-      // Metadata reuse is optional and must never block the flyer analysis.
+      // Duplicate/recovery detection is a convenience. If it cannot be checked,
+      // the explicit Analyze action still performs the normal import flow.
     }
   };
 
@@ -1112,6 +1197,14 @@ export default function FlyerPage() {
 
   const processFile = async () => {
     if (!file || !user) return;
+    if (duplicateFlyer && !allowDuplicateReprocess) {
+      toast({
+        title: "Tabloide já importado",
+        description:
+          "Use o histórico existente ou escolha Reprocessar se quiser gerar uma nova análise.",
+      });
+      return;
+    }
     const selected = files.length ? files : [file];
     const isPdf =
       selected.length === 1 &&
@@ -1722,6 +1815,52 @@ export default function FlyerPage() {
             </Card>
           )}
 
+          {duplicateFlyer && !allowDuplicateReprocess && (
+            <Card className="border-amber-500/30 bg-amber-500/5">
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-xl bg-amber-500/10 p-2 text-amber-400">
+                    <History className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-bold">Este tabloide já foi importado</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {duplicateFlyer.retailer || "Mercado"} ·{" "}
+                      {duplicateFlyer.itemCount
+                        ? duplicateFlyer.itemCount + " ofertas"
+                        : "já consta no histórico"}
+                    </p>
+                    {(duplicateFlyer.validFrom || duplicateFlyer.validTo) && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {duplicateFlyer.validFrom || "—"} → {duplicateFlyer.validTo || "—"}
+                      </p>
+                    )}
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <Button
+                        type="button"
+                        className="h-9 text-xs font-bold"
+                        onClick={() => {
+                          setSelectedHistoryId(duplicateFlyer.id);
+                          setView("history");
+                        }}
+                      >
+                        Ver no histórico
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9 text-xs"
+                        onClick={() => setAllowDuplicateReprocess(true)}
+                      >
+                        Reprocessar
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="border-primary/20">
             <CardContent className="p-3.5 sm:p-5">
               <button
@@ -1951,9 +2090,19 @@ export default function FlyerPage() {
                 </div>
               )}
 
-              <Button className="mt-3 h-10 w-full sm:mt-4 sm:h-11" disabled={!file || processing} onClick={() => void processFile()}>
+              <Button
+                className="mt-3 h-10 w-full sm:mt-4 sm:h-11"
+                disabled={!file || processing || (!!duplicateFlyer && !allowDuplicateReprocess)}
+                onClick={() => void processFile()}
+              >
                 {processing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                {processing ? "Importando no servidor…" : "Analisar tabloide"}
+                {processing
+                  ? "Importando no servidor…"
+                  : duplicateFlyer && !allowDuplicateReprocess
+                    ? "Tabloide já importado"
+                    : allowDuplicateReprocess
+                      ? "Reprocessar tabloide"
+                      : "Analisar tabloide"}
               </Button>
             </CardContent>
           </Card>
