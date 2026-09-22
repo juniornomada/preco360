@@ -208,6 +208,7 @@ function semanticFamily(value: unknown) {
     ["beer", /cerveja|\bcerv\b/],
     ["spirits", /smirnoff ice|cachaca|caipirinha|\bgin\b|licor|coquetel|aperitivo|campari|aperol/],
     ["juice", /suco|refresco|nectar/],
+    ["cereal", /cereal matinal|\bcereal\b/],
     ["chocolate_drink", /achocolatado|toddynho/],
     // Type wins over flavor: café sabor chocolate stays coffee.
     ["coffee", /cafe|cappuccino|dolce gusto|capsula/],
