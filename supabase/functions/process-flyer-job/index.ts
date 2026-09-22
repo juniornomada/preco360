@@ -1,29 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-type MagickModule = typeof import("npm:@imagemagick/magick-wasm@0.0.43");
-let magickModulePromise: Promise<MagickModule> | null = null;
-
-async function loadImageMagick(): Promise<MagickModule> {
-  if (!magickModulePromise) {
-    magickModulePromise = (async () => {
-      const magick = await import("npm:@imagemagick/magick-wasm@0.0.43");
-      const wasmBytes = await Deno.readFile(
-        new URL(
-          "magick.wasm",
-          import.meta.resolve("npm:@imagemagick/magick-wasm@0.0.43"),
-        ),
-      );
-      await magick.initializeImageMagick(wasmBytes);
-      return magick;
-    })().catch((error) => {
-      magickModulePromise = null;
-      throw error;
-    });
-  }
-
-  return magickModulePromise;
-}
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -882,70 +858,6 @@ async function downloadJobFile(job: JobRow, pageNo?: number) {
   });
 }
 
-async function renderPdfPages(pdfFile: File, pageNos: number[]) {
-  const startedAt = performance.now();
-  const {
-    Density,
-    ImageMagick,
-    MagickFormat,
-    MagickReadSettings,
-  } = await loadImageMagick();
-  const wanted = new Set(
-    pageNos
-      .map((value) => Math.max(1, Math.trunc(Number(value) || 1)))
-      .filter(Boolean),
-  );
-  const rendered = new Map<number, File>();
-  const bytes = new Uint8Array(await pdfFile.arrayBuffer());
-
-  const settings = new MagickReadSettings({
-    format: MagickFormat.Pdf,
-    density: new Density(144),
-  });
-
-  ImageMagick.readCollection(bytes, settings, (images: any) => {
-    let index = 0;
-    images.forEach((image: any) => {
-      const pageNo = index + 1;
-      index += 1;
-      if (!wanted.has(pageNo)) return;
-
-      const width = Number(image.width) || 0;
-      const height = Number(image.height) || 0;
-      const maxDimension = Math.max(width, height);
-      if (maxDimension > 1800) {
-        const scale = 1800 / maxDimension;
-        image.resize(
-          Math.max(1, Math.round(width * scale)),
-          Math.max(1, Math.round(height * scale)),
-        );
-      }
-
-      image.quality = 88;
-      image.write(MagickFormat.Jpeg, (data: Uint8Array) => {
-        const copy = new Uint8Array(data.length);
-        copy.set(data);
-        rendered.set(
-          pageNo,
-          new File([copy], `page-${pageNo}.jpg`, { type: "image/jpeg" }),
-        );
-      });
-    });
-  });
-
-  for (const pageNo of wanted) {
-    if (!rendered.has(pageNo)) {
-      throw new Error("Não foi possível rasterizar a página " + pageNo + " do PDF.");
-    }
-  }
-
-  return {
-    files: rendered,
-    elapsedMs: Math.round(performance.now() - startedAt),
-    originalBytes: bytes.length,
-  };
-}
-
 async function triggerRefine(jobId: string) {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -993,18 +905,18 @@ async function extractPhysicalPage(
   total: number,
   pageNo: number,
   knownRetailers: string[] = [],
-  preparedFile?: File,
 ) {
   const startedAt = Date.now();
-  const file = preparedFile ?? await downloadJobFile(job, pageNo);
-  const singlePageImage = file.type.startsWith("image/");
+  const file = await downloadJobFile(job, pageNo);
+  const multiImagePages =
+    Array.isArray(job.source_files) && job.source_files.length > 1;
   const prompt =
     EXTRACTION_PROMPT +
     "\n\nEXECUÇÃO EM ETAPAS — PÁGINA ALVO " + pageNo + "/" + total +
-    (singlePageImage
+    (multiImagePages
       ? "\nEsta imagem corresponde à página física " + pageNo + " do tabloide."
       : "\nAnalise SOMENTE a página física " + pageNo + " deste arquivo.") +
-    (singlePageImage
+    (multiImagePages
       ? "\nAnalise integralmente esta imagem e extraia todas as ofertas visíveis."
       : "\nIgnore completamente as demais páginas nesta execução.") +
     "\nExtraia TODAS as ofertas visíveis da página alvo." +
@@ -1071,19 +983,15 @@ async function processPage(jobId: string, requestedPage: number) {
 
     const multiImagePages =
       Array.isArray(job.source_files) && job.source_files.length > 1;
-    const isPdf =
-      String(job.mime_type ?? "").toLowerCase() === "application/pdf" ||
-      job.source_file_name.toLowerCase().endsWith(".pdf");
 
-    // Separate image files and rasterized PDF pages are independent, so we can
-    // preserve page-level extraction quality while processing two pages at once.
-    let pagesToProcess =
-      multiImagePages || isPdf
-        ? [
-            startPage,
-            ...pendingPages.filter((page) => page !== startPage).slice(0, 1),
-          ]
-        : [startPage];
+    // Independent uploaded images can be processed two at a time. PDFs stay
+    // sequential during refinement to avoid resending the full document twice.
+    const pagesToProcess = multiImagePages
+      ? [
+          startPage,
+          ...pendingPages.filter((page) => page !== startPage).slice(0, 1),
+        ]
+      : [startPage];
 
     const pageLabel =
       pagesToProcess.length > 1
@@ -1104,35 +1012,9 @@ async function processPage(jobId: string, requestedPage: number) {
 
     const knownRetailers = await knownRetailerNames(job.user_id);
 
-    let preparedFiles = new Map<number, File>();
-    let pdfRenderMs = 0;
-    let originalPdfBytes = 0;
-
-    if (isPdf) {
-      try {
-        const pdfFile = await downloadJobFile(job);
-        const rendered = await renderPdfPages(pdfFile, pagesToProcess);
-        preparedFiles = rendered.files;
-        pdfRenderMs = rendered.elapsedMs;
-        originalPdfBytes = rendered.originalBytes;
-      } catch (renderError) {
-        console.warn(
-          "Falha ao rasterizar PDF; mantendo fallback sequencial:",
-          renderError instanceof Error ? renderError.message : String(renderError),
-        );
-        pagesToProcess = [startPage];
-      }
-    }
-
     const settled = await Promise.allSettled(
       pagesToProcess.map((pageNo) =>
-        extractPhysicalPage(
-          job,
-          total,
-          pageNo,
-          knownRetailers,
-          preparedFiles.get(pageNo),
-        ),
+        extractPhysicalPage(job, total, pageNo, knownRetailers),
       ),
     );
 
@@ -1258,10 +1140,7 @@ async function processPage(jobId: string, requestedPage: number) {
       page_timings_ms: pageTimings,
       page_input_bytes: pageInputBytes,
       page_models: pageModels,
-      pipeline_version: "pdf-raster-parallel-v1",
-      last_pdf_render_ms: pdfRenderMs || null,
-      original_pdf_bytes:
-        originalPdfBytes || job.result?.original_pdf_bytes || null,
+      pipeline_version: "stable-server-pdf-v1",
       raw_offer_count: rawOfferCount,
       deduplicated_count: Math.max(0, rawOfferCount - offers.length),
       offers,
