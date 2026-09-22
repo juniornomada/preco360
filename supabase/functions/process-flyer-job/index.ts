@@ -569,7 +569,12 @@ function dedupeOffers(offers: any[]) {
   );
 }
 
-async function runGemini(file: File, prompt: string, preferredModel?: string) {
+async function runGemini(
+  file: File,
+  prompt: string,
+  preferredModel?: string,
+  options?: { maxAttempts?: number; requestTimeoutMs?: number },
+) {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) throw new Error("GEMINI_API_KEY não está configurada.");
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -602,10 +607,27 @@ async function runGemini(file: File, prompt: string, preferredModel?: string) {
   // attempts are enough here and keep the invocation safely below the Edge
   // Function lifetime when a provider call stalls. PDFs keep the broader
   // fallback list because they are heavier and less predictable.
-  const modelCandidates = isImagePage
+  const defaultCandidates = isImagePage
     ? allCandidates.slice(0, 2)
     : allCandidates;
-  const requestTimeoutMs = isImagePage ? 55000 : 105000;
+  const maxAttempts = Math.max(
+    1,
+    Math.min(
+      defaultCandidates.length,
+      Math.trunc(Number(options?.maxAttempts) || defaultCandidates.length),
+    ),
+  );
+  const modelCandidates = defaultCandidates.slice(0, maxAttempts);
+  const requestTimeoutMs = Math.max(
+    15000,
+    Math.min(
+      105000,
+      Math.trunc(
+        Number(options?.requestTimeoutMs) ||
+          (isImagePage ? 55000 : 105000),
+      ),
+    ),
+  );
 
   let lastError = "Nenhum modelo Gemini gratuito disponível.";
   for (const model of modelCandidates) {
@@ -872,7 +894,7 @@ async function triggerRefine(jobId: string) {
 
 function isTransientAiFailure(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
-  return /timed out|timeout|429|resource exhausted|overloaded|temporar|502|503|504/i.test(message);
+  return /timed out|timeout|429|resource exhausted|overloaded|temporar|502|503|504|json inválido|conteúdo estruturado/i.test(message);
 }
 
 async function triggerPage(jobId: string, pageNo: number) {
@@ -905,6 +927,7 @@ async function extractPhysicalPage(
   total: number,
   pageNo: number,
   knownRetailers: string[] = [],
+  preferredModel?: string,
 ) {
   const startedAt = Date.now();
   const file = await downloadJobFile(job, pageNo);
@@ -933,7 +956,13 @@ async function extractPhysicalPage(
   const { parsed, model } = await runGemini(
     file,
     prompt,
-    job.result?.model,
+    preferredModel ?? job.result?.model,
+    {
+      // One provider attempt per Edge invocation. If it times out, processPage
+      // persists the retry counter and starts a fresh invocation with another model.
+      maxAttempts: 1,
+      requestTimeoutMs: 70000,
+    },
   );
 
   const pageOffers = validOffers(parsed).map((offer: any) => ({
@@ -1013,9 +1042,31 @@ async function processPage(jobId: string, requestedPage: number) {
     const knownRetailers = await knownRetailerNames(job.user_id);
 
     const settled = await Promise.allSettled(
-      pagesToProcess.map((pageNo) =>
-        extractPhysicalPage(job, total, pageNo, knownRetailers),
-      ),
+      pagesToProcess.map((pageNo) => {
+        const retryIndex = Math.max(
+          0,
+          Math.trunc(
+            Number(job.result?.page_retry_counts?.[String(pageNo)]) || 0,
+          ),
+        );
+        const pageModels = Array.from(
+          new Set(
+            [job.result?.model, ...FREE_GEMINI_MODELS]
+              .map((value) => String(value ?? "").trim())
+              .filter(Boolean),
+          ),
+        );
+        const preferredPageModel =
+          pageModels[Math.min(retryIndex, pageModels.length - 1)];
+
+        return extractPhysicalPage(
+          job,
+          total,
+          pageNo,
+          knownRetailers,
+          preferredPageModel,
+        );
+      }),
     );
 
     const successes: Array<Awaited<ReturnType<typeof extractPhysicalPage>>> = [];
@@ -1140,7 +1191,7 @@ async function processPage(jobId: string, requestedPage: number) {
       page_timings_ms: pageTimings,
       page_input_bytes: pageInputBytes,
       page_models: pageModels,
-      pipeline_version: "stable-server-pdf-v1",
+      pipeline_version: "bounded-page-retry-v2",
       raw_offer_count: rawOfferCount,
       deduplicated_count: Math.max(0, rawOfferCount - offers.length),
       offers,
