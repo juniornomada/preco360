@@ -101,6 +101,14 @@ type ProcessedSource = {
   pageCount: number | null;
   sourceFiles?: SourceFileEntry[];
 };
+
+type PendingImportRecovery = {
+  id: string;
+  sourceFileName: string;
+  retailer: string | null;
+  offerCount: number;
+  completedAt: string | null;
+};
 const IMPORT_JOB_KEY = "preco360-active-flyer-import-job";
 
 const isTransientImportError = (message?: string | null) =>
@@ -293,6 +301,8 @@ export default function FlyerPage() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [processedSource, setProcessedSource] = useState<ProcessedSource | null>(null);
   const [jobActioning, setJobActioning] = useState(false);
+  const [pendingRecovery, setPendingRecovery] =
+    useState<PendingImportRecovery | null>(null);
   const appliedJobRef = useRef<string | null>(null);
   const autoRetryJobRef = useRef<string | null>(null);
 
@@ -306,6 +316,7 @@ export default function FlyerPage() {
     setPageCount(null);
     setProcessedSource(null);
     setActiveJobId(null);
+    setPendingRecovery(null);
     setProcessing(false);
     setProgress({ current: 0, total: 0, label: "" });
     appliedJobRef.current = null;
@@ -435,23 +446,92 @@ export default function FlyerPage() {
     if (!user || view !== "import") return;
 
     let cancelled = false;
-    const recoverImport = async () => {
-      const saved = localStorage.getItem(IMPORT_JOB_KEY);
-      if (saved) {
-        if (!cancelled) {
-          setActiveJobId(saved);
-          setProgress({ current: 1, total: 1, label: "Recuperando importação…" });
+
+    const setCompletedRecovery = async (job: any) => {
+      if (!job || cancelled) return;
+
+      let alreadySaved = false;
+      if (job.file_hash) {
+        const { data: savedFlyer } = await db
+          .from("flyers")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("file_hash", job.file_hash)
+          .limit(1)
+          .maybeSingle();
+        alreadySaved = !!savedFlyer;
+      }
+
+      if (alreadySaved || cancelled) {
+        if (localStorage.getItem(IMPORT_JOB_KEY) === job.id) {
+          localStorage.removeItem(IMPORT_JOB_KEY);
         }
         return;
       }
 
-      // Recover a recent timeout job first. Older builds removed the local
-      // job id when a timeout marked the job as failed, even though completed
-      // pages and uploaded source files were still intact.
-      const failedCutoff = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const offerCount = Array.isArray(job.result?.offers)
+        ? job.result.offers.length
+        : 0;
+
+      setPendingRecovery({
+        id: job.id,
+        sourceFileName: job.source_file_name || "Tabloide",
+        retailer: job.retailer ?? job.result?.retailer ?? null,
+        offerCount,
+        completedAt: job.completed_at ?? null,
+      });
+      localStorage.setItem(IMPORT_JOB_KEY, job.id);
+      setProgress({ current: 0, total: 0, label: "" });
+      setProcessing(false);
+    };
+
+    const recoverImport = async () => {
+      const saved = localStorage.getItem(IMPORT_JOB_KEY);
+      if (saved) {
+        const { data: savedJob, error: savedError } = await db
+          .from("flyer_import_jobs")
+          .select(
+            "id,status,source_file_name,file_hash,retailer,result,completed_at,error_message,created_at",
+          )
+          .eq("user_id", user.id)
+          .eq("id", saved)
+          .maybeSingle();
+
+        if (!savedError && savedJob && !cancelled) {
+          if (savedJob.status === "completed") {
+            await setCompletedRecovery(savedJob);
+            return;
+          }
+
+          if (
+            ["queued", "processing", "refining"].includes(savedJob.status) ||
+            (savedJob.status === "failed" &&
+              isTransientImportError(savedJob.error_message))
+          ) {
+            setActiveJobId(savedJob.id);
+            setProgress({
+              current: 1,
+              total: 1,
+              label: "Recuperando importação…",
+            });
+            return;
+          }
+
+          localStorage.removeItem(IMPORT_JOB_KEY);
+        } else if (!cancelled) {
+          localStorage.removeItem(IMPORT_JOB_KEY);
+        }
+      }
+
+      // Recover a recent timeout job first. This can continue entirely from the
+      // browser; no database console or support intervention is required.
+      const failedCutoff = new Date(
+        Date.now() - 2 * 60 * 60 * 1000,
+      ).toISOString();
       const { data: failedJobs } = await db
         .from("flyer_import_jobs")
         .select("id,error_message,created_at")
+        .eq("user_id", user.id)
         .eq("status", "failed")
         .gte("created_at", failedCutoff)
         .order("created_at", { ascending: false })
@@ -472,36 +552,39 @@ export default function FlyerPage() {
         return;
       }
 
-      // Older builds removed the local job id as soon as analysis completed.
-      // Recover a recent completed-but-not-saved import so a refresh does not
-      // discard the review screen.
-      const cutoff = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
-      const { data: latest, error: latestError } = await db
+      // If the tab/browser was closed after analysis, find the latest completed
+      // job that has not yet become a saved flyer and offer an explicit resume.
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: completedJobs } = await db
         .from("flyer_import_jobs")
-        .select("id,file_hash,completed_at")
+        .select(
+          "id,status,source_file_name,file_hash,retailer,result,completed_at,created_at",
+        )
+        .eq("user_id", user.id)
         .eq("status", "completed")
         .gte("completed_at", cutoff)
         .order("completed_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(5);
 
-      if (latestError || !latest || cancelled) return;
+      for (const job of completedJobs ?? []) {
+        if (cancelled) return;
 
-      let alreadySaved = false;
-      if (latest.file_hash) {
-        const { data: savedFlyer } = await db
-          .from("flyers")
-          .select("id")
-          .eq("file_hash", latest.file_hash)
-          .limit(1)
-          .maybeSingle();
-        alreadySaved = !!savedFlyer;
-      }
+        let alreadySaved = false;
+        if (job.file_hash) {
+          const { data: savedFlyer } = await db
+            .from("flyers")
+            .select("id")
+            .eq("user_id", user.id)
+            .eq("file_hash", job.file_hash)
+            .limit(1)
+            .maybeSingle();
+          alreadySaved = !!savedFlyer;
+        }
 
-      if (!alreadySaved && !cancelled) {
-        localStorage.setItem(IMPORT_JOB_KEY, latest.id);
-        setActiveJobId(latest.id);
-        setProgress({ current: 1, total: 1, label: "Recuperando importação concluída…" });
+        if (!alreadySaved) {
+          await setCompletedRecovery(job);
+          return;
+        }
       }
     };
 
@@ -510,6 +593,27 @@ export default function FlyerPage() {
       cancelled = true;
     };
   }, [user?.id, view]);
+
+  const continuePendingImport = () => {
+    if (!pendingRecovery) return;
+    appliedJobRef.current = null;
+    localStorage.setItem(IMPORT_JOB_KEY, pendingRecovery.id);
+    setActiveJobId(pendingRecovery.id);
+    setPendingRecovery(null);
+    setProgress({
+      current: 1,
+      total: 1,
+      label: "Abrindo revisão salva…",
+    });
+  };
+
+  const dismissPendingImport = () => {
+    if (!pendingRecovery) return;
+    if (localStorage.getItem(IMPORT_JOB_KEY) === pendingRecovery.id) {
+      localStorage.removeItem(IMPORT_JOB_KEY);
+    }
+    setPendingRecovery(null);
+  };
 
   const productMap = useMemo(
     () => new Map(products.map((product) => [product.id, product])),
@@ -1352,6 +1456,52 @@ export default function FlyerPage() {
 
       {view === "import" && (
         <div className="space-y-3">
+          {pendingRecovery && (
+            <Card className="border-primary/35 bg-primary/5">
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-xl bg-primary/15 p-2 text-primary">
+                    <CheckCircle2 className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-bold">Importação pronta para continuar</p>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {pendingRecovery.sourceFileName}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {pendingRecovery.retailer
+                        ? pendingRecovery.retailer + " · "
+                        : ""}
+                      {pendingRecovery.offerCount
+                        ? pendingRecovery.offerCount + " ofertas aguardando revisão."
+                        : "A análise foi concluída e aguarda revisão."}
+                    </p>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <Button
+                        type="button"
+                        className="h-9 text-xs font-bold"
+                        onClick={continuePendingImport}
+                      >
+                        Continuar revisão
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9 text-xs"
+                        onClick={dismissPendingImport}
+                      >
+                        Agora não
+                      </Button>
+                    </div>
+                    <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                      O resultado está salvo no servidor. Você pode fechar o app e continuar depois.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="border-primary/20">
             <CardContent className="p-3.5 sm:p-5">
               <button
