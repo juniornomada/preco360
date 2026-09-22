@@ -509,6 +509,34 @@ export default function FlyerPage() {
         }
       }
 
+      // Recover any recent active server-side job even if Android/browser
+      // discarded the localStorage pointer while the tab was suspended.
+      const activeCutoff = new Date(
+        Date.now() - 6 * 60 * 60 * 1000,
+      ).toISOString();
+      const { data: activeJobs } = await db
+        .from("flyer_import_jobs")
+        .select("id,status,progress_current,progress_total,progress_label,created_at")
+        .eq("user_id", user.id)
+        .in("status", ["queued", "processing", "refining"])
+        .gte("created_at", activeCutoff)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      const serverActiveJob = activeJobs?.[0];
+      if (serverActiveJob && !cancelled) {
+        localStorage.setItem(IMPORT_JOB_KEY, serverActiveJob.id);
+        setActiveJobId(serverActiveJob.id);
+        setProgress({
+          current: Math.max(0, Number(serverActiveJob.progress_current) || 0),
+          total: Math.max(1, Number(serverActiveJob.progress_total) || 1),
+          label:
+            serverActiveJob.progress_label ||
+            "Recuperando importação em andamento…",
+        });
+        return;
+      }
+
       // Recover a recent timeout job first. This can continue entirely from the
       // browser; no database console or support intervention is required.
       const failedCutoff = new Date(
