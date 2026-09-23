@@ -1340,7 +1340,9 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
             entry.package_quantity,
             entry.package_unit,
             entry.offer_notes,
-            effectivePrice,
+            Number.isFinite(regularPrice) && regularPrice > 0
+              ? regularPrice
+              : effectivePrice,
           )
         : packageInfoFromQuantity(
             entry.package_quantity,
