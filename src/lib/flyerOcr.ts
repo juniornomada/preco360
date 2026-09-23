@@ -1,5 +1,11 @@
 import { supabase } from "@/integrations/supabase/client";
-import { normalizedUnitPrice, type BaseUnit, type FlyerCandidate, type PackageInfo } from "@/lib/flyerAnalysis";
+import {
+  normalizedUnitPrice,
+  offerPackageInfo,
+  type BaseUnit,
+  type FlyerCandidate,
+  type PackageInfo,
+} from "@/lib/flyerAnalysis";
 import { readFlyerFileSmart as readFlyerLocal } from "@/lib/flyerOcrV6";
 import { loadPdfJsBrowser } from "@/lib/pdfJsBrowser";
 
@@ -329,14 +335,21 @@ function toCandidate(offer: VisionOffer, sourcePageOverride?: number): RichCandi
   const confidence = Number(offer.confidence);
   if (!offer.product_name?.trim() || !Number.isFinite(price) || price <= 0 || confidence < 0.72) return null;
 
-  let pkg = packageInfo(offer.package_quantity, offer.package_unit);
+  const rawName = displayName(offer);
+  let pkg = offerPackageInfo(
+    rawName,
+    offer.package_quantity,
+    offer.package_unit,
+    offer.notes,
+    price,
+  );
   if (!pkg && offer.price_basis_unit && offer.price_basis_unit.toLowerCase() !== "un") {
     pkg = packageInfo(offer.price_basis_quantity, offer.price_basis_unit);
   }
 
   const normalized = normalizedUnitPrice(price, pkg);
   return {
-    rawName: displayName(offer),
+    rawName,
     brand: offer.brand?.trim() || null,
     price,
     packageInfo: pkg,
