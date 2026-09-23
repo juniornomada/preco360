@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Tags } from "lucide-react";
 import {
   forceProductVisual,
@@ -259,25 +259,30 @@ export default function ProductVisual({
   const visual = productVisual(name, category);
   const useRuleIcon = forceProductVisual(name, category);
   const safeImageUrl = useRuleIcon ? null : imageUrl;
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [safeImageUrl]);
+
+  const showImage = Boolean(safeImageUrl) && !imageFailed;
 
   return (
     <div className={`flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-muted/50 ${compact ? "h-[52px] w-[52px] sm:h-14 sm:w-14" : "h-14 w-14"}`}>
       {safeImageUrl ? (
         <img
+          key={safeImageUrl}
           src={safeImageUrl}
           alt=""
           loading="lazy"
-          className="h-full w-full object-contain p-1"
-          onError={(event) => {
-            event.currentTarget.style.display = "none";
-            const fallback = event.currentTarget.nextElementSibling as HTMLElement | null;
-            if (fallback) fallback.style.display = "flex";
-          }}
+          className={`${showImage ? "block" : "hidden"} h-full w-full object-contain p-1`}
+          onLoad={() => setImageFailed(false)}
+          onError={() => setImageFailed(true)}
         />
       ) : null}
       <span
         aria-hidden="true"
-        className={`${safeImageUrl ? "hidden" : "flex"} h-full w-full items-center justify-center`}
+        className={`${showImage ? "hidden" : "flex"} h-full w-full items-center justify-center`}
       >
         <ProductVisualIcon visual={visual} />
       </span>
