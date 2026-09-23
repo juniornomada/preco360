@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 const MAX_RECORDING_MS = 5500;
+const TRANSCRIPTION_TIMEOUT_MS = 8000;
 const SILENCE_AFTER_SPEECH_MS = 750;
 const MIN_RECORDING_MS = 450;
 const SPEECH_RMS_THRESHOLD = 0.018;
@@ -112,10 +113,29 @@ export function useVoiceSearch() {
         }),
       );
 
-      const { data, error: invokeError } = await supabase.functions.invoke(
+      const invokePromise = supabase.functions.invoke(
         "transcribe-radar-voice",
         { body: form },
       );
+
+      const { data, error: invokeError } = await new Promise<
+        Awaited<typeof invokePromise>
+      >((resolve, reject) => {
+        const timeoutId = window.setTimeout(() => {
+          reject(new Error("VOICE_TRANSCRIPTION_TIMEOUT"));
+        }, TRANSCRIPTION_TIMEOUT_MS);
+
+        void invokePromise.then(
+          (result) => {
+            window.clearTimeout(timeoutId);
+            resolve(result);
+          },
+          (invokeFailure) => {
+            window.clearTimeout(timeoutId);
+            reject(invokeFailure);
+          },
+        );
+      });
 
       if (invokeError) throw invokeError;
 
@@ -133,8 +153,15 @@ export function useVoiceSearch() {
       transcriptCallbackRef.current?.(transcript);
     } catch (transcriptionError) {
       console.error("Falha ao transcrever busca por voz:", transcriptionError);
+
+      const timedOut =
+        transcriptionError instanceof Error &&
+        transcriptionError.message === "VOICE_TRANSCRIPTION_TIMEOUT";
+
       setError(
-        "Não consegui transcrever o áudio agora. Toque no microfone e tente novamente.",
+        timedOut
+          ? "A transcrição demorou demais. Tente novamente."
+          : "Não consegui transcrever o áudio agora. Toque no microfone e tente novamente.",
       );
     } finally {
       setIsTranscribing(false);
