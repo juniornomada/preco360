@@ -42,6 +42,9 @@ describe("product visual resolver", () => {
   it("forces safe icons only for high-risk families", () => {
     expect(forceProductVisual("Antisséptico Listerine Tipos 500ml")).toBe(true);
     expect(forceProductVisual("Cápsulas de Bebida Dolce Gusto")).toBe(true);
+    expect(forceProductVisual("Filé de Merluza El Mare 500g")).toBe(false);
+    expect(forceProductVisual("Filé de Merluza Seara Congelada 500g")).toBe(false);
+    expect(forceProductVisual("Bisteca Suína Congelada Aurora Kg")).toBe(false);
     expect(forceProductVisual("Sabonete Dove Original 90g")).toBe(false);
     expect(forceProductVisual("Uva Verde sem Semente 500g")).toBe(true);
     expect(forceProductVisual("Abobrinha Paulista Verde Kg")).toBe(true);
