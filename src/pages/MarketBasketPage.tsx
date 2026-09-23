@@ -20,6 +20,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { basketNeedsCatalog, genericBasketFamilies } from "@/lib/flyerAnalysis";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
+import { canonicalRetailerName } from "@/lib/retailerNames";
 
 const db = supabase as any;
 const LEGACY_STORAGE_KEY = "preco360-basket-selection-v2";
@@ -1146,7 +1147,7 @@ export default function MarketBasketPage() {
                       </p>
                     )}
                     <p className="text-xs text-muted-foreground">
-                      {row.offer.retailer} · válido até {dateBr(row.offer.validTo)}
+                      {canonicalRetailerName(row.offer.retailer)} · válido até {dateBr(row.offer.validTo)}
                     </p>
                   </div>
                   <div className="shrink-0 text-right">
@@ -1215,7 +1216,7 @@ export default function MarketBasketPage() {
                                 : "text-foreground")
                             }
                           >
-                            {market.retailer}
+                            {canonicalRetailerName(market.retailer)}
                           </p>
                           <p className="text-[10px] text-muted-foreground">
                             {market.covered}/{selectedGroups.length} itens com preço vigente
@@ -1470,7 +1471,7 @@ export default function MarketBasketPage() {
                         {best && (
                           <p className="mt-1 text-[11px] text-muted-foreground">
                             {group.generic
-                              ? `Melhor agora: ${best.raw_name} · ${best.retailer}`
+                              ? `Melhor agora: ${best.raw_name} · ${canonicalRetailerName(best.retailer)}`
                               : `1 pacote = ${packageLabel(best)}`}
                           </p>
                         )}
@@ -1551,7 +1552,7 @@ export default function MarketBasketPage() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-lg font-extrabold leading-tight text-primary">
-                          {market.retailer}
+                          {canonicalRetailerName(market.retailer)}
                         </p>
                         {isBestMarket && (
                           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary">

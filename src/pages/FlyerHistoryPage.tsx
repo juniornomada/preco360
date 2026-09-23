@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { canonicalRetailerName } from "@/lib/retailerNames";
 
 const db = supabase as any;
 
@@ -37,7 +38,7 @@ export default function FlyerHistoryPage() {
   });
 
   const removeFlyer = async (flyer: any) => {
-    if (!window.confirm(`Excluir o tabloide de ${flyer.retailer}? Os preços ofertados dele também serão removidos.`)) return;
+    if (!window.confirm(`Excluir o tabloide de ${canonicalRetailerName(flyer.retailer)}? Os preços ofertados dele também serão removidos.`)) return;
     setDeletingId(flyer.id);
     try {
       const sourcePaths = Array.from(
@@ -101,7 +102,7 @@ export default function FlyerHistoryPage() {
               <CardContent className="flex items-center gap-3 p-4">
                 <div className="rounded-xl bg-primary/10 p-2.5 text-primary"><FileText className="h-5 w-5" /></div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-bold">{flyer.retailer}</p>
+                  <p className="truncate font-bold">{canonicalRetailerName(flyer.retailer)}</p>
                   <p className="text-xs text-muted-foreground">{dateBr(flyer.valid_from)} → {dateBr(flyer.valid_to)} · {flyer.flyer_items?.[0]?.count ?? 0} ofertas</p>
                   <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{flyer.source_file_name || "Tabloide"}</p>
                 </div>

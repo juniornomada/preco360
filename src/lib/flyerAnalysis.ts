@@ -1,3 +1,5 @@
+import { canonicalRetailerName } from "@/lib/retailerNames";
+
 export type BaseUnit = "kg" | "l" | "un";
 
 export type PackageInfo = {
@@ -242,6 +244,7 @@ export function extractFlyerMeta(text: string) {
   const normalized = normalizeSearchText(text);
   let retailer = "";
   if (normalized.includes("confianca")) retailer = "Confiança";
+  else if (normalized.includes("kawakami")) retailer = "Kawakami";
   else if (normalized.includes("carrefour")) retailer = "Carrefour";
   else if (normalized.includes("assai")) retailer = "Assaí";
   else if (normalized.includes("atacadao")) retailer = "Atacadão";
@@ -278,7 +281,7 @@ function packageBonus(a: PackageInfo | null, b: PackageInfo | null) {
 export function matchFlyerItem(candidate: FlyerCandidate, products: ProductForMatch[], savedAliases: AliasForMatch[], retailer?: string) {
   const normalized = normalizeSearchText(candidate.rawName);
   const alias = savedAliases.find((item) => item.normalized_alias === normalized &&
-    (!item.retailer || !retailer || normalizeSearchText(item.retailer) === normalizeSearchText(retailer)));
+    (!item.retailer || !retailer || canonicalRetailerName(item.retailer) === canonicalRetailerName(retailer)));
   if (alias) return { productId: alias.product_id, confidence: 1, type: "exact" as const };
 
   const candidateTokens = tokens(candidate.rawName);

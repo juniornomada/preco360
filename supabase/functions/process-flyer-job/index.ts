@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { canonicalRetailerName } from "../_shared/retailer-name.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -1098,10 +1099,11 @@ async function processPage(jobId: string, requestedPage: number) {
       ]),
     ].sort((a, b) => a - b);
 
-    let retailer =
+    let retailer = canonicalRetailerName(
       job.result?.retailer ??
       job.retailer ??
-      null;
+      null,
+    );
     let validFrom =
       job.result?.valid_from ??
       job.valid_from ??
@@ -1114,7 +1116,7 @@ async function processPage(jobId: string, requestedPage: number) {
 
     for (const success of successes) {
       model = success.model || model;
-      retailer = success.parsed.retailer ?? retailer;
+      retailer = canonicalRetailerName(success.parsed.retailer ?? retailer);
       validFrom = alignDateYearToSource(
         success.parsed.valid_from ?? validFrom,
         job.source_file_name,
@@ -1352,7 +1354,7 @@ async function processInitial(jobId: string) {
       ok: true,
       engine: "gemini-vision",
       model,
-      retailer: parsed.retailer ?? job.retailer ?? null,
+      retailer: canonicalRetailerName(parsed.retailer ?? job.retailer ?? null),
       valid_from: parsed.valid_from ?? job.valid_from ?? null,
       valid_to: parsed.valid_to ?? job.valid_to ?? null,
       page_count: pageCount,
