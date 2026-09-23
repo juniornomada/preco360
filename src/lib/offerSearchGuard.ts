@@ -62,3 +62,40 @@ export function isGenericPoncaSearch(query: string) {
 
   return tokens.length === 1 && poncaSearchVariantSet.has(tokens[0]);
 }
+
+
+const powderedDrinkTerms = new Set(["suco", "sucos", "refresco", "refrescos"]);
+
+export function isPowderedDrinkSearch(query: string) {
+  const tokens = normalizeSearchText(query)
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((token) => !["de", "da", "do", "das", "dos", "em"].includes(token));
+
+  return (
+    tokens.includes("po") &&
+    tokens.some((token) => powderedDrinkTerms.has(token))
+  );
+}
+
+export function powderedDrinkSearchRequests(query: string) {
+  const tokens = normalizeSearchText(query)
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((token) => !["de", "da", "do", "das", "dos", "em"].includes(token));
+
+  if (
+    !tokens.includes("po") ||
+    !tokens.some((token) => powderedDrinkTerms.has(token))
+  ) {
+    return [tokens.join(" ")];
+  }
+
+  return [...new Set(
+    ["suco", "refresco"].map((familyTerm) =>
+      tokens
+        .map((token) => (powderedDrinkTerms.has(token) ? familyTerm : token))
+        .join(" "),
+    ),
+  )];
+}
