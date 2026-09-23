@@ -731,7 +731,9 @@ function comparableOfferIdentity(current: FlyerItemRow, previous: FlyerItemRow) 
         !currentPackage ||
         !previousPackage ||
         currentPackage.baseUnit !== "un" ||
-        previousPackage.baseUnit !== "un"
+        previousPackage.baseUnit !== "un" ||
+        currentPackage.baseQuantity <= 1 ||
+        previousPackage.baseQuantity <= 1
       )
     ) {
       return false;
