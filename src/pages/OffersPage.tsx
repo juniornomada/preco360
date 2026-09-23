@@ -7,7 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import ProductVisual from "@/components/ProductVisual";
-import { BEEF_SEMANTIC_TOKENS, isBeefOfferText, isBroadBeefSearch } from "@/lib/beefSearch";
+import {
+  BEEF_SEMANTIC_TOKENS,
+  FISH_SEMANTIC_TOKENS,
+  PORK_SEMANTIC_TOKENS,
+  isBeefOfferText,
+  isBroadBeefSearch,
+  isBroadFishSearch,
+  isBroadPorkSearch,
+  isFishOfferText,
+  isPorkOfferText,
+} from "@/lib/beefSearch";
 import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
 import {
@@ -258,6 +268,8 @@ type OfferFamily =
   | "coffeeCapsule"
   | "cake"
   | "beef"
+  | "pork"
+  | "fish"
   | "other";
 
 type SearchFamilyIntent = OfferFamily | "milk" | "corn" | "coffee";
@@ -268,6 +280,8 @@ function hasAny(tokens: Set<string>, values: string[]) {
 
 function queryOfferFamily(query: string): SearchFamilyIntent | null {
   if (isBroadBeefSearch(query)) return "beef";
+  if (isBroadPorkSearch(query)) return "pork";
+  if (isBroadFishSearch(query)) return "fish";
 
   const tokens = new Set(searchTokens(query));
   const hasMilk = hasAny(tokens, ["leite", "leites"]);
@@ -382,6 +396,8 @@ function inferOfferFamily(
   // Product-head rules: the beginning of the name is more reliable than a
   // keyword appearing later as flavor, ingredient or accompaniment.
   if (isBeefOfferText(raw)) return "beef";
+  if (isPorkOfferText(raw)) return "pork";
+  if (isFishOfferText(raw)) return "fish";
   if (/^bolos?\b/.test(raw)) return "cake";
 
   if (/^(?:mistura de )?creme de leite\b/.test(raw)) return "milkCream";
@@ -478,6 +494,8 @@ function familyLabel(family: OfferFamily) {
   if (family === "coffeeCapsule") return "Café em cápsula";
   if (family === "cake") return "Bolo";
   if (family === "beef") return "Carne bovina";
+  if (family === "pork") return "Carne suína";
+  if (family === "fish") return "Peixe";
   return "Produto";
 }
 
@@ -537,6 +555,8 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   if (intent === "juice") add("suco", "sucos");
   if (intent === "cake") add("bolo", "bolos");
   if (intent === "beef") add(...BEEF_SEMANTIC_TOKENS);
+  if (intent === "pork") add(...PORK_SEMANTIC_TOKENS);
+  if (intent === "fish") add(...FISH_SEMANTIC_TOKENS);
 
   return result;
 }
@@ -562,6 +582,8 @@ function familyMatchesIntent(family: OfferFamily, intent: SearchFamilyIntent | n
     );
   }
   if (intent === "beef") return family === "beef";
+  if (intent === "pork") return family === "pork";
+  if (intent === "fish") return family === "fish";
   return family === intent;
 }
 
@@ -1129,7 +1151,9 @@ export default function OffersPage() {
     explicitSearchFamily === "milk" ||
     explicitSearchFamily === "corn" ||
     explicitSearchFamily === "coffee" ||
-    explicitSearchFamily === "beef";
+    explicitSearchFamily === "beef" ||
+    explicitSearchFamily === "pork" ||
+    explicitSearchFamily === "fish";
 
   const bestOfferByFamily = useMemo(() => {
     const bestEntry = new Map<
