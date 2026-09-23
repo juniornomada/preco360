@@ -21,6 +21,7 @@ import {
 import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
 import { canonicalRetailerName } from "@/lib/retailerNames";
+import { packagePriceIsMeaningfullyDifferent, prioritizeKgPrice } from "@/lib/offerPriceDisplay";
 import {
   BadgeCheck,
   ChevronRight,
@@ -1378,6 +1379,24 @@ export default function OffersPage() {
             );
             const displayTitle = compactOfferName(item);
             const packLabel = packageLabel(item);
+            const prioritizeUnitPrice = prioritizeKgPrice(
+              entry.family,
+              item.raw_name,
+              candidate.baseUnit,
+            );
+            const showEffectivePackageTotal =
+              prioritizeUnitPrice &&
+              packagePriceIsMeaningfullyDifferent(
+                candidate.price,
+                candidate.normalizedPrice,
+              );
+            const showRegularPackageTotal =
+              prioritizeUnitPrice &&
+              regularNormalized.baseUnit === "kg" &&
+              packagePriceIsMeaningfullyDifferent(
+                regularPrice,
+                regularNormalized.normalizedPrice,
+              );
             const isFamilyBest =
               bestOfferByFamily.get(entry.family) === item.id;
             const isTopResult = isBroadFamilySearch
@@ -1457,39 +1476,81 @@ export default function OffersPage() {
                             </p>
                           )}
                           <p className="text-lg font-extrabold leading-tight sm:text-xl text-primary">
-                            {brl(candidate.price)}
+                            {prioritizeUnitPrice
+                              ? formatNormalizedPrice(
+                                  candidate.normalizedPrice,
+                                  candidate.baseUnit,
+                                )
+                              : brl(candidate.price)}
                           </p>
-                          {candidate.baseUnit !== "un" && (
-                            <p className="mt-0.5 text-[10px] font-semibold text-primary">
-                              {formatNormalizedPrice(
-                                candidate.normalizedPrice,
-                                candidate.baseUnit,
-                              )}
-                            </p>
+                          {prioritizeUnitPrice ? (
+                            showEffectivePackageTotal && (
+                              <p className="mt-0.5 text-[10px] font-semibold text-primary/85">
+                                Embalagem {brl(candidate.price)}
+                              </p>
+                            )
+                          ) : (
+                            candidate.baseUnit !== "un" && (
+                              <p className="mt-0.5 text-[10px] font-semibold text-primary">
+                                {formatNormalizedPrice(
+                                  candidate.normalizedPrice,
+                                  candidate.baseUnit,
+                                )}
+                              </p>
+                            )
                           )}
                           <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground/80">
-                            Normal {brl(regularPrice)}
-                            {regularNormalized.baseUnit !== "un"
-                              ? " · " +
-                                formatNormalizedPrice(
+                            {prioritizeUnitPrice &&
+                            regularNormalized.baseUnit === "kg" ? (
+                              <>
+                                Normal{" "}
+                                {formatNormalizedPrice(
                                   regularNormalized.normalizedPrice,
                                   regularNormalized.baseUnit,
-                                )
-                              : ""}
+                                )}
+                                {showRegularPackageTotal
+                                  ? " · embalagem " + brl(regularPrice)
+                                  : ""}
+                              </>
+                            ) : (
+                              <>
+                                Normal {brl(regularPrice)}
+                                {regularNormalized.baseUnit !== "un"
+                                  ? " · " +
+                                    formatNormalizedPrice(
+                                      regularNormalized.normalizedPrice,
+                                      regularNormalized.baseUnit,
+                                    )
+                                  : ""}
+                              </>
+                            )}
                           </p>
                         </>
                       ) : (
                         <>
                           <p className="text-lg font-extrabold leading-tight sm:text-xl">
-                            {brl(candidate.price)}
+                            {prioritizeUnitPrice
+                              ? formatNormalizedPrice(
+                                  candidate.normalizedPrice,
+                                  candidate.baseUnit,
+                                )
+                              : brl(candidate.price)}
                           </p>
-                          {candidate.baseUnit !== "un" && (
-                            <p className="mt-0.5 text-[10px] text-muted-foreground">
-                              {formatNormalizedPrice(
-                                candidate.normalizedPrice,
-                                candidate.baseUnit,
-                              )}
-                            </p>
+                          {prioritizeUnitPrice ? (
+                            showEffectivePackageTotal && (
+                              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                Embalagem {brl(candidate.price)}
+                              </p>
+                            )
+                          ) : (
+                            candidate.baseUnit !== "un" && (
+                              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                {formatNormalizedPrice(
+                                  candidate.normalizedPrice,
+                                  candidate.baseUnit,
+                                )}
+                              </p>
+                            )
                           )}
                         </>
                       )}
