@@ -44,6 +44,9 @@ type SpeechWindow = Window & {
   webkitSpeechRecognition?: SpeechRecognitionConstructor;
 };
 
+const SILENCE_COMMIT_MS = 900;
+const MAX_LISTENING_MS = 6000;
+
 export function normalizeVoiceSearchTranscript(value: string) {
   return value
     .replace(/\s+/g, " ")
@@ -77,9 +80,24 @@ function voiceErrorMessage(error?: string) {
 
 export function useVoiceSearch() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const silenceTimerRef = useRef<number | null>(null);
+  const maxTimerRef = useRef<number | null>(null);
+  const pendingTranscriptRef = useRef("");
+  const deliveredRef = useRef(false);
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isSupported = getSpeechRecognitionConstructor() !== null;
+
+  const clearTimers = useCallback(() => {
+    if (silenceTimerRef.current !== null) {
+      window.clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    if (maxTimerRef.current !== null) {
+      window.clearTimeout(maxTimerRef.current);
+      maxTimerRef.current = null;
+    }
+  }, []);
 
   const stopListening = useCallback(() => {
     recognitionRef.current?.stop();
@@ -93,18 +111,52 @@ export function useVoiceSearch() {
         return false;
       }
 
+      clearTimers();
       recognitionRef.current?.abort();
+      pendingTranscriptRef.current = "";
+      deliveredRef.current = false;
 
       const recognition = new Recognition();
       recognition.lang = "pt-BR";
-      recognition.interimResults = false;
+      recognition.interimResults = true;
       recognition.continuous = false;
       recognition.maxAlternatives = 1;
+
+      const deliverPending = () => {
+        const transcript = normalizeVoiceSearchTranscript(
+          pendingTranscriptRef.current,
+        );
+        if (!transcript || deliveredRef.current) return false;
+
+        deliveredRef.current = true;
+        onTranscript(transcript);
+        return true;
+      };
+
+      const scheduleSilenceCommit = () => {
+        if (silenceTimerRef.current !== null) {
+          window.clearTimeout(silenceTimerRef.current);
+        }
+        silenceTimerRef.current = window.setTimeout(() => {
+          deliverPending();
+          recognition.stop();
+        }, SILENCE_COMMIT_MS);
+      };
 
       recognition.onstart = () => {
         recognitionRef.current = recognition;
         setError(null);
         setIsListening(true);
+
+        maxTimerRef.current = window.setTimeout(() => {
+          const delivered = deliverPending();
+          if (!delivered && !pendingTranscriptRef.current) {
+            setError(
+              "Não consegui ouvir o produto. Toque no microfone e tente novamente.",
+            );
+          }
+          recognition.stop();
+        }, MAX_LISTENING_MS);
       };
 
       recognition.onresult = (event) => {
@@ -112,17 +164,31 @@ export function useVoiceSearch() {
         const transcript = normalizeVoiceSearchTranscript(
           lastResult?.[0]?.transcript ?? "",
         );
-        if (transcript) {
-          onTranscript(transcript);
+
+        if (!transcript) return;
+        pendingTranscriptRef.current = transcript;
+
+        if (lastResult?.isFinal) {
+          deliverPending();
+          clearTimers();
+          recognition.stop();
+          return;
         }
+
+        scheduleSilenceCommit();
       };
 
       recognition.onerror = (event) => {
-        setError(voiceErrorMessage(event.error));
+        clearTimers();
+        if (event.error !== "aborted") {
+          setError(voiceErrorMessage(event.error));
+        }
         setIsListening(false);
       };
 
       recognition.onend = () => {
+        clearTimers();
+        deliverPending();
         if (recognitionRef.current === recognition) {
           recognitionRef.current = null;
         }
@@ -133,20 +199,22 @@ export function useVoiceSearch() {
         recognition.start();
         return true;
       } catch {
+        clearTimers();
         setError("Não foi possível iniciar o microfone. Tente novamente.");
         setIsListening(false);
         return false;
       }
     },
-    [],
+    [clearTimers],
   );
 
   useEffect(() => {
     return () => {
+      clearTimers();
       recognitionRef.current?.abort();
       recognitionRef.current = null;
     };
-  }, []);
+  }, [clearTimers]);
 
   return {
     isSupported,
