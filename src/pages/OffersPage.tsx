@@ -21,7 +21,11 @@ import {
 import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
 import { canonicalRetailerName } from "@/lib/retailerNames";
-import { packagePriceIsMeaningfullyDifferent, prioritizeKgPrice } from "@/lib/offerPriceDisplay";
+import {
+  isCannedFishOffer,
+  packagePriceIsMeaningfullyDifferent,
+  prioritizeKgPrice,
+} from "@/lib/offerPriceDisplay";
 import {
   BadgeCheck,
   ChevronRight,
@@ -272,6 +276,7 @@ type OfferFamily =
   | "beef"
   | "pork"
   | "fish"
+  | "cannedFish"
   | "other";
 
 type SearchFamilyIntent = OfferFamily | "milk" | "corn" | "coffee";
@@ -399,6 +404,7 @@ function inferOfferFamily(
   // keyword appearing later as flavor, ingredient or accompaniment.
   if (isBeefOfferText(raw)) return "beef";
   if (isPorkOfferText(raw)) return "pork";
+  if (isCannedFishOffer(raw)) return "cannedFish";
   if (isFishOfferText(raw)) return "fish";
   if (/^bolos?\b/.test(raw)) return "cake";
 
@@ -498,6 +504,7 @@ function familyLabel(family: OfferFamily) {
   if (family === "beef") return "Carne bovina";
   if (family === "pork") return "Carne suína";
   if (family === "fish") return "Peixe";
+  if (family === "cannedFish") return "Peixe enlatado";
   return "Produto";
 }
 
@@ -585,7 +592,9 @@ function familyMatchesIntent(family: OfferFamily, intent: SearchFamilyIntent | n
   }
   if (intent === "beef") return family === "beef";
   if (intent === "pork") return family === "pork";
-  if (intent === "fish") return family === "fish";
+  if (intent === "fish") {
+    return family === "fish" || family === "cannedFish";
+  }
   return family === intent;
 }
 
@@ -1089,8 +1098,10 @@ export default function OffersPage() {
 
     for (const entry of matches) {
       const group = groups.find((candidateGroup) =>
-        candidateGroup.some((member) =>
-          comparableOfferIdentity(member.item, entry.item),
+        candidateGroup.some(
+          (member) =>
+            member.family === entry.family &&
+            comparableOfferIdentity(member.item, entry.item),
         ),
       );
 
@@ -1106,7 +1117,10 @@ export default function OffersPage() {
             searchRelevance(a, normalizedQuery);
           if (relevanceDiff) return relevanceDiff;
 
-          if (a.candidate.baseUnit === b.candidate.baseUnit) {
+          if (a.family === "cannedFish" && b.family === "cannedFish") {
+            const packagePriceDiff = a.candidate.price - b.candidate.price;
+            if (Math.abs(packagePriceDiff) > 0.0001) return packagePriceDiff;
+          } else if (a.candidate.baseUnit === b.candidate.baseUnit) {
             const priceDiff =
               a.candidate.normalizedPrice - b.candidate.normalizedPrice;
             if (Math.abs(priceDiff) > 0.0001) return priceDiff;
@@ -1160,22 +1174,25 @@ export default function OffersPage() {
   const bestOfferByFamily = useMemo(() => {
     const bestEntry = new Map<
       OfferFamily,
-      { id: string; normalizedPrice: number; packagePrice: number }
+      { id: string; primaryPrice: number; packagePrice: number }
     >();
 
     for (const entry of analyzed) {
       const current = bestEntry.get(entry.family);
-      const candidatePrice = entry.candidate.normalizedPrice;
+      const candidatePrice =
+        entry.family === "cannedFish"
+          ? entry.candidate.price
+          : entry.candidate.normalizedPrice;
 
       if (
         !current ||
-        candidatePrice < current.normalizedPrice - 0.0001 ||
-        (Math.abs(candidatePrice - current.normalizedPrice) <= 0.0001 &&
+        candidatePrice < current.primaryPrice - 0.0001 ||
+        (Math.abs(candidatePrice - current.primaryPrice) <= 0.0001 &&
           entry.candidate.price < current.packagePrice)
       ) {
         bestEntry.set(entry.family, {
           id: entry.item.id,
-          normalizedPrice: candidatePrice,
+          primaryPrice: candidatePrice,
           packagePrice: entry.candidate.price,
         });
       }
