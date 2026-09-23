@@ -33,6 +33,10 @@ type SpeechRecognitionLike = {
   abort: () => void;
   onstart: ((event: Event) => void) | null;
   onend: ((event: Event) => void) | null;
+  onaudiostart: ((event: Event) => void) | null;
+  onaudioend: ((event: Event) => void) | null;
+  onspeechstart: ((event: Event) => void) | null;
+  onspeechend: ((event: Event) => void) | null;
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
 };
@@ -45,14 +49,23 @@ type SpeechWindow = Window & {
 };
 
 const SILENCE_COMMIT_MS = 900;
+const SPEECH_END_STOP_MS = 250;
 const MAX_LISTENING_MS = 6000;
 
 export function normalizeVoiceSearchTranscript(value: string) {
-  return value
+  const normalized = value
     .replace(/\s+/g, " ")
     .trim()
     .replace(/[.,;:!?]+$/g, "")
     .trim();
+
+  // On pt-BR speech recognition, the final "l" in a very short utterance can
+  // occasionally be emitted phonetically as "u" ("sal" -> "sau").
+  if (normalized.toLocaleLowerCase("pt-BR") === "sau") {
+    return "sal";
+  }
+
+  return normalized;
 }
 
 function getSpeechRecognitionConstructor() {
@@ -84,6 +97,7 @@ export function useVoiceSearch() {
   const maxTimerRef = useRef<number | null>(null);
   const pendingTranscriptRef = useRef("");
   const deliveredRef = useRef(false);
+  const speechStartedRef = useRef(false);
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isSupported = getSpeechRecognitionConstructor() !== null;
@@ -115,6 +129,7 @@ export function useVoiceSearch() {
       recognitionRef.current?.abort();
       pendingTranscriptRef.current = "";
       deliveredRef.current = false;
+      speechStartedRef.current = false;
 
       const recognition = new Recognition();
       recognition.lang = "pt-BR";
@@ -159,6 +174,26 @@ export function useVoiceSearch() {
         }, MAX_LISTENING_MS);
       };
 
+      recognition.onspeechstart = () => {
+        speechStartedRef.current = true;
+        if (silenceTimerRef.current !== null) {
+          window.clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = null;
+        }
+      };
+
+      recognition.onspeechend = () => {
+        if (silenceTimerRef.current !== null) {
+          window.clearTimeout(silenceTimerRef.current);
+        }
+        // Chrome/Android sometimes keeps very short words such as "sal" in a
+        // non-final state. Stopping recognition shortly after speechend forces
+        // the browser to flush the final result instead of leaving the mic on.
+        silenceTimerRef.current = window.setTimeout(() => {
+          recognition.stop();
+        }, SPEECH_END_STOP_MS);
+      };
+
       recognition.onresult = (event) => {
         const lastResult = event.results[event.results.length - 1];
         const transcript = normalizeVoiceSearchTranscript(
@@ -180,7 +215,9 @@ export function useVoiceSearch() {
 
       recognition.onerror = (event) => {
         clearTimers();
-        if (event.error !== "aborted") {
+
+        const delivered = deliverPending();
+        if (!delivered && event.error !== "aborted") {
           setError(voiceErrorMessage(event.error));
         }
         setIsListening(false);
@@ -188,7 +225,12 @@ export function useVoiceSearch() {
 
       recognition.onend = () => {
         clearTimers();
-        deliverPending();
+        const delivered = deliverPending();
+        if (!delivered && speechStartedRef.current) {
+          setError(
+            "Ouvi sua fala, mas não consegui identificar o produto. Tente falar novamente.",
+          );
+        }
         if (recognitionRef.current === recognition) {
           recognitionRef.current = null;
         }
