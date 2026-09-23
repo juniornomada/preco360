@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  comparableCannedFishOffers,
   isCannedFishOffer,
   packagePriceIsMeaningfullyDifferent,
   prioritizeKgPrice,
@@ -29,9 +30,55 @@ describe("meat and fish price display", () => {
     expect(isCannedFishOffer("Temaki Teika Atum 100g")).toBe(false);
   });
 
+  it("compares canned fish only within the same species and package size", () => {
+    expect(
+      comparableCannedFishOffers(
+        "Sardinha Palmeira Tipos 125g",
+        125,
+        "g",
+        "Sardinha Gomes da Costa lata / tipos / 125g",
+        125,
+        "g",
+      ),
+    ).toBe(true);
+
+    expect(
+      comparableCannedFishOffers(
+        "Atum Natural Robinson Crusoe 140g",
+        140,
+        "g",
+        "Atum Robinson Crusoe Pedaço em Óleo 170g",
+        170,
+        "g",
+      ),
+    ).toBe(false);
+
+    expect(
+      comparableCannedFishOffers(
+        "Atum Coqueiro Sólido 120g",
+        120,
+        "g",
+        "Sardinha Palmeira Tipos 120g",
+        120,
+        "g",
+      ),
+    ).toBe(false);
+
+    expect(
+      comparableCannedFishOffers(
+        "Sardinha Palmeira Tipos 125g",
+        125,
+        "g",
+        "Sardinha Fresca Kg",
+        1,
+        "kg",
+      ),
+    ).toBe(false);
+  });
+
   it("keeps package price primary for canned tuna and sardines", () => {
-    expect(prioritizeKgPrice("fish", "Atum Coqueiro Sólido 120g", "kg")).toBe(false);
-    expect(prioritizeKgPrice("fish", "Sardinha Palmeira Tipos 125g", "kg")).toBe(false);
+    expect(prioritizeKgPrice("cannedFish", "Atum Coqueiro Sólido 120g", "kg")).toBe(false);
+    expect(prioritizeKgPrice("cannedFish", "Sardinha Palmeira Tipos 125g", "kg")).toBe(false);
   });
 
   it("also prioritizes common fresh chicken cuts", () => {
