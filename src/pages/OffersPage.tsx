@@ -50,6 +50,7 @@ import {
   findComparablePurchaseProducts,
   formatNormalizedPrice,
   inferPackage,
+  isCapacitySpecificationProduct,
   matchFlyerItem,
   offerPackageInfo,
   offerReferenceFamiliesCompatible,
@@ -191,6 +192,36 @@ function expiryLabel(value: string | null | undefined, today: string) {
 function packageLabel(item: FlyerItemRow) {
   const quantity = Number(item.package_quantity);
   const rawUnit = String(item.package_unit ?? "").trim().toLowerCase();
+
+  if (!isCapacitySpecificationProduct(item.raw_name)) {
+    const effective = offerPackageInfo(
+      item.raw_name,
+      item.package_quantity,
+      item.package_unit,
+      item.offer_notes,
+      Number(item.advertised_price) || 0,
+    );
+
+    if (effective) {
+      let displayQuantity = effective.quantity;
+      let displayUnit: string = effective.unit;
+
+      if (effective.unit === "ml" && effective.quantity >= 1000) {
+        displayQuantity = effective.quantity / 1000;
+        displayUnit = "L";
+      } else if (effective.unit === "g" && effective.quantity >= 1000) {
+        displayQuantity = effective.quantity / 1000;
+        displayUnit = "kg";
+      } else if (effective.unit === "l") {
+        displayUnit = "L";
+      }
+
+      const value = displayQuantity.toLocaleString("pt-BR", {
+        maximumFractionDigits: 3,
+      });
+      return `${value} ${displayUnit}`;
+    }
+  }
 
   if (Number.isFinite(quantity) && quantity > 0 && rawUnit) {
     const unit =
