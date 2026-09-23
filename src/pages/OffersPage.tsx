@@ -1410,7 +1410,9 @@ export default function OffersPage() {
           type="button"
           variant="outline"
           className="h-9 gap-1.5 rounded-xl text-xs font-bold"
-          onClick={() => navigate("/radar")}
+          onClick={() => {
+            searchInputRef.current?.focus();
+          }}
         >
           <Radar className="h-3.5 w-3.5 text-primary" />
           Radar
