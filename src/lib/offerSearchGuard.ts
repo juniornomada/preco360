@@ -31,3 +31,34 @@ export function isSaltProductName(value: string) {
   const normalized = normalizeSearchText(value).trim();
   return /^sal\b/.test(normalized);
 }
+
+
+export const PONCA_SEARCH_VARIANTS = [
+  "ponca",
+  "poncan",
+  "poncam",
+  "ponka",
+  "ponkan",
+  "ponkam",
+  "poca",
+  "pocan",
+  "pocam",
+  "pokan",
+  "pokam",
+] as const;
+
+const poncaSearchVariantSet = new Set<string>(PONCA_SEARCH_VARIANTS);
+
+export function normalizePoncaSearchToken(value: string) {
+  const normalized = normalizeSearchText(value).trim();
+  return poncaSearchVariantSet.has(normalized) ? "ponca" : normalized;
+}
+
+export function isGenericPoncaSearch(query: string) {
+  const tokens = normalizeSearchText(query)
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((token) => !["de", "da", "do", "das", "dos", "em"].includes(token));
+
+  return tokens.length === 1 && poncaSearchVariantSet.has(tokens[0]);
+}
