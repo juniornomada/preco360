@@ -70,9 +70,8 @@ export function normalizeVoiceSearchTranscript(value: string) {
     return "sal";
   }
 
-  // Ponkan/Poncã has several accepted spellings and Chrome/Android can emit
-  // phonetically unrelated-looking text for this short fruit name. Keep the
-  // browser-native recognizer, but collapse known variants to one search term.
+  // Ponkan/Poncã has several accepted spellings. Keep the browser-native
+  // recognizer, but collapse only closely related spellings to one search term.
   const poncaAliases = new Set([
     "ponca",
     "poncan",
@@ -85,7 +84,6 @@ export function normalizeVoiceSearchTranscript(value: string) {
     "pocam",
     "pokan",
     "pokam",
-    "moricote",
   ]);
 
   if (poncaAliases.has(key)) {
