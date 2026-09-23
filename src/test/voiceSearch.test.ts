@@ -25,6 +25,8 @@ describe("normalizeVoiceSearchTranscript", () => {
     expect(normalizeVoiceSearchTranscript("ponkan")).toBe("poncã");
     expect(normalizeVoiceSearchTranscript("poncan")).toBe("poncã");
     expect(normalizeVoiceSearchTranscript("ponca")).toBe("poncã");
-    expect(normalizeVoiceSearchTranscript("PONCÃ.")).toBe("PONCÃ");
+    expect(normalizeVoiceSearchTranscript("pokan")).toBe("poncã");
+    expect(normalizeVoiceSearchTranscript("pocã")).toBe("poncã");
+    expect(normalizeVoiceSearchTranscript("PONCÃ.")).toBe("poncã");
   });
 });

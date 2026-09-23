@@ -33,7 +33,7 @@ function normalizeTranscript(value: string) {
     .toLowerCase();
 
   if (key === "sau") return "sal";
-  if (["ponca", "poncan", "ponkan", "pocan", "pocan", "ponkam"].includes(key)) {
+  if (["ponca", "poncan", "ponkan", "pocan", "pokan", "poca", "ponkam"].includes(key)) {
     return "poncã";
   }
 
@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
       "Retorne SOMENTE JSON no formato {\"transcript\":\"...\"}. " +
       "Transcreva apenas o nome do produto realmente falado, sem acrescentar marca, tipo ou complemento. " +
       "Palavras curtas são válidas. Se a pessoa falar somente 'sal', retorne exatamente 'sal' — não acrescente 'refinado'. " +
-      "Se ouvir poncã, poncan, ponkan ou pronúncia equivalente da fruta, normalize para 'poncã'. " +
+      "Se ouvir poncã, ponkan, pokan, pocã, poncan ou pronúncia equivalente da fruta, normalize para 'poncã'. " +
       "Se não houver fala inteligível, retorne {\"transcript\":\"\"}.";
 
     const configured = String(Deno.env.get("GEMINI_MODEL") || "").trim();
