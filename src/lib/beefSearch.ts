@@ -122,7 +122,7 @@ export function isBeefOfferText(value: string) {
 }
 
 const NON_PORK_RE =
-  /(^| )(bovin[oa]s?|frango|ave|aves|peru|tilapia|merluza|salmao|atum|sardinha|pacu|tambaqui)( |$)/;
+  /(^| )(bovin[oa]s?|ovin[oa]s?|cordeiro|cordeira|frango|ave|aves|peru|peixe|pescado|tilapia|merluza|linguado|panga|salmao|atum|sardinha|bacalhau|pacu|tambaqui|pintado|corvina|tainha|anchova|truta|pescada|pescadinha|cacao)( |$)/;
 
 const PORK_PRODUCT_HEAD_RE =
   /^(carne suin[oa]s?|bisteca(?: da paleta)? suin[oa]|bisteca .* suin[oa]|file mignon suin[oa]|costela suin[oa]|costelinha suin[oa]|lombo suin[oa]|lombo\b|copa lombo(?: suin[oa])?|paleta suin[oa]|panceta(?: suin[oa])?|pernil(?: suin[oa])?|orelha suin[oa]|pe suin[oa]|pele suin[oa]|rabo suin[oa])( |$)/;
