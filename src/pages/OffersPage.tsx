@@ -20,6 +20,7 @@ import {
 } from "@/lib/beefSearch";
 import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
+import { canonicalRetailerName } from "@/lib/retailerNames";
 import {
   BadgeCheck,
   ChevronRight,
@@ -1428,7 +1429,7 @@ export default function OffersPage() {
                         <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-bold">
                           <Store className="h-3.5 w-3.5 shrink-0 text-primary" />
                           <span className="truncate">
-                            {flyer?.retailer ?? "Supermercado"}
+                            {canonicalRetailerName(flyer?.retailer) || "Supermercado"}
                           </span>
                         </span>
                         <span
