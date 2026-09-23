@@ -15,4 +15,9 @@ describe("normalizeVoiceSearchTranscript", () => {
   it("keeps very short product names such as sal", () => {
     expect(normalizeVoiceSearchTranscript(" sal. ")).toBe("sal");
   });
+
+  it("corrects the common pt-BR short-word transcription sau to sal", () => {
+    expect(normalizeVoiceSearchTranscript("sau")).toBe("sal");
+    expect(normalizeVoiceSearchTranscript("SAU.")).toBe("sal");
+  });
 });
