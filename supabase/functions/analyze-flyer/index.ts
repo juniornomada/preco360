@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { canonicalRetailerName } from "../_shared/retailer-name.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -477,7 +478,7 @@ Deno.serve(async (req: Request) => {
       ok: true,
       engine: "gemini-vision",
       model,
-      retailer: parsed.retailer ?? null,
+      retailer: canonicalRetailerName(parsed.retailer),
       valid_from: parsed.valid_from ?? null,
       valid_to: parsed.valid_to ?? null,
       page_count: pageCount ?? parsed.page_count ?? null,
