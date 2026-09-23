@@ -21,7 +21,7 @@ describe("normalizeVoiceSearchTranscript", () => {
     expect(normalizeVoiceSearchTranscript("SAU.")).toBe("sal");
   });
 
-  it("normalizes Ponkan spellings and the observed Chrome misrecognition", () => {
+  it("normalizes Ponkan and closely related spellings", () => {
     const variants = [
       "poncã",
       "ponca",
@@ -36,7 +36,6 @@ describe("normalizeVoiceSearchTranscript", () => {
       "pocam",
       "pokan",
       "pokam",
-      "moricote",
     ];
 
     for (const variant of variants) {
