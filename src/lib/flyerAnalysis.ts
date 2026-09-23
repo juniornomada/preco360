@@ -1313,7 +1313,12 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
   comparablePurchaseProducts: ProductForMatch[] = [],
 ): OfferVerdict {
   const purchaseSources = new Map<string, ProductForMatch>();
-  if (product) purchaseSources.set(product.id, product);
+  if (
+    product &&
+    offerReferenceFamiliesCompatible(candidate.rawName, product.name) !== false
+  ) {
+    purchaseSources.set(product.id, product);
+  }
   for (const comparable of comparablePurchaseProducts) {
     purchaseSources.set(comparable.id, comparable);
   }
