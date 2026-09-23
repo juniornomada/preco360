@@ -104,6 +104,13 @@ export function useVoiceSearch() {
     setError(null);
 
     try {
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError || !sessionData.session?.access_token) {
+        throw new Error("VOICE_SESSION_UNAVAILABLE");
+      }
+
       const form = new FormData();
       const extension = blob.type.includes("mp4") ? "m4a" : "webm";
       form.append(
@@ -112,32 +119,31 @@ export function useVoiceSearch() {
           type: blob.type || "audio/webm",
         }),
       );
+      form.append("access_token", sessionData.session.access_token);
 
-      const invokePromise = supabase.functions.invoke(
-        "transcribe-radar-voice",
-        { body: form },
-      );
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => {
+        controller.abort();
+      }, TRANSCRIPTION_TIMEOUT_MS);
 
-      const { data, error: invokeError } = await new Promise<
-        Awaited<typeof invokePromise>
-      >((resolve, reject) => {
-        const timeoutId = window.setTimeout(() => {
-          reject(new Error("VOICE_TRANSCRIPTION_TIMEOUT"));
-        }, TRANSCRIPTION_TIMEOUT_MS);
-
-        void invokePromise.then(
-          (result) => {
-            window.clearTimeout(timeoutId);
-            resolve(result);
-          },
-          (invokeFailure) => {
-            window.clearTimeout(timeoutId);
-            reject(invokeFailure);
+      let response: Response;
+      try {
+        response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/transcribe-radar-voice`,
+          {
+            method: "POST",
+            body: form,
+            signal: controller.signal,
           },
         );
-      });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
 
-      if (invokeError) throw invokeError;
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(String(data?.error || `VOICE_HTTP_${response.status}`));
+      }
 
       const transcript = normalizeVoiceSearchTranscript(
         String(data?.transcript ?? ""),
@@ -155,8 +161,8 @@ export function useVoiceSearch() {
       console.error("Falha ao transcrever busca por voz:", transcriptionError);
 
       const timedOut =
-        transcriptionError instanceof Error &&
-        transcriptionError.message === "VOICE_TRANSCRIPTION_TIMEOUT";
+        transcriptionError instanceof DOMException &&
+        transcriptionError.name === "AbortError";
 
       setError(
         timedOut

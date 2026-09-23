@@ -76,6 +76,35 @@ Deno.serve(async (req) => {
     if (!apiKey) throw new Error("GEMINI_API_KEY não configurada.");
 
     const form = await req.formData();
+    const accessToken = String(form.get("access_token") || "").trim();
+
+    if (!accessToken) {
+      return new Response(JSON.stringify({ error: "Sessão não informada." }), {
+        status: 401,
+        headers: { ...corsHeaders, "content-type": "application/json" },
+      });
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceRole) {
+      throw new Error("Configuração do Supabase indisponível.");
+    }
+
+    const authResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        apikey: serviceRole,
+      },
+    });
+
+    if (!authResponse.ok) {
+      return new Response(JSON.stringify({ error: "Sessão inválida." }), {
+        status: 401,
+        headers: { ...corsHeaders, "content-type": "application/json" },
+      });
+    }
+
     const file = form.get("file");
     if (!(file instanceof File)) {
       return new Response(JSON.stringify({ error: "Áudio não enviado." }), {
