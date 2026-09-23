@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { ArrowLeft, ImageOff, Search, Store } from "lucide-react";
+import { ArrowLeft, ImageOff, Mic, Search, Store } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useVoiceSearch } from "@/hooks/useVoiceSearch";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -71,7 +72,15 @@ export default function OfferImagesAuditPage() {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [onlyMissing, setOnlyMissing] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const {
+    isListening,
+    isTranscribing,
+    error: voiceSearchError,
+    startListening,
+    stopListening,
+  } = useVoiceSearch();
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query), 180);
@@ -188,12 +197,65 @@ export default function OfferImagesAuditPage() {
       <div className="relative mb-2">
         <Search className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
         <Input
-          className="h-12 pl-10 text-base"
-          placeholder="Filtrar por produto, marca ou mercado..."
+          ref={searchInputRef}
+          className="h-12 pl-10 pr-12 text-base"
+          placeholder={
+            isListening
+              ? "Ouvindo o produto..."
+              : isTranscribing
+                ? "Transcrevendo..."
+                : "Filtrar por produto, marca ou mercado..."
+          }
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
+        <button
+          type="button"
+          className={`absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${
+            isListening
+              ? "bg-primary/15 text-primary animate-pulse"
+              : isTranscribing
+                ? "bg-muted text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          }`}
+          aria-label={
+            isListening
+              ? "Parar busca por voz"
+              : isTranscribing
+                ? "Transcrevendo áudio"
+                : "Buscar produto por voz"
+          }
+          aria-pressed={isListening}
+          aria-busy={isTranscribing}
+          disabled={isTranscribing}
+          title={
+            isListening
+              ? "Parar"
+              : isTranscribing
+                ? "Transcrevendo..."
+                : "Buscar por voz"
+          }
+          onClick={() => {
+            if (isListening) {
+              stopListening();
+              return;
+            }
+
+            searchInputRef.current?.blur();
+            startListening((transcript) => {
+              setQuery(transcript);
+              setDebouncedQuery(transcript);
+            });
+          }}
+        >
+          <Mic className="h-4 w-4" />
+        </button>
       </div>
+      {voiceSearchError && (
+        <p className="-mt-1 mb-2 px-1 text-[10px] text-destructive">
+          {voiceSearchError}
+        </p>
+      )}
 
       <div className="mb-4 grid grid-cols-2 gap-2">
         <Button
