@@ -20,4 +20,26 @@ describe("normalizeVoiceSearchTranscript", () => {
     expect(normalizeVoiceSearchTranscript("sau")).toBe("sal");
     expect(normalizeVoiceSearchTranscript("SAU.")).toBe("sal");
   });
+
+  it("normalizes Ponkan and closely related spellings", () => {
+    const variants = [
+      "poncã",
+      "ponca",
+      "poncan",
+      "poncam",
+      "ponkan",
+      "ponkam",
+      "ponka",
+      "pocã",
+      "poca",
+      "pocan",
+      "pocam",
+      "pokan",
+      "pokam",
+    ];
+
+    for (const variant of variants) {
+      expect(normalizeVoiceSearchTranscript(variant)).toBe("poncã");
+    }
+  });
 });
