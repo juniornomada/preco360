@@ -23,10 +23,13 @@ import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
 import { canonicalRetailerName } from "@/lib/retailerNames";
 import {
+  isGenericPoncaSearch,
   isGenericSaltSearch,
   isGenericSugarSearch,
   isSaltProductName,
   isSugarProductName,
+  normalizePoncaSearchToken,
+  PONCA_SEARCH_VARIANTS,
 } from "@/lib/offerSearchGuard";
 import {
   comparableCannedFishOffers,
@@ -285,7 +288,7 @@ function searchTokens(value: string) {
       if (["refri", "refr"].includes(token)) return "refrigerante";
       if (["qj", "qjo"].includes(token)) return "queijo";
       if (["muss", "mussar", "mozzarella"].includes(token)) return "mussarela";
-      return token;
+      return normalizePoncaSearchToken(token);
     })
     .filter((token) => !searchStopWords.has(token));
 }
@@ -999,29 +1002,53 @@ export default function OffersPage() {
     [normalizedSearch],
   );
 
+  const searchRequests = useMemo(
+    () =>
+      isGenericPoncaSearch(normalizedSearch)
+        ? [...PONCA_SEARCH_VARIANTS]
+        : [searchRequest],
+    [normalizedSearch, searchRequest],
+  );
+
+  const searchRequestsKey = searchRequests.join("|");
+
   const {
     data: searchRows = [],
     isLoading: loadingSearchRows,
     error: searchRowsError,
   } = useQuery<SearchOfferItemRow[]>({
-    queryKey: ["live-market-offer-search-v1", user?.id, today, searchRequest],
-    enabled: !!user && hasSearch && searchRequest.length >= 2,
+    queryKey: ["live-market-offer-search-v1", user?.id, today, searchRequestsKey],
+    enabled:
+      !!user &&
+      hasSearch &&
+      searchRequests.some((request) => request.length >= 2),
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
     retry: 1,
     queryFn: async ({ signal }) => {
-      const { data, error } = await db
-        .rpc("search_offer_items_v1", {
-          p_query: searchRequest,
-          p_on_date: today,
-          p_active_limit: 120,
-          p_history_limit: 180,
-        })
-        .abortSignal(signal);
+      const responses = await Promise.all(
+        searchRequests.map((request) =>
+          db
+            .rpc("search_offer_items_v1", {
+              p_query: request,
+              p_on_date: today,
+              p_active_limit: 120,
+              p_history_limit: 180,
+            })
+            .abortSignal(signal),
+        ),
+      );
 
-      if (error) throw error;
-      return (data ?? []) as SearchOfferItemRow[];
+      const rowsById = new Map<string, SearchOfferItemRow>();
+      for (const { data, error } of responses) {
+        if (error) throw error;
+        for (const row of (data ?? []) as SearchOfferItemRow[]) {
+          rowsById.set(row.id, row);
+        }
+      }
+
+      return [...rowsById.values()];
     },
   });
 
