@@ -13,6 +13,7 @@ import { ensureClubActivationNote } from "@/lib/clubOfferRules";
 import { canonicalRetailerName } from "@/lib/retailerNames";
 import {
   ArrowDown,
+  ArrowLeft,
   ArrowUp,
   BadgeCheck,
   CalendarDays,
@@ -1642,7 +1643,7 @@ export default function FlyerPage() {
     <div className="page-container !pb-40 mx-auto w-full max-w-3xl">
       <header className="mb-3 flex items-start justify-between gap-3 sm:mb-4">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary sm:text-xs">Radar</p>
+          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary sm:text-xs">Gestão de tabloides</p>
           <h1 className="mt-0.5 text-[clamp(1.45rem,6vw,2rem)] font-extrabold leading-tight tracking-tight sm:mt-1">
             Base de ofertas
           </h1>
@@ -1655,9 +1656,19 @@ export default function FlyerPage() {
         </div>
       </header>
 
+      <Button
+        type="button"
+        variant="outline"
+        className="mb-2.5 h-10 w-full justify-start gap-2 border-primary/25 bg-primary/5 text-sm font-bold sm:mb-3"
+        onClick={() => navigate("/offers")}
+      >
+        <ArrowLeft className="h-4 w-4 text-primary" />
+        Voltar ao Radar de ofertas
+      </Button>
+
       <div className="mb-2.5 grid grid-cols-3 gap-1.5 rounded-xl bg-muted p-1 sm:mb-3 sm:gap-2">
         {([
-          ["radar", "Revisão", Sparkles],
+          ["radar", "Conferir", Sparkles],
           ["import", "Importar", Upload],
           ["history", "Histórico", History],
         ] as const).map(([key, label, Icon]) => (
@@ -2174,10 +2185,10 @@ export default function FlyerPage() {
           {!items.length ? (
             <Card className="border-dashed">
               <CardContent className="p-7 text-center">
-                <Radar className="mx-auto h-9 w-9 text-primary" />
-                <h2 className="mt-3 text-lg font-bold">Seu radar de mercado começa aqui</h2>
+                <Sparkles className="mx-auto h-9 w-9 text-primary" />
+                <h2 className="mt-3 text-lg font-bold">Nenhum tabloide aguardando conferência</h2>
                 <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-                  Importe um tabloide para comparar preço ofertado com o que você já pagou.
+                  Depois de importar um tabloide, esta aba mostra as ofertas lidas pela IA para você corrigir nomes, preços e correspondências antes de salvar.
                 </p>
                 <Button className="mt-4" onClick={() => changeView("import")}>
                   <Upload className="mr-2 h-4 w-4" />Importar tabloide
