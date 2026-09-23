@@ -151,35 +151,209 @@ function numberPt(value: string) {
   return Number(value.replace(/\./g, "").replace(",", "."));
 }
 
-export function inferPackage(value: string): PackageInfo | null {
-  const text = normalizeSearchText(value)
-    .replace(/\b([a-z]{3,})(kg|ml)\b/g, "$1 $2")
-    .replace(/(\d)\s+(kg|g|ml|l|lt|un|und|unid)\b/g, "$1$2");
-  const multi = text.match(/\b(\d+)\s*x\s*(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|lt)\b/i);
-  if (multi) {
-    const quantity = Number(multi[1]) * numberPt(multi[2]);
-    const unit = (multi[3].toLowerCase() === "lt" ? "l" : multi[3].toLowerCase()) as PackageInfo["unit"];
-    if (unit === "g") return { quantity, unit, baseUnit: "kg", baseQuantity: quantity / 1000 };
-    if (unit === "kg") return { quantity, unit, baseUnit: "kg", baseQuantity: quantity };
-    if (unit === "ml") return { quantity, unit, baseUnit: "l", baseQuantity: quantity / 1000 };
+function packageNumber(value: string, unit: string) {
+  if (value.includes(",")) {
+    return Number(value.replace(/\./g, "").replace(",", "."));
+  }
+  if (
+    (unit === "g" || unit === "ml") &&
+    /^\d+\.\d{3}$/.test(value)
+  ) {
+    return Number(value.replace(".", ""));
+  }
+  return Number(value);
+}
+
+function packageInfoFromQuantity(
+  quantityValue: number | string | null | undefined,
+  unitValue: string | null | undefined,
+): PackageInfo | null {
+  const quantity = Number(quantityValue);
+  const unit = normalizeSearchText(unitValue ?? "");
+  if (!Number.isFinite(quantity) || quantity <= 0) return null;
+
+  if (unit === "g") {
+    return { quantity, unit: "g", baseUnit: "kg", baseQuantity: quantity / 1000 };
+  }
+  if (unit === "kg") {
+    return { quantity, unit: "kg", baseUnit: "kg", baseQuantity: quantity };
+  }
+  if (unit === "ml") {
+    return { quantity, unit: "ml", baseUnit: "l", baseQuantity: quantity / 1000 };
+  }
+  if (unit === "l" || unit === "lt") {
     return { quantity, unit: "l", baseUnit: "l", baseQuantity: quantity };
   }
-
-  const match = text.match(/\b(\d+(?:[.,]\d+)?)\s*(kg|quilo|quilos|g|grama|gramas|ml|l|lt|litro|litros|un|und|unid|unidade|unidades)\b/i);
-  if (match) {
-    const quantity = numberPt(match[1]);
-    const unit = match[2].toLowerCase();
-    if (["g", "grama", "gramas"].includes(unit)) return { quantity, unit: "g", baseUnit: "kg", baseQuantity: quantity / 1000 };
-    if (["kg", "quilo", "quilos"].includes(unit)) return { quantity, unit: "kg", baseUnit: "kg", baseQuantity: quantity };
-    if (unit === "ml") return { quantity, unit: "ml", baseUnit: "l", baseQuantity: quantity / 1000 };
-    if (["l", "lt", "litro", "litros"].includes(unit)) return { quantity, unit: "l", baseUnit: "l", baseQuantity: quantity };
+  if (["un", "und", "unid", "unidade", "unidades"].includes(unit)) {
     return { quantity, unit: "un", baseUnit: "un", baseQuantity: quantity };
   }
-
-  if (/\b(kg|quilo|quilos)\b/.test(text)) return { quantity: 1, unit: "kg", baseUnit: "kg", baseQuantity: 1 };
-  if (/\b(litro|litros|lt)\b/.test(text)) return { quantity: 1, unit: "l", baseUnit: "l", baseQuantity: 1 };
-  if (/\b(unidade|unidades|und|unid)\b/.test(text)) return { quantity: 1, unit: "un", baseUnit: "un", baseQuantity: 1 };
   return null;
+}
+
+export function inferPackage(value: string): PackageInfo | null {
+  const text = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/([a-z])\.([a-z])/g, "$1 $2")
+    .replace(/[^a-z0-9.,]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/\b([a-z]{3,})(kg|ml)\b/g, "$1 $2")
+    .replace(/(\d)\s+(kg|g|ml|l|lt|un|und|unid)\b/g, "$1$2");
+
+  const multi = text.match(
+    /\b(\d+)\s*x\s*(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|lt)\b/i,
+  );
+  if (multi) {
+    const unit = (
+      multi[3].toLowerCase() === "lt" ? "l" : multi[3].toLowerCase()
+    ) as PackageInfo["unit"];
+    const quantity =
+      Number(multi[1]) * packageNumber(multi[2], unit);
+    return packageInfoFromQuantity(quantity, unit);
+  }
+
+  const sizeThenCount = text.match(
+    /\b(\d+(?:[.,]\d+)?)\s*(g|ml)\b\s*(?:cada\s*)?(?:cx|caixa|fd|fardo|pct|pacote|pack)\s*(?:com\s*)?(\d+)\s*(?:un|und|unid|unidades?|latas?|rolos?|capsulas?)\b/i,
+  );
+  if (sizeThenCount) {
+    const unit = sizeThenCount[2].toLowerCase();
+    const quantity =
+      packageNumber(sizeThenCount[1], unit) * Number(sizeThenCount[3]);
+    return packageInfoFromQuantity(quantity, unit);
+  }
+
+  const countThenSize = text.match(
+    /\b(?:cx|caixa|fd|fardo|pct|pacote|pack)\s*(?:com\s*)?(\d+)\s*(?:un|und|unid|unidades?|latas?|rolos?|capsulas?)\s*(?:de\s*)?(\d+(?:[.,]\d+)?)\s*(g|ml)\b/i,
+  );
+  if (countThenSize) {
+    const unit = countThenSize[3].toLowerCase();
+    const quantity =
+      Number(countThenSize[1]) * packageNumber(countThenSize[2], unit);
+    return packageInfoFromQuantity(quantity, unit);
+  }
+
+  const meterPack = text.match(
+    /\b(\d+)\s*x\s*\d+(?:[.,]\d+)?\s*m\b/i,
+  );
+  if (meterPack) {
+    return {
+      quantity: Number(meterPack[1]),
+      unit: "un",
+      baseUnit: "un",
+      baseQuantity: Number(meterPack[1]),
+    };
+  }
+
+  const match = text.match(
+    /\b(\d+(?:[.,]\d+)?)\s*(kg|quilo|quilos|g|grama|gramas|ml|l|lt|litro|litros|un|und|unid|unidade|unidades)\b/i,
+  );
+  if (match) {
+    const rawUnit = match[2].toLowerCase();
+    const normalizedUnit =
+      rawUnit === "lt" || rawUnit === "litro" || rawUnit === "litros"
+        ? "l"
+        : rawUnit === "grama" || rawUnit === "gramas"
+          ? "g"
+          : rawUnit === "quilo" || rawUnit === "quilos"
+            ? "kg"
+            : ["und", "unid", "unidade", "unidades"].includes(rawUnit)
+              ? "un"
+              : rawUnit;
+    const quantity = packageNumber(match[1], normalizedUnit);
+    return packageInfoFromQuantity(quantity, normalizedUnit);
+  }
+
+  if (/\b(kg|quilo|quilos)\b/.test(text)) {
+    return { quantity: 1, unit: "kg", baseUnit: "kg", baseQuantity: 1 };
+  }
+  if (/\b(litro|litros|lt)\b/.test(text)) {
+    return { quantity: 1, unit: "l", baseUnit: "l", baseQuantity: 1 };
+  }
+  if (/\b(unidade|unidades|und|unid)\b/.test(text)) {
+    return { quantity: 1, unit: "un", baseUnit: "un", baseQuantity: 1 };
+  }
+  return null;
+}
+
+export function isCapacitySpecificationProduct(rawName: string) {
+  const text = normalizeSearchText(rawName);
+  return /^(assadeira|caixa (?:organizadora|termica)|panela(?: de pressao)?|copo (?!descartavel)|jarra|frigideira|travessa|pote (?:tramontina|plasutil|plasvale|marinex|nadir))\b/.test(
+    text,
+  );
+}
+
+function explicitPackCount(value: string) {
+  const text = normalizeSearchText(value);
+  const multiplied = text.match(/\b(\d+)\s*x\s*\d+/);
+  if (multiplied) return Number(multiplied[1]);
+
+  const containerCount = text.match(
+    /\b(?:pack|fardo|fd|caixa|cx|pacote|pct)\s*(?:com\s*)?(\d+)\s*(?:un|und|unid|unidades?|latas?|rolos?|capsulas?)\b/,
+  );
+  if (containerCount) return Number(containerCount[1]);
+
+  const sizeThenCount = text.match(
+    /\b\d+(?:\s+\d+)?\s*(?:g|ml)\b\s*(?:cada\s*)?(?:cx|caixa|fd|fardo|pct|pacote|pack)\s*(?:com\s*)?(\d+)\s*(?:un|und|unid|unidades?|latas?|rolos?|capsulas?)\b/,
+  );
+  return sizeThenCount ? Number(sizeThenCount[1]) : null;
+}
+
+function packageUnitPrice(offerNotes: string[] | null | undefined) {
+  const raw = (offerNotes ?? []).join(" ");
+  const match = raw.match(
+    /(?:1\s*)?un(?:idade)?\s+(?:sai|saem)\s+por\s*:?[ ]*r\$\s*(\d+(?:[.,]\d{2}))/i,
+  );
+  if (!match) return null;
+  const price = Number(match[1].replace(",", "."));
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
+export function offerPackageInfo(
+  rawName: string,
+  packageQuantity?: number | string | null,
+  packageUnit?: string | null,
+  offerNotes?: string[] | null,
+  totalPrice?: number | null,
+): PackageInfo | null {
+  if (isCapacitySpecificationProduct(rawName)) {
+    return { quantity: 1, unit: "un", baseUnit: "un", baseQuantity: 1 };
+  }
+
+  const combined = [rawName, ...(offerNotes ?? [])].join(" ");
+  let pkg =
+    inferPackage(combined) ??
+    packageInfoFromQuantity(packageQuantity, packageUnit);
+
+  if (!pkg) return null;
+
+  const unitPrice = packageUnitPrice(offerNotes);
+  const explicitCount = explicitPackCount(combined);
+  if (
+    pkg.baseUnit !== "un" &&
+    !explicitCount &&
+    unitPrice &&
+    totalPrice &&
+    Number.isFinite(totalPrice) &&
+    totalPrice > unitPrice
+  ) {
+    const estimatedCount = totalPrice / unitPrice;
+    const count = Math.round(estimatedCount);
+    if (
+      count >= 2 &&
+      count <= 100 &&
+      Math.abs(estimatedCount - count) <= 0.05
+    ) {
+      pkg = {
+        ...pkg,
+        quantity: pkg.quantity * count,
+        baseQuantity: pkg.baseQuantity * count,
+      };
+    }
+  }
+
+  return pkg;
 }
 
 export function normalizedUnitPrice(price: number, pkg: PackageInfo | null) {
@@ -919,6 +1093,88 @@ function purchaseKeysCompatible(left: string, right: string) {
   return false;
 }
 
+export function offerReferenceFamilyKey(value: string) {
+  const text = normalizeSearchText(value);
+
+  if (/^(?:papel toalha|toalha de papel)\b/.test(text)) {
+    return /\binterfolh(?:a|ado|ada|ados|adas)?\b/.test(text)
+      ? "limpeza:papel-toalha-interfolhado"
+      : "limpeza:papel-toalha-rolo";
+  }
+
+  if (/^papel higienico\b/.test(text)) {
+    if (/\bfolha simples\b/.test(text)) {
+      return "higiene:papel-higienico:simples";
+    }
+    if (/\bfolha dupla\b/.test(text) || /\bf d\b/.test(text)) {
+      return "higiene:papel-higienico:dupla";
+    }
+    return "higiene:papel-higienico";
+  }
+
+  if (/^toalha umedecida\b/.test(text)) {
+    return "higiene:toalha-umedecida";
+  }
+
+  if (/^fralda\b/.test(text)) {
+    return /\bgeriatrica\b/.test(text)
+      ? "higiene:fralda-geriatrica"
+      : "higiene:fralda-infantil";
+  }
+
+  if (/^alimento para caes ou gatos\b/.test(text)) {
+    return "pet:caes-gatos";
+  }
+  if (/^alimento para caes\b/.test(text)) return "pet:caes";
+  if (/^alimento para gatos\b/.test(text)) return "pet:gatos";
+
+  if (/^limpador perfumado\b/.test(text)) {
+    return /\b(?:concentrado|conc)\b/.test(text)
+      ? "limpeza:limpador-perfumado-concentrado"
+      : "limpeza:limpador-perfumado-pronto";
+  }
+
+  if (/^capsulas?\b/.test(text)) return "cafe:capsula";
+
+  const purchaseKey = purchaseComparisonKey(value);
+  if (purchaseKey) return purchaseKey;
+
+  const genericKey = genericBasketFamily(value)?.key;
+  if (genericKey) return genericKey;
+
+  if (/^caixa organizadora\b/.test(text)) return "casa:caixa-organizadora";
+  if (/^caixa termica\b/.test(text)) return "casa:caixa-termica";
+  if (/^panela(?: de pressao)?\b/.test(text)) return "casa:panela";
+  if (/^assadeira\b/.test(text)) return "casa:assadeira";
+  if (/^copo (?!descartavel)\b/.test(text)) return "casa:copo";
+  if (/^hamburguer misto\b/.test(text)) return "congelado:hamburguer-misto";
+
+  return null;
+}
+
+export function offerReferenceFamiliesCompatible(
+  left: string,
+  right: string,
+): boolean | null {
+  const leftKey = offerReferenceFamilyKey(left);
+  const rightKey = offerReferenceFamilyKey(right);
+
+  if (!leftKey && !rightKey) return null;
+  if (!leftKey || !rightKey) return false;
+  return purchaseKeysCompatible(leftKey, rightKey);
+}
+
+export function offerReferenceRequiresKnownCount(familyKey: string | null) {
+  if (!familyKey) return false;
+  return (
+    familyKey.startsWith("higiene:papel-higienico") ||
+    familyKey.startsWith("limpeza:papel-toalha") ||
+    familyKey === "higiene:toalha-umedecida" ||
+    familyKey.startsWith("higiene:fralda-") ||
+    familyKey === "cafe:capsula"
+  );
+}
+
 function historicalPackage(product: ProductForMatch) {
   return product.package_size && product.unit
     ? inferPackage(`${product.package_size}${product.unit}`)
@@ -987,6 +1243,7 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
     package_unit?: string | null;
     raw_name?: string | null;
     base_unit?: string | null;
+    offer_notes?: string[] | null;
   }> = [],
   comparablePurchaseProducts: ProductForMatch[] = [],
 ): OfferVerdict {
@@ -1003,7 +1260,6 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
       .map((entry) => entry!.normalizedPrice),
   );
   const advertised = previousAdvertised
-    .filter((entry) => entry.base_unit === candidate.baseUnit)
     .map((entry) => {
       const regularPrice = Number(entry.advertised_price);
       const clubPrice = Number(entry.club_advertised_price);
@@ -1011,32 +1267,51 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
         Number.isFinite(clubPrice) &&
         clubPrice > 0 &&
         (!Number.isFinite(regularPrice) || regularPrice <= 0 || clubPrice <= regularPrice);
+      const effectivePrice = hasValidClub ? clubPrice : regularPrice;
 
-      if (hasValidClub) {
-        const pkg =
-          entry.package_quantity && entry.package_unit
-            ? inferPackage(`${entry.package_quantity}${entry.package_unit}`)
-            : entry.raw_name
-              ? inferPackage(entry.raw_name)
-              : null;
-        if (pkg) {
-          return normalizedUnitPrice(clubPrice, pkg).normalizedPrice;
-        }
+      const pkg = entry.raw_name
+        ? offerPackageInfo(
+            entry.raw_name,
+            entry.package_quantity,
+            entry.package_unit,
+            entry.offer_notes,
+            effectivePrice,
+          )
+        : packageInfoFromQuantity(
+            entry.package_quantity,
+            entry.package_unit,
+          );
 
-        const storedNormalized = Number(entry.normalized_price);
+      if (pkg && Number.isFinite(effectivePrice) && effectivePrice > 0) {
+        const normalized = normalizedUnitPrice(effectivePrice, pkg);
+        return normalized.baseUnit === candidate.baseUnit
+          ? normalized.normalizedPrice
+          : null;
+      }
+
+      if (entry.base_unit !== candidate.baseUnit) return null;
+
+      const storedNormalized = Number(entry.normalized_price);
+      if (
+        Number.isFinite(storedNormalized) &&
+        storedNormalized > 0
+      ) {
         if (
-          Number.isFinite(storedNormalized) &&
-          storedNormalized > 0 &&
+          hasValidClub &&
           Number.isFinite(regularPrice) &&
           regularPrice > 0
         ) {
           return storedNormalized * (clubPrice / regularPrice);
         }
+        return storedNormalized;
       }
 
-      return Number(entry.normalized_price);
+      return null;
     })
-    .filter((value) => Number.isFinite(value) && value > 0);
+    .filter(
+      (value): value is number =>
+        value !== null && Number.isFinite(value) && value > 0,
+    );
   // A price the user actually paid is stronger evidence than an advertised
   // price. Use paid history first; fall back to older flyer offers only when
   // there is no comparable purchase history.
