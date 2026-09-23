@@ -30,9 +30,21 @@ export function normalizeVoiceSearchTranscript(value: string) {
 
   if (key === "sau") return "sal";
 
-  if (
-    ["ponca", "poncan", "ponkan", "ponkam", "pocan", "pokan", "poca"].includes(key)
-  ) {
+  const poncaAliases = new Set([
+    "ponca",
+    "poncan",
+    "poncam",
+    "ponka",
+    "ponkan",
+    "ponkam",
+    "poca",
+    "pocan",
+    "pocam",
+    "pokan",
+    "pokam",
+  ]);
+
+  if (poncaAliases.has(key)) {
     return "poncã";
   }
 
