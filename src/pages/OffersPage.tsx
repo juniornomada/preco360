@@ -862,7 +862,6 @@ export default function OffersPage() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const {
     isListening,
-    isTranscribing,
     error: voiceSearchError,
     startListening,
     stopListening,
@@ -1372,9 +1371,7 @@ export default function OffersPage() {
           placeholder={
             isListening
               ? "Ouvindo o produto..."
-              : isTranscribing
-                ? "Transcrevendo..."
-                : "Busque Nescau, café, leite, carne..."
+              : "Busque Nescau, café, leite, carne..."
           }
           value={searchInput}
           onChange={(event) => {
@@ -1394,21 +1391,11 @@ export default function OffersPage() {
           className={`absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${
             isListening
               ? "bg-primary/15 text-primary animate-pulse"
-              : isTranscribing
-                ? "bg-muted text-primary"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
           }`}
-          aria-label={
-            isListening
-              ? "Parar busca por voz"
-              : isTranscribing
-                ? "Transcrevendo áudio"
-                : "Buscar produto por voz"
-          }
+          aria-label={isListening ? "Parar busca por voz" : "Buscar produto por voz"}
           aria-pressed={isListening}
-          aria-busy={isTranscribing}
-          disabled={isTranscribing}
-          title={isListening ? "Parar" : isTranscribing ? "Transcrevendo..." : "Buscar por voz"}
+          title={isListening ? "Parar" : "Buscar por voz"}
           onClick={() => {
             if (isListening) {
               stopListening();
