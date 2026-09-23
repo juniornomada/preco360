@@ -143,7 +143,7 @@ const specificRules: Rule[] = [
   { pattern: /cenoura/, visual: "🥕", confidence: 0.99 },
   { pattern: /chuchu/, visual: "🥒", confidence: 0.92 },
   { pattern: /beterraba/, visual: "__beet__", confidence: 0.99 },
-  { pattern: /abobrinha paulista/, visual: "__zucchini_paulista__", forceIcon: true, confidence: 0.99 },
+  { pattern: /abobrinha paulista/, visual: "__zucchini_paulista__", confidence: 0.99 },
   { pattern: /abobrinha italiana/, visual: "__zucchini_italiana__", confidence: 0.99 },
   { pattern: /abobrinha/, visual: "__zucchini__", forceIcon: true, confidence: 0.99 },
   { pattern: /abobora|moranga/, visual: "🎃", confidence: 0.99 },
