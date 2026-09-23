@@ -127,6 +127,13 @@ describe("offer reference normalization", () => {
         "Bolo Tauste Abóbora com Coco 100g",
       ),
     ).toBe(false);
+
+    expect(
+      offerReferenceFamiliesCompatible(
+        "Queijo Mussarela Piloto Peça Kg",
+        "QJ.MUSS.PILOTO FT.kg",
+      ),
+    ).toBe(false);
   });
 
   it("keeps compatible families comparable", () => {
