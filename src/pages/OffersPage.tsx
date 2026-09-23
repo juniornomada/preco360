@@ -721,6 +721,22 @@ function comparableOfferIdentity(current: FlyerItemRow, previous: FlyerItemRow) 
     );
   }
 
+  const currentAnimalFamily = inferOfferFamily(current, null);
+  const previousAnimalFamily = inferOfferFamily(previous, null);
+  const protectedAnimalFamilies = new Set<OfferFamily>([
+    "beef",
+    "pork",
+    "fish",
+    "cannedFish",
+  ]);
+  if (
+    (protectedAnimalFamilies.has(currentAnimalFamily) ||
+      protectedAnimalFamilies.has(previousAnimalFamily)) &&
+    currentAnimalFamily !== previousAnimalFamily
+  ) {
+    return false;
+  }
+
   const currentPrice = Number(current.advertised_price) || 0;
   const previousPrice = Number(previous.advertised_price) || 0;
   const currentPackage = offerPackageInfo(
