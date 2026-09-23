@@ -20,4 +20,11 @@ describe("normalizeVoiceSearchTranscript", () => {
     expect(normalizeVoiceSearchTranscript("sau")).toBe("sal");
     expect(normalizeVoiceSearchTranscript("SAU.")).toBe("sal");
   });
+
+  it("normalizes common poncã transcription variants", () => {
+    expect(normalizeVoiceSearchTranscript("ponkan")).toBe("poncã");
+    expect(normalizeVoiceSearchTranscript("poncan")).toBe("poncã");
+    expect(normalizeVoiceSearchTranscript("ponca")).toBe("poncã");
+    expect(normalizeVoiceSearchTranscript("PONCÃ.")).toBe("PONCÃ");
+  });
 });
