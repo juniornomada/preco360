@@ -5,7 +5,7 @@ type SpeechAlternative = {
 };
 
 type SpeechResult = {
-  0?: SpeechAlternative;
+  [index: number]: SpeechAlternative | undefined;
   length: number;
   isFinal?: boolean;
 };
@@ -59,10 +59,37 @@ export function normalizeVoiceSearchTranscript(value: string) {
     .replace(/[.,;:!?]+$/g, "")
     .trim();
 
+  const key = normalized
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR");
+
   // On pt-BR speech recognition, the final "l" in a very short utterance can
   // occasionally be emitted phonetically as "u" ("sal" -> "sau").
-  if (normalized.toLocaleLowerCase("pt-BR") === "sau") {
+  if (key === "sau") {
     return "sal";
+  }
+
+  // Ponkan/Poncã has several accepted spellings and Chrome/Android can emit
+  // phonetically unrelated-looking text for this short fruit name. Keep the
+  // browser-native recognizer, but collapse known variants to one search term.
+  const poncaAliases = new Set([
+    "ponca",
+    "poncan",
+    "poncam",
+    "ponka",
+    "ponkan",
+    "ponkam",
+    "poca",
+    "pocan",
+    "pocam",
+    "pokan",
+    "pokam",
+    "moricote",
+  ]);
+
+  if (poncaAliases.has(key)) {
+    return "poncã";
   }
 
   return normalized;
@@ -135,7 +162,21 @@ export function useVoiceSearch() {
       recognition.lang = "pt-BR";
       recognition.interimResults = true;
       recognition.continuous = false;
-      recognition.maxAlternatives = 1;
+      recognition.maxAlternatives = 5;
+
+      const bestTranscript = (result?: SpeechResult) => {
+        if (!result?.length) return "";
+
+        const alternatives = Array.from({ length: result.length }, (_, index) =>
+          normalizeVoiceSearchTranscript(result[index]?.transcript ?? ""),
+        ).filter(Boolean);
+
+        return (
+          alternatives.find((candidate) => candidate === "poncã") ??
+          alternatives[0] ??
+          ""
+        );
+      };
 
       const deliverPending = () => {
         const transcript = normalizeVoiceSearchTranscript(
@@ -196,9 +237,7 @@ export function useVoiceSearch() {
 
       recognition.onresult = (event) => {
         const lastResult = event.results[event.results.length - 1];
-        const transcript = normalizeVoiceSearchTranscript(
-          lastResult?.[0]?.transcript ?? "",
-        );
+        const transcript = bestTranscript(lastResult);
 
         if (!transcript) return;
         pendingTranscriptRef.current = transcript;
