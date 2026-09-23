@@ -4,6 +4,9 @@ import {
   isGenericSugarSearch,
   isSaltProductName,
   isSugarProductName,
+  isGenericPoncaSearch,
+  normalizePoncaSearchToken,
+  PONCA_SEARCH_VARIANTS,
 } from "@/lib/offerSearchGuard";
 
 describe("offer search guards", () => {
@@ -35,5 +38,13 @@ describe("offer search guards", () => {
     expect(isSaltProductName("Sal Cisne Refinado Extra 1kg")).toBe(true);
     expect(isSaltProductName("Manteiga com Sal Lider Pote 200g")).toBe(false);
     expect(isSaltProductName("Salame Ceratti Italiano 100g")).toBe(false);
+  });
+
+  it("treats Ponkan spellings as one search identity", () => {
+    for (const variant of PONCA_SEARCH_VARIANTS) {
+      expect(isGenericPoncaSearch(variant)).toBe(true);
+      expect(normalizePoncaSearchToken(variant)).toBe("ponca");
+    }
+    expect(isGenericPoncaSearch("tangerina")).toBe(false);
   });
 });
