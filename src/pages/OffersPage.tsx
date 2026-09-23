@@ -22,6 +22,7 @@ import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
 import { canonicalRetailerName } from "@/lib/retailerNames";
 import {
+  comparableCannedFishOffers,
   isCannedFishOffer,
   packagePriceIsMeaningfullyDifferent,
   prioritizeKgPrice,
@@ -669,6 +670,20 @@ function offerIdentityTokens(value: string) {
 }
 
 function comparableOfferIdentity(current: FlyerItemRow, previous: FlyerItemRow) {
+  const currentIsCannedFish = isCannedFishOffer(current.raw_name);
+  const previousIsCannedFish = isCannedFishOffer(previous.raw_name);
+
+  if (currentIsCannedFish || previousIsCannedFish) {
+    return comparableCannedFishOffers(
+      current.raw_name,
+      current.package_quantity,
+      current.package_unit,
+      previous.raw_name,
+      previous.package_quantity,
+      previous.package_unit,
+    );
+  }
+
   if (
     current.base_unit &&
     previous.base_unit &&
@@ -1414,6 +1429,20 @@ export default function OffersPage() {
                 regularPrice,
                 regularNormalized.normalizedPrice,
               );
+            const referenceLabel =
+              verdict.referencePrice &&
+              entry.family === "cannedFish" &&
+              candidate.packageInfo?.baseUnit === "kg"
+                ? brl(
+                    verdict.referencePrice *
+                      candidate.packageInfo.baseQuantity,
+                  )
+                : verdict.referencePrice
+                  ? formatNormalizedPrice(
+                      verdict.referencePrice,
+                      candidate.baseUnit,
+                    )
+                  : null;
             const isFamilyBest =
               bestOfferByFamily.get(entry.family) === item.id;
             const isTopResult = isBroadFamilySearch
@@ -1605,19 +1634,13 @@ export default function OffersPage() {
                                 aria-label="Ver histórico do produto"
                               >
                                 {verdict.purchaseCount > 0 ? "Pago " : "Ref. "}
-                                {formatNormalizedPrice(
-                                  verdict.referencePrice,
-                                  candidate.baseUnit,
-                                )}
+                                {referenceLabel}
                                 <ChevronRight className="h-3 w-3" />
                               </button>
                             ) : (
                               <span className="font-semibold text-muted-foreground">
                                 {verdict.purchaseCount > 0 ? "Pago " : "Ref. "}
-                                {formatNormalizedPrice(
-                                  verdict.referencePrice,
-                                  candidate.baseUnit,
-                                )}
+                                {referenceLabel}
                               </span>
                             ))}
 
