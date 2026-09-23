@@ -5,7 +5,9 @@ import {
   isSaltProductName,
   isSugarProductName,
   isGenericPoncaSearch,
+  isPowderedDrinkSearch,
   normalizePoncaSearchToken,
+  powderedDrinkSearchRequests,
   PONCA_SEARCH_VARIANTS,
 } from "@/lib/offerSearchGuard";
 
@@ -46,5 +48,21 @@ describe("offer search guards", () => {
       expect(normalizePoncaSearchToken(variant)).toBe("ponca");
     }
     expect(isGenericPoncaSearch("tangerina")).toBe(false);
+  });
+
+  it("treats suco em pó and refresco em pó as the same search family", () => {
+    expect(isPowderedDrinkSearch("suco em pó")).toBe(true);
+    expect(isPowderedDrinkSearch("refresco em pó")).toBe(true);
+    expect(isPowderedDrinkSearch("suco de uva")).toBe(false);
+    expect(isPowderedDrinkSearch("achocolatado em pó")).toBe(false);
+
+    expect(powderedDrinkSearchRequests("suco em pó Apti")).toEqual([
+      "suco po apti",
+      "refresco po apti",
+    ]);
+    expect(powderedDrinkSearchRequests("refresco em pó")).toEqual([
+      "suco po",
+      "refresco po",
+    ]);
   });
 });

@@ -25,10 +25,12 @@ import { canonicalRetailerName } from "@/lib/retailerNames";
 import {
   isGenericPoncaSearch,
   isGenericSaltSearch,
+  isPowderedDrinkSearch,
   isGenericSugarSearch,
   isSaltProductName,
   isSugarProductName,
   normalizePoncaSearchToken,
+  powderedDrinkSearchRequests,
   PONCA_SEARCH_VARIANTS,
 } from "@/lib/offerSearchGuard";
 import {
@@ -295,6 +297,7 @@ function searchTokens(value: string) {
 
 type OfferFamily =
   | "powder"
+  | "powderedDrink"
   | "drink"
   | "cereal"
   | "capsule"
@@ -346,6 +349,13 @@ function queryOfferFamily(query: string): SearchFamilyIntent | null {
   const hasTomato = hasAny(tokens, ["tomate", "tomates"]);
   const hasCorn = hasAny(tokens, ["milho", "milhos"]);
   const hasCoffee = hasAny(tokens, ["cafe", "cafes"]);
+
+  if (
+    tokens.has("po") &&
+    hasAny(tokens, ["suco", "sucos", "refresco", "refrescos"])
+  ) {
+    return "powderedDrink";
+  }
 
   if (hasMilk) {
     if (hasAny(tokens, ["bolo", "bolos"])) return "cake";
@@ -504,6 +514,14 @@ function inferOfferFamily(
     return "coffeeGround";
   }
 
+  if (
+    tokens.has("po") &&
+    hasAny(tokens, ["suco", "sucos", "refresco", "refrescos"]) &&
+    isWeight
+  ) {
+    return "powderedDrink";
+  }
+
   if (hasAny(tokens, ["bebida", "bebidas"])) return "drink";
   if (hasAny(tokens, ["cereal", "cereais"])) return "cereal";
   if (hasAny(tokens, ["capsula", "capsulas"])) return "capsule";
@@ -529,6 +547,7 @@ function inferOfferFamily(
 
 function familyLabel(family: OfferFamily) {
   if (family === "powder") return "Achocolatado em pó";
+  if (family === "powderedDrink") return "Refresco em pó";
   if (family === "drink") return "Bebida";
   if (family === "cereal") return "Cereal";
   if (family === "capsule") return "Cápsulas";
@@ -603,6 +622,9 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
     add("cafe", "cafes", "caps", "capsula", "capsulas");
   }
 
+  if (intent === "powderedDrink") {
+    add("po", "suco", "sucos", "refresco", "refrescos");
+  }
   if (intent === "powder") {
     add(
       "po",
@@ -1002,13 +1024,15 @@ export default function OffersPage() {
     [normalizedSearch],
   );
 
-  const searchRequests = useMemo(
-    () =>
-      isGenericPoncaSearch(normalizedSearch)
-        ? [...PONCA_SEARCH_VARIANTS]
-        : [searchRequest],
-    [normalizedSearch, searchRequest],
-  );
+  const searchRequests = useMemo(() => {
+    if (isGenericPoncaSearch(normalizedSearch)) {
+      return [...PONCA_SEARCH_VARIANTS];
+    }
+    if (isPowderedDrinkSearch(normalizedSearch)) {
+      return powderedDrinkSearchRequests(normalizedSearch);
+    }
+    return [searchRequest];
+  }, [normalizedSearch, searchRequest]);
 
   const searchRequestsKey = searchRequests.join("|");
 
