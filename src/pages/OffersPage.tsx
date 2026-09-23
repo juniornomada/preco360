@@ -821,7 +821,7 @@ function candidateFromItem(item: FlyerItemRow): FlyerCandidate {
     item.package_quantity,
     item.package_unit,
     item.offer_notes,
-    effectivePrice,
+    regularPrice,
   );
   const normalized = normalizedUnitPrice(effectivePrice, packageInfo);
 
