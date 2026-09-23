@@ -22,7 +22,12 @@ import {
 import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
 import { canonicalRetailerName } from "@/lib/retailerNames";
-import { isGenericSugarSearch, isSugarProductName } from "@/lib/offerSearchGuard";
+import {
+  isGenericSaltSearch,
+  isGenericSugarSearch,
+  isSaltProductName,
+  isSugarProductName,
+} from "@/lib/offerSearchGuard";
 import {
   comparableCannedFishOffers,
   isCannedFishOffer,
@@ -317,6 +322,7 @@ type OfferFamily =
   | "fish"
   | "cannedFish"
   | "sugar"
+  | "salt"
   | "other";
 
 type SearchFamilyIntent = OfferFamily | "milk" | "corn" | "coffee";
@@ -326,6 +332,7 @@ function hasAny(tokens: Set<string>, values: string[]) {
 }
 
 function queryOfferFamily(query: string): SearchFamilyIntent | null {
+  if (isGenericSaltSearch(query)) return "salt";
   if (isGenericSugarSearch(query)) return "sugar";
   if (isBroadBeefSearch(query)) return "beef";
   if (isBroadPorkSearch(query)) return "pork";
@@ -443,6 +450,7 @@ function inferOfferFamily(
 
   // Product-head rules: the beginning of the name is more reliable than a
   // keyword appearing later as flavor, ingredient or accompaniment.
+  if (isSaltProductName(raw)) return "salt";
   if (isSugarProductName(raw)) return "sugar";
   if (isBeefOfferText(raw)) return "beef";
   if (isPorkOfferText(raw)) return "pork";
@@ -548,6 +556,7 @@ function familyLabel(family: OfferFamily) {
   if (family === "fish") return "Peixe";
   if (family === "cannedFish") return "Peixe enlatado";
   if (family === "sugar") return "Açúcar";
+  if (family === "salt") return "Sal";
   return "Produto";
 }
 
@@ -607,6 +616,7 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   if (intent === "juice") add("suco", "sucos");
   if (intent === "cake") add("bolo", "bolos");
   if (intent === "sugar") add("acucar", "acucares");
+  if (intent === "salt") add("sal");
   if (intent === "beef") add(...BEEF_SEMANTIC_TOKENS);
   if (intent === "pork") add(...PORK_SEMANTIC_TOKENS);
   if (intent === "fish") add(...FISH_SEMANTIC_TOKENS);
@@ -1296,7 +1306,8 @@ export default function OffersPage() {
     explicitSearchFamily === "beef" ||
     explicitSearchFamily === "pork" ||
     explicitSearchFamily === "fish" ||
-    explicitSearchFamily === "sugar";
+    explicitSearchFamily === "sugar" ||
+    explicitSearchFamily === "salt";
 
   const bestOfferByFamily = useMemo(() => {
     const bestEntry = new Map<
