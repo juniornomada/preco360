@@ -14,6 +14,31 @@ const CANNED_FISH_HINT_RE =
 const FRESH_FISH_HINT_RE =
   /(^| )(fresco|fresca|resfriado|resfriada|congelado|congelada|file|files|posta|postas|inteiro|inteira)( |$)/;
 
+function cannedFishSpecies(rawName: string) {
+  const match = normalize(rawName).match(/^(atum|sardinha)( |$)/);
+  return match?.[1] ?? null;
+}
+
+function massInGrams(
+  rawName: string,
+  packageQuantity?: number | string | null,
+  packageUnit?: string | null,
+) {
+  const quantity = Number(packageQuantity);
+  const unit = normalize(packageUnit ?? "");
+
+  if (Number.isFinite(quantity) && quantity > 0) {
+    if (unit === "g") return quantity;
+    if (unit === "kg") return quantity * 1000;
+  }
+
+  const match = normalize(rawName).match(/\b(\d+(?:[.,]\d+)?)\s*(kg|g)\b/);
+  if (!match) return null;
+  const parsed = Number(match[1].replace(",", "."));
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return match[2] === "kg" ? parsed * 1000 : parsed;
+}
+
 export function isCannedFishOffer(rawName: string) {
   const text = normalize(rawName);
   if (!CANNED_FISH_HEAD_RE.test(text)) return false;
@@ -28,6 +53,42 @@ export function isCannedFishOffer(rawName: string) {
   return Number.isFinite(quantity) && quantity > 0 && quantity <= 250;
 }
 
+export function comparableCannedFishOffers(
+  leftRawName: string,
+  leftPackageQuantity?: number | string | null,
+  leftPackageUnit?: string | null,
+  rightRawName?: string,
+  rightPackageQuantity?: number | string | null,
+  rightPackageUnit?: string | null,
+) {
+  if (!rightRawName) return false;
+  if (!isCannedFishOffer(leftRawName) || !isCannedFishOffer(rightRawName)) {
+    return false;
+  }
+
+  if (cannedFishSpecies(leftRawName) !== cannedFishSpecies(rightRawName)) {
+    return false;
+  }
+
+  const leftGrams = massInGrams(
+    leftRawName,
+    leftPackageQuantity,
+    leftPackageUnit,
+  );
+  const rightGrams = massInGrams(
+    rightRawName,
+    rightPackageQuantity,
+    rightPackageUnit,
+  );
+
+  if (leftGrams === null || rightGrams === null) return false;
+
+  // Canned fish is bought by the package, so historical references must be
+  // the same retail pack size. This avoids treating 140 g and 170 g cans as
+  // interchangeable just because both normalize to R$/kg.
+  return Math.abs(leftGrams - rightGrams) < 0.5;
+}
+
 export function prioritizeKgPrice(
   family: string | null | undefined,
   rawName: string,
@@ -35,7 +96,7 @@ export function prioritizeKgPrice(
 ) {
   if (baseUnit !== "kg") return false;
 
-  if (family === "fish" && isCannedFishOffer(rawName)) {
+  if ((family === "fish" || family === "cannedFish") && isCannedFishOffer(rawName)) {
     return false;
   }
 
