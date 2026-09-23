@@ -11,4 +11,8 @@ describe("normalizeVoiceSearchTranscript", () => {
   it("keeps product details that matter to search", () => {
     expect(normalizeVoiceSearchTranscript("Nescau 400g")).toBe("Nescau 400g");
   });
+
+  it("keeps very short product names such as sal", () => {
+    expect(normalizeVoiceSearchTranscript(" sal. ")).toBe("sal");
+  });
 });
