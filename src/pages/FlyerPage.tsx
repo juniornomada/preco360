@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import ProductVisual from "@/components/ProductVisual";
 import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { ensureClubActivationNote } from "@/lib/clubOfferRules";
+import { canonicalRetailerName } from "@/lib/retailerNames";
 import {
   ArrowDown,
   ArrowUp,
@@ -895,7 +896,7 @@ export default function FlyerPage() {
         activeJob.page_count || 1,
       );
       const meta = extractFlyerMeta(result.metaText || result.textByPage.join("\n"));
-      const detectedRetailer = result.retailer || activeJob.retailer || meta.retailer;
+      const detectedRetailer = canonicalRetailerName(result.retailer || activeJob.retailer || meta.retailer);
       const detectedValidFrom = result.validFrom || activeJob.valid_from || meta.validFrom;
       const detectedValidTo = result.validTo || activeJob.valid_to || meta.validTo;
 
@@ -1151,7 +1152,7 @@ export default function FlyerPage() {
           ? Number(knownFlyer.flyer_items[0]?.count ?? 0)
           : 0;
 
-        setRetailer(knownFlyer.retailer ?? "");
+        setRetailer(canonicalRetailerName(knownFlyer.retailer));
         setValidFrom(knownFlyer.valid_from ?? "");
         setValidTo(knownFlyer.valid_to ?? "");
         setDuplicateFlyer({
@@ -1431,6 +1432,7 @@ export default function FlyerPage() {
       return;
     }
 
+    const canonicalRetailer = canonicalRetailerName(retailer);
     const validItems = items.filter((item) => item.rawName.trim() && item.price > 0);
     if (!validItems.length) {
       toast({ title: "Nenhuma oferta válida", description: "Revise os itens antes de salvar." });
@@ -1475,8 +1477,8 @@ export default function FlyerPage() {
         const { error: updateFlyerError } = await db
           .from("flyers")
           .update({
-            retailer: retailer.trim(),
-            title: `${retailer.trim()} · ${validFrom ? dateBr(validFrom) : "Ofertas"}`,
+            retailer: canonicalRetailer,
+            title: `${canonicalRetailer} · ${validFrom ? dateBr(validFrom) : "Ofertas"}`,
             valid_from: validFrom || null,
             valid_to: validTo || null,
             source_type: sourceType,
@@ -1510,8 +1512,8 @@ export default function FlyerPage() {
           .from("flyers")
           .insert({
             user_id: user.id,
-            retailer: retailer.trim(),
-            title: `${retailer.trim()} · ${validFrom ? dateBr(validFrom) : "Ofertas"}`,
+            retailer: canonicalRetailer,
+            title: `${canonicalRetailer} · ${validFrom ? dateBr(validFrom) : "Ofertas"}`,
             valid_from: validFrom || null,
             valid_to: validTo || null,
             source_type: sourceType,
@@ -1559,7 +1561,7 @@ export default function FlyerPage() {
             store_restrictions: rich.storeRestrictions ?? [],
             purchase_limit: rich.purchaseLimit ?? null,
             offer_notes: ensureClubActivationNote(
-              retailer.trim(),
+              canonicalRetailer,
               rich.clubAdvertisedPrice,
               rich.offerNotes,
             ),
@@ -1594,7 +1596,7 @@ export default function FlyerPage() {
           .select("id")
           .eq("user_id", user.id)
           .eq("normalized_alias", normalizedAlias)
-          .eq("retailer", retailer.trim())
+          .eq("retailer", canonicalRetailer)
           .maybeSingle();
         if (!existing) {
           await db.from("product_aliases").insert({
@@ -1602,7 +1604,7 @@ export default function FlyerPage() {
             product_id: item.productId,
             alias: item.rawName.trim(),
             normalized_alias: normalizedAlias,
-            retailer: retailer.trim(),
+            retailer: canonicalRetailer,
           });
         }
       }
@@ -1826,7 +1828,7 @@ export default function FlyerPage() {
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       {pendingRecovery.retailer
-                        ? pendingRecovery.retailer + " · "
+                        ? canonicalRetailerName(pendingRecovery.retailer) + " · "
                         : ""}
                       {pendingRecovery.offerCount
                         ? pendingRecovery.offerCount + " ofertas aguardando revisão."
@@ -1868,7 +1870,7 @@ export default function FlyerPage() {
                   <div className="min-w-0 flex-1">
                     <p className="font-bold">Este tabloide já foi importado</p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {duplicateFlyer.retailer || "Mercado"} ·{" "}
+                      {canonicalRetailerName(duplicateFlyer.retailer) || "Mercado"} ·{" "}
                       {duplicateFlyer.itemCount
                         ? duplicateFlyer.itemCount + " ofertas"
                         : "já consta no histórico"}
@@ -2355,7 +2357,7 @@ export default function FlyerPage() {
                     <div className="flex items-center gap-3">
                       <div className="rounded-xl bg-primary/10 p-2.5 text-primary"><FileText className="h-5 w-5" /></div>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-bold">{flyer.retailer}</p>
+                        <p className="truncate font-bold">{canonicalRetailerName(flyer.retailer)}</p>
                         <p className="text-xs text-muted-foreground">
                           {dateBr(flyer.valid_from)} → {dateBr(flyer.valid_to)} · {flyer.flyer_items?.[0]?.count ?? 0} ofertas
                         </p>
