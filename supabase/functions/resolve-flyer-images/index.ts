@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { processingCompatible } from "../_shared/image-candidate-rules.ts";
 
 const FORCE_TARGET_IDS = new Set<string>(["a7cfb220-ab11-42b0-a861-fd9e9acc0507","2d2e1fc6-2259-4d24-bb42-451ed75b7df5","eb150e98-6f87-4175-85a4-35ae838ce207","e51eec9c-503d-4d4d-9eb4-8c367d4423af","53711fd3-f850-4825-a5ce-49593823ad9c","964c0a01-cc2a-41ac-96b5-9bf8e8331af2","f03acf46-0572-4a08-81b7-cef3e30eda6f","a3957742-a986-453b-86c7-0ef0c70eba35","15a2529c-7d9d-4757-a6a4-c16ce1f3b055","43526874-2121-47cd-b19b-d3143e4fcda3","4f5fb764-2532-4f84-8431-53d354fe0783","19a3a93c-73b3-428e-b2ba-c8400d70352a","d109b06d-efbb-4bde-b239-98012e527c80","65508f9f-8acf-47d0-b704-21e94f29b1e0","c3e759d6-0b93-4471-bb11-ee1206f129dc","f85121e3-ae06-4d5d-aa61-32a3f471d3cd","ea9039d5-65d8-4eb9-97ef-9c60ee275d30","f607437d-c5af-452f-b91b-7c1527c489c8","3b2a21e6-9092-47d4-af2b-8d5e7a3b3af0","67cbbfa6-a276-47b8-b7ff-a7ba4ea5124c","d8c8eb7f-2db4-4772-806d-dd35c26c6793","874bcfc5-a59f-499e-a6c6-9d72a3fe7eab","0dd859c1-43e9-442d-9849-eca0a2a00822","1d6ac70d-c973-4de1-98cb-602b725fffc9","33519ec8-48fa-497f-b246-807a31b77c91","4551d3c7-d169-415d-9b54-3fec55049482","f8d53842-b838-48fb-9f4f-b7d52081f621","e7118782-8e5c-4c33-970c-7919b032f91c","1663665f-eddd-4784-9e2d-3d75f436f4a2","b493d3ba-3186-4ea7-9bf1-9f2b967442d1","8aced767-7703-4712-adc9-dc5b7227e61f","e8826ab2-e5ab-4f39-9519-a7139a33dd0e","ea24ad86-f28f-4afb-9a42-ea1e70997db5","d95ac115-8473-44ee-9d23-9830345ecf64","90edf02b-e116-4d36-a57e-620e288efe02","0781cab4-2556-4da4-b9b4-06ad498ba04e","7813c93a-4692-4c38-a119-8deed008adf4","1ab3021e-6ced-41b0-938f-ff0e57e8ff99","66e4941e-2d4b-47e5-aeaf-45980f954ebe","8c582163-83de-4b54-bcb6-f4775d4a42a2","d259126d-f6e1-43ad-a6c3-eb288a0d1ec2","ceabe30d-14d4-4dd8-a228-08208d5cddcf","1fe06692-9d02-41cf-bab7-7c55c1bc3ae4","a055a5a5-0c4c-4207-a22d-2036e957c3cf","66139c5a-d22e-48f7-b728-9ac0c64c1498","241ee98a-a7c3-4976-ba91-c459414cf408","a28b677e-c30c-4eb4-831b-085d1f0ce488","5d1c1461-2145-44f3-8ff0-05a0852298a2","5eed8771-672f-4e58-a774-5d7063cf2c30","952eb292-8660-4a04-8582-309fb96681b5","99880f3d-1577-4237-a85d-65bf26c48ad6","ac4f7a50-3983-4828-95c0-78675e6493ed","d65ad8e5-6d79-4325-b56f-eed154843604","c52c25d0-8026-4ebb-ab81-9add2ce8ded7","e6e357e7-bace-4ec7-8517-1409610e13d1","a1ad3db8-48a2-42f2-ac14-4b7bb8735e6d","05d73e94-01a4-4712-a48b-2c1b1014adc3","d22edf78-9423-4f7c-97b4-08f8504b4712","1f1d6299-bc1d-42b0-afe3-56b1e86599b2","4ee39907-bfc2-4a5c-b807-48ee2ccea821","b34e9a4d-4414-4e4d-9e49-dfb76ab1ba81","c2bcabbc-a1d5-46f1-8a30-1b445f243341","51a02bf5-89d7-4d21-a3f4-170d3f22c895"]);
 
@@ -77,6 +78,7 @@ type LibraryImage = {
   confidence: number | string;
   status: string;
   search_query: string | null;
+  source_url?: string | null;
 };
 
 type LibraryMatch = {
@@ -401,6 +403,7 @@ function offerIsAmbiguousMultiProduct(item: OfferRow) {
 
 function cacheScore(item: OfferRow, cached: LibraryImage) {
   if (!semanticCompatible(item.raw_name, cached.normalized_name)) return 0;
+  if (!processingCompatible(item.raw_name, `${cached.normalized_name} ${cached.external_code ?? ""} ${cached.source_url ?? ""}`)) return 0;
 
   if (item.product_id && cached.product_id === item.product_id) {
     const pkg = packageSimilarity(item, `${cached.package_quantity ?? ""}${cached.package_unit ?? ""}`);
@@ -447,7 +450,8 @@ async function findLibraryImage(
   if (
     exact?.image_url &&
     Number(exact.confidence) >= 0.85 &&
-    semanticCompatible(item.raw_name, exact.normalized_name)
+    semanticCompatible(item.raw_name, exact.normalized_name) &&
+    processingCompatible(item.raw_name, `${exact.normalized_name} ${exact.external_code ?? ""} ${exact.source_url ?? ""}`)
   ) {
     return { row: exact as LibraryImage, familyReuse: false };
   }
@@ -540,6 +544,7 @@ function scoreOffHit(item: OfferRow, hit: any): Candidate | null {
   const quantity = String(hit?.quantity ?? "");
 
   if (!semanticCompatible(item.raw_name, title)) return null;
+  if (!processingCompatible(item.raw_name, title)) return null;
 
   const brandScore = brandSimilarity(item, brands, title);
   const packageScore = packageSimilarity(item, quantity);
@@ -707,6 +712,7 @@ async function searchMercadoLivre(item: OfferRow, query: string) {
       .map((hit: any) => {
         const title = String(hit?.title ?? "");
         if (!title || !semanticCompatible(item.raw_name, title)) return null;
+        if (!processingCompatible(item.raw_name, title)) return null;
 
         const brandScore = brandSimilarity(item, title, title);
         const nameScore = nameSimilarity(item, title, title);
@@ -861,6 +867,7 @@ async function searchBingImages(item: OfferRow, query: string) {
       const pageUrl = String(meta?.purl ?? "").trim();
       if (!imageUrl || !title) continue;
       if (!semanticCompatible(item.raw_name, title)) continue;
+      if (!processingCompatible(item.raw_name, `${title} ${pageUrl}`)) continue;
       if (!multipackCompatible(item, title)) continue;
 
       const brandScore = brandSimilarity(item, title, title);
@@ -939,6 +946,7 @@ async function searchBingImagesLoose(item: OfferRow, query: string) {
       const title = String(meta?.t ?? "").trim();
       const pageUrl = String(meta?.purl ?? "").trim();
       if (!imageUrl) continue;
+      if (!processingCompatible(item.raw_name, `${title} ${pageUrl}`)) continue;
 
       out.push({
         source: "bing",
@@ -1015,13 +1023,15 @@ async function searchDuckDuckGoImagesLoose(item: OfferRow, query: string) {
     const imageUrl = String(result?.image ?? "").trim();
     if (!imageUrl) continue;
     const title = String(result?.title ?? query).trim() || query;
+    const pageUrl = String(result?.url ?? "").trim();
+    if (!processingCompatible(item.raw_name, `${title} ${pageUrl}`)) continue;
     out.push({
       source: "duckduckgo",
       imageUrl,
       title,
       brandText: title,
       quantityText: title,
-      code: String(result?.url ?? imageUrl),
+      code: pageUrl || imageUrl,
       deterministicScore: 0.84,
       brandScore: item.brand ? 0.75 : 0.5,
       nameScore: 0.5,
@@ -1058,6 +1068,7 @@ async function searchGoogleImages(item: OfferRow, query: string) {
     .map((hit: any) => {
       const title = String(hit?.title ?? "");
       if (!semanticCompatible(item.raw_name, title)) return null;
+      if (!processingCompatible(item.raw_name, `${title} ${String(hit?.image?.contextLink ?? "")}`)) return null;
       const brandScore = brandSimilarity(item, title, title);
       const nameScore = nameSimilarity(item, title, title);
       const packageScore = parseQuantity(title) ? packageSimilarity(item, title) : 0.5;
@@ -1483,6 +1494,7 @@ async function tryCabocloEquivalent(
     : await searchBingImagesLoose(item, conciseQuery);
   const candidates = [...ddgPrimary, ...ddgSecondary, ...bingCandidates];
   for (const candidate of candidates.slice(0, 18)) {
+    if (!processingCompatible(item.raw_name, `${candidate.title} ${candidate.code ?? ""}`)) continue;
     try {
       const imageUrl = await persistCandidateImage(
         supabase,
