@@ -782,7 +782,7 @@ function candidateFromItem(item: FlyerItemRow): FlyerCandidate {
     price: effectivePrice,
     packageInfo,
     normalizedPrice: normalized.normalizedPrice,
-    baseUnit: (item.base_unit || normalized.baseUnit) as "kg" | "l" | "un",
+    baseUnit: normalized.baseUnit,
     clubPrice: clubPrice !== null,
     sourcePage: Number(item.source_page) || 1,
   };
