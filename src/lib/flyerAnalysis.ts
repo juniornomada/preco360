@@ -1156,6 +1156,51 @@ export function offerReferenceFamilyKey(value: string) {
 
   if (/^capsulas?\b/.test(text)) return "cafe:capsula";
 
+  if (/^gelatina\b/.test(text)) {
+    return /\b(?:zero|diet|sem acucar)\b/.test(text)
+      ? "mercearia:gelatina-zero"
+      : "mercearia:gelatina-regular";
+  }
+
+  if (/^bebida lactea\b/.test(text)) {
+    if (/\b(?:whey|proteina|proteica|proplay|yopro)\b/.test(text)) {
+      return "laticinio:bebida-lactea-proteica";
+    }
+    if (/\b(?:cappuccino|cafe)\b/.test(text)) {
+      return "laticinio:bebida-lactea-cafe";
+    }
+    return "laticinio:bebida-lactea-comum";
+  }
+
+  if (/^amaciante\b/.test(text)) {
+    return /\b(?:concentrado|concentrada|conc)\b/.test(text)
+      ? "limpeza:amaciante-concentrado"
+      : "limpeza:amaciante-regular";
+  }
+
+  if (/^shampoo\b/.test(text)) {
+    if (/\b(?:procao|pet|caes|cao|gatos|gato)\b/.test(text)) {
+      return "pet:shampoo";
+    }
+    return "higiene:shampoo-humano";
+  }
+
+  if (/^batata\b/.test(text)) {
+    if (/\bpalha\b/.test(text)) return "batata:palha";
+    if (
+      /\b(?:palito|rustica|congelada|congelado|air fryer|frita|fritas)\b/.test(
+        text,
+      )
+    ) {
+      return "batata:congelada";
+    }
+    return "hortifruti:batata";
+  }
+
+  if (/^bolo\b/.test(text)) {
+    return /\bpote\b/.test(text) ? "padaria:bolo-pote" : "padaria:bolo";
+  }
+
   const purchaseKey = purchaseComparisonKey(value);
   if (purchaseKey) return purchaseKey;
 
