@@ -85,6 +85,48 @@ describe("offer reference normalization", () => {
         "Biscoito Marilan Wafer Chocolate 70g",
       ),
     ).toBe(false);
+
+    expect(
+      offerReferenceFamiliesCompatible(
+        "Batata Congelada McCain Air Fryer Extra Crocante 600g",
+        "Batata Extra Kg",
+      ),
+    ).toBe(false);
+
+    expect(
+      offerReferenceFamiliesCompatible(
+        "Bebida Láctea Piracanjuba Whey 250ml",
+        "Bebida Láctea Líder Chocolate 1L",
+      ),
+    ).toBe(false);
+
+    expect(
+      offerReferenceFamiliesCompatible(
+        "Amaciante Ypê Concentrado 500ml",
+        "Amaciante Ypê Aconchego 2L",
+      ),
+    ).toBe(false);
+
+    expect(
+      offerReferenceFamiliesCompatible(
+        "Shampoo e Condicionador Procão 1L",
+        "Shampoo Neutrox 300ml",
+      ),
+    ).toBe(false);
+
+    expect(
+      offerReferenceFamiliesCompatible(
+        "Gelatina Zero Açúcar Apti 12g",
+        "Gelatina Apti Sabores 1kg",
+      ),
+    ).toBe(false);
+
+    expect(
+      offerReferenceFamiliesCompatible(
+        "Bolo de Pote Tauste Prestígio 200g",
+        "Bolo Tauste Abóbora com Coco 100g",
+      ),
+    ).toBe(false);
   });
 
   it("keeps compatible families comparable", () => {
