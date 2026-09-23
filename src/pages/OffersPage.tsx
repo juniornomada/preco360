@@ -51,6 +51,10 @@ import {
   formatNormalizedPrice,
   inferPackage,
   matchFlyerItem,
+  offerPackageInfo,
+  offerReferenceFamiliesCompatible,
+  offerReferenceFamilyKey,
+  offerReferenceRequiresKnownCount,
   normalizeSearchText,
   normalizedUnitPrice,
   type FlyerCandidate,
@@ -686,12 +690,52 @@ function comparableOfferIdentity(current: FlyerItemRow, previous: FlyerItemRow) 
     );
   }
 
+  const currentPrice = Number(current.advertised_price) || 0;
+  const previousPrice = Number(previous.advertised_price) || 0;
+  const currentPackage = offerPackageInfo(
+    current.raw_name,
+    current.package_quantity,
+    current.package_unit,
+    current.offer_notes,
+    currentPrice,
+  );
+  const previousPackage = offerPackageInfo(
+    previous.raw_name,
+    previous.package_quantity,
+    previous.package_unit,
+    previous.offer_notes,
+    previousPrice,
+  );
+  const currentBaseUnit = currentPackage?.baseUnit ?? current.base_unit;
+  const previousBaseUnit = previousPackage?.baseUnit ?? previous.base_unit;
+
   if (
-    current.base_unit &&
-    previous.base_unit &&
-    current.base_unit !== previous.base_unit
+    currentBaseUnit &&
+    previousBaseUnit &&
+    currentBaseUnit !== previousBaseUnit
   ) {
     return false;
+  }
+
+  const familyCompatibility = offerReferenceFamiliesCompatible(
+    current.raw_name,
+    previous.raw_name,
+  );
+  if (familyCompatibility === false) return false;
+
+  if (familyCompatibility === true) {
+    const familyKey = offerReferenceFamilyKey(current.raw_name);
+    if (
+      offerReferenceRequiresKnownCount(familyKey) &&
+      (
+        !currentPackage ||
+        !previousPackage ||
+        currentPackage.baseUnit !== "un" ||
+        previousPackage.baseUnit !== "un"
+      )
+    ) {
+      return false;
+    }
   }
 
   const a = offerIdentityTokens(current.raw_name);
@@ -720,14 +764,16 @@ function validClubPrice(item: FlyerItemRow) {
 }
 
 function candidateFromItem(item: FlyerItemRow): FlyerCandidate {
-  const packageInfo =
-    item.package_quantity && item.package_unit
-      ? inferPackage(`${item.package_quantity}${item.package_unit}`)
-      : inferPackage(item.raw_name);
-
   const regularPrice = Number(item.advertised_price) || 0;
   const clubPrice = validClubPrice(item);
   const effectivePrice = clubPrice ?? regularPrice;
+  const packageInfo = offerPackageInfo(
+    item.raw_name,
+    item.package_quantity,
+    item.package_unit,
+    item.offer_notes,
+    effectivePrice,
+  );
   const normalized = normalizedUnitPrice(effectivePrice, packageInfo);
 
   return {
@@ -1452,10 +1498,13 @@ export default function OffersPage() {
             const appActivationRequired =
               clubPrice !== null &&
               requiresAppActivation(flyer?.retailer, item.offer_notes);
-            const regularPackage =
-              item.package_quantity && item.package_unit
-                ? inferPackage(`${item.package_quantity}${item.package_unit}`)
-                : inferPackage(item.raw_name);
+            const regularPackage = offerPackageInfo(
+              item.raw_name,
+              item.package_quantity,
+              item.package_unit,
+              item.offer_notes,
+              regularPrice,
+            );
             const regularNormalized = normalizedUnitPrice(
               regularPrice,
               regularPackage,
