@@ -317,6 +317,26 @@ export function offerPackageInfo(
   offerNotes?: string[] | null,
   totalPrice?: number | null,
 ): PackageInfo | null {
+  const normalizedName = normalizeSearchText(rawName);
+
+  // Verified against the previous Tauste flyer: the current OCR/import stored
+  // "Biscoito Marilan Maizena 5kg" at the same R$ 5,49 price as the 300 g pack.
+  // Keep this correction here while the source row itself is read-only.
+  if (
+    normalizedName === "biscoito marilan maizena 5kg" &&
+    totalPrice !== null &&
+    totalPrice !== undefined &&
+    totalPrice >= 4 &&
+    totalPrice <= 7
+  ) {
+    return {
+      quantity: 300,
+      unit: "g",
+      baseUnit: "kg",
+      baseQuantity: 0.3,
+    };
+  }
+
   if (isCapacitySpecificationProduct(rawName)) {
     return { quantity: 1, unit: "un", baseUnit: "un", baseQuantity: 1 };
   }
