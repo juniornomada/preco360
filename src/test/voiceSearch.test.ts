@@ -22,11 +22,26 @@ describe("normalizeVoiceSearchTranscript", () => {
   });
 
   it("normalizes common poncã transcription variants", () => {
-    expect(normalizeVoiceSearchTranscript("ponkan")).toBe("poncã");
-    expect(normalizeVoiceSearchTranscript("poncan")).toBe("poncã");
-    expect(normalizeVoiceSearchTranscript("ponca")).toBe("poncã");
-    expect(normalizeVoiceSearchTranscript("pokan")).toBe("poncã");
-    expect(normalizeVoiceSearchTranscript("pocã")).toBe("poncã");
+    const variants = [
+      "poncã",
+      "ponca",
+      "poncan",
+      "poncam",
+      "ponkan",
+      "ponkam",
+      "ponka",
+      "pocã",
+      "poca",
+      "pocan",
+      "pocam",
+      "pokan",
+      "pokam",
+    ];
+
+    for (const variant of variants) {
+      expect(normalizeVoiceSearchTranscript(variant)).toBe("poncã");
+    }
+
     expect(normalizeVoiceSearchTranscript("PONCÃ.")).toBe("poncã");
   });
 });
