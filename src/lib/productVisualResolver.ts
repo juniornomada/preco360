@@ -26,7 +26,7 @@ const specificRules: Rule[] = [
   { pattern: /iog\s*liq|iogurte/, visual: "__yogurt__", confidence: 0.98 },
 
   // Fish and seafood.
-  { pattern: /file de merluza|merluza/, visual: "__fishfillet__", forceIcon: true, confidence: 0.99 },
+  { pattern: /file de merluza|merluza/, visual: "__fishfillet__", confidence: 0.99 },
   { pattern: /bacalhau|peixe|tilapia|pescado|salmao|sardinha|mapara|pangasius|pintado/, visual: "🐟", confidence: 0.97 },
   { pattern: /camarao/, visual: "🍤", confidence: 0.99 },
 
@@ -115,7 +115,7 @@ const specificRules: Rule[] = [
   { pattern: /linguica calabresa|calabresa defumada/, visual: "__calabresa__", forceIcon: true, confidence: 0.99 },
   { pattern: /linguica|\bling\b/, visual: "🌭", confidence: 0.97 },
   { pattern: /salsicha|hot dog/, visual: "🌭", confidence: 0.99 },
-  { pattern: /costela suina|costelinha suina|bisteca suina|panceta suina/, visual: "__porkribs__", forceIcon: true, confidence: 0.98 },
+  { pattern: /costela suina|costelinha suina|bisteca suina|panceta suina/, visual: "__porkribs__", confidence: 0.98 },
   { pattern: /hamburguer/, visual: "🍔", confidence: 0.99 },
   { pattern: /frango|sobrecoxa|\bcoxa\b|coxinha|asas|\basa\b|meio da asa|filezinho|steak/, visual: "🍗", confidence: 0.98 },
   { pattern: /contra file|coxao|patinho|acem|osso buco|miolo do sete|carne moida|bovino|bovina|\bcarne\b|lagarto|pernil|lombo|paleta|ponta de peito/, visual: "🥩", confidence: 0.97 },
