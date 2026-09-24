@@ -992,7 +992,6 @@ export default function StorePriceImportPage() {
               .insert({
                 user_id: user.id,
                 name: productName,
-                normalized_name: normalizedName || null,
                 category: "Geral",
                 brand: row.brand,
                 barcode: row.barcode,
