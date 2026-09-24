@@ -69,6 +69,11 @@ function searchText(value: string) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    // "sem alcool", "zero alcool" and "0,0/0.0 alcool" are the same
+    // shopping intent. Canonicalize before punctuation is stripped so 0.0
+    // remains recognizable.
+    .replace(/\b(?:zero|0[.,]?0?)\s*%?\s*alcool\b/g, "sem alcool")
+    .replace(/\bsem\s+alcool\b/g, "sem alcool")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
