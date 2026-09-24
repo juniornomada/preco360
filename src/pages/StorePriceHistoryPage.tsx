@@ -1,14 +1,16 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useVoiceSearch } from "@/hooks/useVoiceSearch";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   ChevronRight,
   History,
+  Mic,
   Search,
   Store,
   TrendingDown,
@@ -125,7 +127,14 @@ function median(values: number[]) {
 export default function StorePriceHistoryPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [search, setSearch] = useState("");
+  const {
+    isListening,
+    error: voiceSearchError,
+    startListening,
+    stopListening,
+  } = useVoiceSearch();
 
   const { data: observations = [], isLoading, error } = useQuery<
     StoreObservation[]
@@ -243,15 +252,51 @@ export default function StorePriceHistoryPage() {
         </Button>
       </div>
 
-      <div className="relative mb-4">
+      <div className="relative mb-1">
         <Search className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
         <Input
-          className="h-12 pl-10"
-          placeholder="Busque Heineken 350 ml, suco, Qboa..."
+          ref={searchInputRef}
+          className="h-12 pl-10 pr-12"
+          placeholder={
+            isListening
+              ? "Ouvindo o produto..."
+              : "Busque Heineken 350 ml, suco, Qboa..."
+          }
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
+        <button
+          type="button"
+          className={`absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${
+            isListening
+              ? "bg-primary/15 text-primary animate-pulse"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          }`}
+          aria-label={isListening ? "Parar busca por voz" : "Buscar produto por voz"}
+          aria-pressed={isListening}
+          title={isListening ? "Parar" : "Buscar por voz"}
+          onClick={() => {
+            if (isListening) {
+              stopListening();
+              return;
+            }
+
+            searchInputRef.current?.blur();
+            void startListening((transcript) => {
+              setSearch(transcript);
+            });
+          }}
+        >
+          <Mic className="h-4 w-4" />
+        </button>
       </div>
+
+      {voiceSearchError && (
+        <p className="mb-3 px-1 text-[10px] text-destructive">
+          {voiceSearchError}
+        </p>
+      )}
+      {!voiceSearchError && <div className="mb-3" />}
 
       {isLoading && (
         <Card className="border-dashed">
