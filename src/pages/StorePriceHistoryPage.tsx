@@ -410,7 +410,7 @@ export default function StorePriceHistoryPage() {
                 key={group.productId}
                 className={
                   comparison?.isBest
-                    ? "overflow-hidden border-primary/70 bg-primary/[0.035] ring-1 ring-primary/35"
+                    ? "overflow-hidden border-primary/60"
                     : "overflow-hidden"
                 }
               >
@@ -435,12 +435,15 @@ export default function StorePriceHistoryPage() {
                       </p>
                       {comparison?.isBest &&
                         comparison.savingsPercent !== null && (
-                          <p className="mt-1 text-[11px] font-semibold text-primary">
-                            {comparison.savingsPercent.toLocaleString("pt-BR", {
-                              minimumFractionDigits: 1,
-                              maximumFractionDigits: 1,
-                            })}
-                            % menor por {unitLabel} que a próxima opção comparável
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            <strong className="font-bold text-primary">
+                              {comparison.savingsPercent.toLocaleString("pt-BR", {
+                                minimumFractionDigits: 1,
+                                maximumFractionDigits: 1,
+                              })}
+                              %
+                            </strong>{" "}
+                            mais barato por {unitLabel}
                           </p>
                         )}
                     </div>
@@ -459,34 +462,44 @@ export default function StorePriceHistoryPage() {
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                         Menor
                       </p>
-                      <p className="mt-0.5 text-sm font-extrabold text-primary">
+                      <p className="mt-0.5 text-sm font-extrabold">
                         {brl(bestPrice)}
                       </p>
                     </div>
-                    <div className="rounded-xl bg-muted/60 p-2.5">
+                    <div
+                      className={
+                        comparison?.isBest && normalized
+                          ? "rounded-xl border border-primary/30 bg-primary/10 p-2.5"
+                          : "rounded-xl bg-muted/60 p-2.5"
+                      }
+                    >
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Referência
+                        {normalized
+                          ? comparison?.baseUnit === "l"
+                            ? "Por litro"
+                            : comparison?.baseUnit === "kg"
+                              ? "Por kg"
+                              : "Por unidade"
+                          : "Referência"}
                       </p>
-                      <p className="mt-0.5 text-sm font-extrabold">
-                        {brl(group.median)}
+                      <p
+                        className={
+                          comparison?.isBest && normalized
+                            ? "mt-0.5 text-sm font-extrabold text-primary"
+                            : "mt-0.5 text-sm font-extrabold"
+                        }
+                      >
+                        {normalized ?? brl(group.median)}
                       </p>
                     </div>
                   </div>
 
-                  <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                    <span className="font-semibold text-foreground/80">
+                  <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground/85">
+                    <span className="font-medium">
                       {group.latest.supermarket}
                     </span>
                     <span>·</span>
                     <span>{dateBr(group.latest.observed_date)}</span>
-                    {normalized && (
-                      <>
-                        <span>·</span>
-                        <span className="font-semibold text-primary">
-                          {normalized}
-                        </span>
-                      </>
-                    )}
                   </div>
 
                   {Number.isFinite(wholesale) && wholesale > 0 && (
@@ -510,9 +523,9 @@ export default function StorePriceHistoryPage() {
                         )}`,
                       )
                     }
-                    className="mt-3 flex h-10 w-full items-center justify-between rounded-xl border border-primary/25 bg-primary/5 px-3 text-sm font-bold text-primary transition hover:bg-primary/10"
+                    className="mt-3 flex h-10 w-full items-center justify-between rounded-xl border border-border/80 bg-transparent px-3 text-sm font-semibold text-foreground/80 transition hover:border-primary/30 hover:bg-muted/50 hover:text-foreground"
                   >
-                    <span>Comparar preço encontrado agora</span>
+                    <span>Comparar agora</span>
                     <ChevronRight className="h-4 w-4" />
                   </button>
                 </CardContent>
