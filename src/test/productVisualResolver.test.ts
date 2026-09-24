@@ -49,6 +49,8 @@ describe("product visual resolver", () => {
     expect(forceProductVisual("Uva Verde sem Semente 500g")).toBe(true);
     expect(forceProductVisual("Abobrinha Paulista Verde Kg")).toBe(true);
     expect(forceProductVisual("Abobrinha Italiana")).toBe(true);
+    expect(forceProductVisual("Batata Doce Kg")).toBe(false);
+    expect(forceProductVisual("Batata Doce Rosada")).toBe(false);
     expect(forceProductVisual("Café em Pó Pilão 500g")).toBe(false);
   });
 });
