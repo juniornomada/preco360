@@ -541,7 +541,11 @@ export default function StorePriceImportPage() {
       sourceHash,
       sourceImagePath,
       sourceFileName,
-      rawName: observation.product_name.trim(),
+      rawName: productNameWithPackage(
+        observation.product_name,
+        observation.package_quantity ?? null,
+        observation.package_unit ?? null,
+      ),
       brand: observation.brand ?? null,
       barcode: observation.barcode ?? null,
       packageQuantity: observation.package_quantity ?? null,
