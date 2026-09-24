@@ -1648,7 +1648,7 @@ export default function FlyerPage() {
             Base de ofertas
           </h1>
           <p className="mt-1 max-w-xl text-xs leading-snug text-muted-foreground sm:text-sm">
-            Importe, revise e mantenha os tabloides que alimentam o Preço 360.
+            Importe tabloides ou registre preços pesquisados presencialmente em loja.
           </p>
         </div>
         <div className="rounded-xl bg-primary/10 p-2.5 text-primary sm:rounded-2xl sm:p-3">
@@ -1825,6 +1825,34 @@ export default function FlyerPage() {
 
       {view === "import" && !(safeReviewMode && items.length > 0) && (
         <div className="space-y-3">
+          <Card className="border-primary/20">
+            <CardContent className="p-3.5">
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                Tipo de importação
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div className="rounded-xl border border-primary/35 bg-primary/10 p-3">
+                  <Upload className="h-4 w-4 text-primary" />
+                  <p className="mt-1.5 text-sm font-bold">Tabloide</p>
+                  <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
+                    Ofertas com período de validade.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate("/radar/store-prices")}
+                  className="rounded-xl border bg-card p-3 text-left transition-colors hover:border-primary/35 hover:bg-primary/5"
+                >
+                  <Store className="h-4 w-4 text-primary" />
+                  <p className="mt-1.5 text-sm font-bold">Pesquisa em loja</p>
+                  <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
+                    Fotos de preços normais de gôndola.
+                  </p>
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+
           {pendingRecovery && (
             <Card className="border-primary/35 bg-primary/5">
               <CardContent className="p-4">
