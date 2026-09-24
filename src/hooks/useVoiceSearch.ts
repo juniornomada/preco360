@@ -1,56 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
-type SpeechAlternative = {
-  transcript: string;
-};
-
-type SpeechResult = {
-  [index: number]: SpeechAlternative | undefined;
-  length: number;
-  isFinal?: boolean;
-};
-
-type SpeechResultList = {
-  [index: number]: SpeechResult;
-  length: number;
-};
-
-type SpeechRecognitionEventLike = Event & {
-  results: SpeechResultList;
-};
-
-type SpeechRecognitionErrorEventLike = Event & {
-  error?: string;
-};
-
-type SpeechRecognitionLike = {
-  lang: string;
-  interimResults: boolean;
-  continuous: boolean;
-  maxAlternatives: number;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-  onstart: ((event: Event) => void) | null;
-  onend: ((event: Event) => void) | null;
-  onaudiostart: ((event: Event) => void) | null;
-  onaudioend: ((event: Event) => void) | null;
-  onspeechstart: ((event: Event) => void) | null;
-  onspeechend: ((event: Event) => void) | null;
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
-  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
-};
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
-
-type SpeechWindow = Window & {
-  SpeechRecognition?: SpeechRecognitionConstructor;
-  webkitSpeechRecognition?: SpeechRecognitionConstructor;
-};
-
-const SILENCE_COMMIT_MS = 900;
-const SPEECH_END_STOP_MS = 250;
 const MAX_LISTENING_MS = 6000;
+const SILENCE_AFTER_SPEECH_MS = 850;
+const MIN_RECORDING_MS = 450;
+const VOICE_RMS_THRESHOLD = 0.018;
 
 export function normalizeVoiceSearchTranscript(value: string) {
   const normalized = value
@@ -64,14 +18,10 @@ export function normalizeVoiceSearchTranscript(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLocaleLowerCase("pt-BR");
 
-  // On pt-BR speech recognition, the final "l" in a very short utterance can
-  // occasionally be emitted phonetically as "u" ("sal" -> "sau").
   if (key === "sau") {
     return "sal";
   }
 
-  // Ponkan/Poncã has several accepted spellings. Keep the browser-native
-  // recognizer, but collapse only closely related spellings to one search term.
   const poncaAliases = new Set([
     "ponca",
     "poncan",
@@ -93,44 +43,62 @@ export function normalizeVoiceSearchTranscript(value: string) {
   return normalized;
 }
 
-function getSpeechRecognitionConstructor() {
-  if (typeof window === "undefined") return null;
-  const speechWindow = window as SpeechWindow;
+function silentVoiceSupported() {
   return (
-    speechWindow.SpeechRecognition ??
-    speechWindow.webkitSpeechRecognition ??
-    null
+    typeof window !== "undefined" &&
+    typeof MediaRecorder !== "undefined" &&
+    !!navigator.mediaDevices?.getUserMedia
   );
 }
 
-function voiceErrorMessage(error?: string) {
-  if (error === "not-allowed" || error === "service-not-allowed") {
+function microphoneErrorMessage(error: unknown) {
+  const name =
+    error && typeof error === "object" && "name" in error
+      ? String((error as { name?: unknown }).name ?? "")
+      : "";
+
+  if (name === "NotAllowedError" || name === "SecurityError") {
     return "Permita o acesso ao microfone para buscar por voz.";
   }
-  if (error === "audio-capture") {
-    return "Não foi possível acessar o microfone.";
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "Não encontrei um microfone disponível.";
   }
-  if (error === "no-speech") {
-    return "Não consegui ouvir o produto. Toque no microfone e tente novamente.";
-  }
-  return "Não consegui reconhecer o produto. Tente novamente.";
+  return "Não foi possível acessar o microfone. Tente novamente.";
+}
+
+function preferredAudioMimeType() {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+  ];
+
+  return (
+    candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ??
+    ""
+  );
 }
 
 export function useVoiceSearch() {
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  const silenceTimerRef = useRef<number | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
   const maxTimerRef = useRef<number | null>(null);
-  const pendingTranscriptRef = useRef("");
-  const deliveredRef = useRef(false);
-  const speechStartedRef = useRef(false);
+  const chunksRef = useRef<Blob[]>([]);
+  const startedAtRef = useRef(0);
+  const speechDetectedRef = useRef(false);
+  const lastVoiceAtRef = useRef(0);
+  const disposedRef = useRef(false);
+
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const isSupported = getSpeechRecognitionConstructor() !== null;
+  const isSupported = silentVoiceSupported();
 
   const clearTimers = useCallback(() => {
-    if (silenceTimerRef.current !== null) {
-      window.clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
+    if (animationFrameRef.current !== null) {
+      window.cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
     if (maxTimerRef.current !== null) {
       window.clearTimeout(maxTimerRef.current);
@@ -138,162 +106,208 @@ export function useVoiceSearch() {
     }
   }, []);
 
+  const releaseMicrophone = useCallback(() => {
+    clearTimers();
+
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+
+    const context = audioContextRef.current;
+    audioContextRef.current = null;
+    if (context && context.state !== "closed") {
+      void context.close().catch(() => {});
+    }
+
+    recorderRef.current = null;
+  }, [clearTimers]);
+
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+    }
   }, []);
 
   const startListening = useCallback(
-    (onTranscript: (transcript: string) => void) => {
-      const Recognition = getSpeechRecognitionConstructor();
-      if (!Recognition) {
-        setError("Busca por voz não está disponível neste navegador.");
+    async (onTranscript: (transcript: string) => void) => {
+      if (!silentVoiceSupported()) {
+        setError("Busca por voz silenciosa não está disponível neste navegador.");
         return false;
       }
 
-      clearTimers();
-      recognitionRef.current?.abort();
-      pendingTranscriptRef.current = "";
-      deliveredRef.current = false;
-      speechStartedRef.current = false;
+      const activeRecorder = recorderRef.current;
+      if (activeRecorder && activeRecorder.state !== "inactive") {
+        activeRecorder.stop();
+        return false;
+      }
 
-      const recognition = new Recognition();
-      recognition.lang = "pt-BR";
-      recognition.interimResults = true;
-      recognition.continuous = false;
-      recognition.maxAlternatives = 5;
+      setError(null);
+      chunksRef.current = [];
+      speechDetectedRef.current = false;
+      lastVoiceAtRef.current = 0;
+      disposedRef.current = false;
 
-      const bestTranscript = (result?: SpeechResult) => {
-        if (!result?.length) return "";
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+        streamRef.current = stream;
 
-        const alternatives = Array.from({ length: result.length }, (_, index) =>
-          normalizeVoiceSearchTranscript(result[index]?.transcript ?? ""),
-        ).filter(Boolean);
+        const mimeType = preferredAudioMimeType();
+        const recorder = mimeType
+          ? new MediaRecorder(stream, { mimeType })
+          : new MediaRecorder(stream);
+        recorderRef.current = recorder;
 
-        return (
-          alternatives.find((candidate) => candidate === "poncã") ??
-          alternatives[0] ??
-          ""
-        );
-      };
+        const audioContext = new AudioContext();
+        audioContextRef.current = audioContext;
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.2;
+        source.connect(analyser);
 
-      const deliverPending = () => {
-        const transcript = normalizeVoiceSearchTranscript(
-          pendingTranscriptRef.current,
-        );
-        if (!transcript || deliveredRef.current) return false;
+        const samples = new Uint8Array(analyser.fftSize);
 
-        deliveredRef.current = true;
-        onTranscript(transcript);
-        return true;
-      };
+        const watchVoiceLevel = () => {
+          if (recorder.state === "inactive") return;
 
-      const scheduleSilenceCommit = () => {
-        if (silenceTimerRef.current !== null) {
-          window.clearTimeout(silenceTimerRef.current);
-        }
-        silenceTimerRef.current = window.setTimeout(() => {
-          deliverPending();
-          recognition.stop();
-        }, SILENCE_COMMIT_MS);
-      };
+          analyser.getByteTimeDomainData(samples);
+          let sumSquares = 0;
 
-      recognition.onstart = () => {
-        recognitionRef.current = recognition;
-        setError(null);
+          for (let index = 0; index < samples.length; index += 1) {
+            const centered = (samples[index] - 128) / 128;
+            sumSquares += centered * centered;
+          }
+
+          const rms = Math.sqrt(sumSquares / samples.length);
+          const now = performance.now();
+
+          if (rms >= VOICE_RMS_THRESHOLD) {
+            speechDetectedRef.current = true;
+            lastVoiceAtRef.current = now;
+          } else if (
+            speechDetectedRef.current &&
+            lastVoiceAtRef.current > 0 &&
+            now - lastVoiceAtRef.current >= SILENCE_AFTER_SPEECH_MS &&
+            now - startedAtRef.current >= MIN_RECORDING_MS
+          ) {
+            recorder.stop();
+            return;
+          }
+
+          animationFrameRef.current =
+            window.requestAnimationFrame(watchVoiceLevel);
+        };
+
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            chunksRef.current.push(event.data);
+          }
+        };
+
+        recorder.onerror = () => {
+          setError("Não consegui gravar sua voz. Tente novamente.");
+          setIsListening(false);
+          releaseMicrophone();
+        };
+
+        recorder.onstop = () => {
+          const chunks = [...chunksRef.current];
+          const recordedType =
+            recorder.mimeType || chunks[0]?.type || "audio/webm";
+          releaseMicrophone();
+
+          if (disposedRef.current) {
+            setIsListening(false);
+            return;
+          }
+
+          if (!chunks.length) {
+            setError("Não consegui ouvir o produto. Toque no microfone e tente novamente.");
+            setIsListening(false);
+            return;
+          }
+
+          void (async () => {
+            try {
+              const audio = new Blob(chunks, { type: recordedType });
+              const body = new FormData();
+              body.append(
+                "file",
+                audio,
+                recordedType.includes("mp4") ? "busca.m4a" : "busca.webm",
+              );
+
+              const { data, error: functionError } =
+                await supabase.functions.invoke("transcribe-voice-search", {
+                  body,
+                });
+
+              if (functionError) throw functionError;
+
+              const transcript = normalizeVoiceSearchTranscript(
+                String(data?.transcript ?? ""),
+              );
+
+              if (!transcript) {
+                setError(
+                  "Não consegui identificar o produto. Toque no microfone e tente novamente.",
+                );
+                return;
+              }
+
+              onTranscript(transcript);
+            } catch (transcriptionError) {
+              console.error("Silent voice search transcription failed", transcriptionError);
+              setError(
+                "Não consegui transcrever sua voz agora. Tente novamente.",
+              );
+            } finally {
+              setIsListening(false);
+            }
+          })();
+        };
+
+        recorder.start(200);
+        startedAtRef.current = performance.now();
         setIsListening(true);
 
         maxTimerRef.current = window.setTimeout(() => {
-          const delivered = deliverPending();
-          if (!delivered && !pendingTranscriptRef.current) {
-            setError(
-              "Não consegui ouvir o produto. Toque no microfone e tente novamente.",
-            );
+          if (recorder.state !== "inactive") {
+            recorder.stop();
           }
-          recognition.stop();
         }, MAX_LISTENING_MS);
-      };
 
-      recognition.onspeechstart = () => {
-        speechStartedRef.current = true;
-        if (silenceTimerRef.current !== null) {
-          window.clearTimeout(silenceTimerRef.current);
-          silenceTimerRef.current = null;
-        }
-      };
+        animationFrameRef.current =
+          window.requestAnimationFrame(watchVoiceLevel);
 
-      recognition.onspeechend = () => {
-        if (silenceTimerRef.current !== null) {
-          window.clearTimeout(silenceTimerRef.current);
-        }
-        // Chrome/Android sometimes keeps very short words such as "sal" in a
-        // non-final state. Stopping recognition shortly after speechend forces
-        // the browser to flush the final result instead of leaving the mic on.
-        silenceTimerRef.current = window.setTimeout(() => {
-          recognition.stop();
-        }, SPEECH_END_STOP_MS);
-      };
-
-      recognition.onresult = (event) => {
-        const lastResult = event.results[event.results.length - 1];
-        const transcript = bestTranscript(lastResult);
-
-        if (!transcript) return;
-        pendingTranscriptRef.current = transcript;
-
-        if (lastResult?.isFinal) {
-          deliverPending();
-          clearTimers();
-          recognition.stop();
-          return;
-        }
-
-        scheduleSilenceCommit();
-      };
-
-      recognition.onerror = (event) => {
-        clearTimers();
-
-        const delivered = deliverPending();
-        if (!delivered && event.error !== "aborted") {
-          setError(voiceErrorMessage(event.error));
-        }
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        clearTimers();
-        const delivered = deliverPending();
-        if (!delivered && speechStartedRef.current) {
-          setError(
-            "Ouvi sua fala, mas não consegui identificar o produto. Tente falar novamente.",
-          );
-        }
-        if (recognitionRef.current === recognition) {
-          recognitionRef.current = null;
-        }
-        setIsListening(false);
-      };
-
-      try {
-        recognition.start();
         return true;
-      } catch {
-        clearTimers();
-        setError("Não foi possível iniciar o microfone. Tente novamente.");
+      } catch (microphoneError) {
+        releaseMicrophone();
         setIsListening(false);
+        setError(microphoneErrorMessage(microphoneError));
         return false;
       }
     },
-    [clearTimers],
+    [releaseMicrophone],
   );
 
   useEffect(() => {
     return () => {
-      clearTimers();
-      recognitionRef.current?.abort();
-      recognitionRef.current = null;
+      disposedRef.current = true;
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        recorder.onstop = null;
+        recorder.stop();
+      }
+      releaseMicrophone();
     };
-  }, [clearTimers]);
+  }, [releaseMicrophone]);
 
   return {
     isSupported,
