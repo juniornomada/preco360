@@ -1,9 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Tags } from "lucide-react";
-import {
-  forceProductVisual,
-  productVisual,
-} from "@/lib/productVisualResolver";
+import { productVisual } from "@/lib/productVisualResolver";
 
 function ProductVisualIcon({
   visual,
@@ -257,8 +254,9 @@ export default function ProductVisual({
   compact?: boolean;
 }) {
   const visual = productVisual(name, category);
-  const useRuleIcon = forceProductVisual(name, category);
-  const safeImageUrl = useRuleIcon ? null : imageUrl;
+  // A valid product image always wins. Visual rules are fallback-only.
+  // This prevents manually verified photos from being replaced by generic icons.
+  const safeImageUrl = imageUrl;
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
