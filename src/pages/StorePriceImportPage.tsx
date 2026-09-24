@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Camera, CheckCircle2, Loader2, Save, Trash2 } from "lucide-react";
@@ -37,9 +37,11 @@ type ExtractedObservation = {
 
 type ReviewObservation = {
   localId: string;
-  file: File;
+  file: File | null;
   previewUrl: string;
   sourceHash: string;
+  sourceImagePath: string | null;
+  sourceFileName: string;
   rawName: string;
   brand: string | null;
   barcode: string | null;
@@ -56,6 +58,69 @@ type ReviewObservation = {
   matchConfidence: number;
   matchType: "exact" | "equivalent" | "manual" | "unmatched";
 };
+
+type StorePriceAnalysisJob = {
+  id: string;
+  retailer: string;
+  observed_date: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  progress_current: number;
+  progress_total: number;
+  progress_label: string;
+  source_files: Array<{
+    index: number;
+    path: string;
+    name: string;
+    mime_type?: string | null;
+    size?: number | null;
+    hash?: string | null;
+  }>;
+  result: {
+    observations?: Array<{
+      index: number;
+      source_file_name: string;
+      source_image_path: string;
+      source_hash: string | null;
+      observation: ExtractedObservation;
+      model?: string | null;
+    }>;
+    failures?: Array<{
+      index: number;
+      source_file_name: string;
+      source_image_path: string;
+      source_hash: string | null;
+      reason: string;
+    }>;
+  } | null;
+  warning_message: string | null;
+  error_message: string | null;
+  completed_at: string | null;
+  saved_at: string | null;
+  updated_at: string | null;
+};
+
+const STORE_PRICE_JOB_KEY = "preco360-active-store-price-analysis-job";
+
+async function invokeStorePriceWorker(jobId: string) {
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { error } = await supabase.functions.invoke("process-store-price-job", {
+      body: { job_id: jobId },
+    });
+
+    if (!error) return;
+
+    lastError = error;
+    if (attempt < 2) {
+      await new Promise((resolve) =>
+        window.setTimeout(resolve, 900 * (attempt + 1)),
+      );
+    }
+  }
+
+  throw lastError ?? new Error("Não foi possível iniciar a análise no servidor.");
+}
 
 const todayLocal = () => {
   const now = new Date();
@@ -145,6 +210,11 @@ export default function StorePriceImportPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [progressLabel, setProgressLabel] = useState("");
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const appliedJobRef = useRef<string | null>(null);
+  const queuedStartRef = useRef<string | null>(null);
+  const autoRetryJobRef = useRef<string | null>(null);
 
   const { data: products = [] } = useQuery<ProductForMatch[]>({
     queryKey: ["store-price-products", user?.id],
@@ -178,11 +248,116 @@ export default function StorePriceImportPage() {
     [products],
   );
 
+  const { data: activeJob } = useQuery<StorePriceAnalysisJob | null>({
+    queryKey: ["store-price-analysis-job", user?.id, activeJobId],
+    queryFn: async () => {
+      if (!activeJobId) return null;
+      const { data, error } = await db
+        .from("store_price_analysis_jobs")
+        .select(
+          "id,retailer,observed_date,status,progress_current,progress_total,progress_label,source_files,result,warning_message,error_message,completed_at,saved_at,updated_at",
+        )
+        .eq("user_id", user!.id)
+        .eq("id", activeJobId)
+        .maybeSingle();
+      if (error) throw error;
+      return data ?? null;
+    },
+    enabled: !!user && !!activeJobId,
+    refetchInterval: activeJobId ? 1500 : false,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    retry: 3,
+  });
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+
+    const recover = async () => {
+      const savedJobId = localStorage.getItem(STORE_PRICE_JOB_KEY);
+      if (savedJobId) {
+        const { data: savedJob } = await db
+          .from("store_price_analysis_jobs")
+          .select(
+            "id,retailer,observed_date,status,progress_current,progress_total,progress_label,saved_at",
+          )
+          .eq("user_id", user.id)
+          .eq("id", savedJobId)
+          .maybeSingle();
+
+        if (savedJob && !savedJob.saved_at && !cancelled) {
+          setRetailer(savedJob.retailer || "");
+          setObservedDate(savedJob.observed_date || todayLocal());
+          setActiveJobId(savedJob.id);
+          setAnalyzing(
+            savedJob.status === "queued" || savedJob.status === "processing",
+          );
+          setProgress({
+            current: Math.max(0, Number(savedJob.progress_current) || 0),
+            total: Math.max(1, Number(savedJob.progress_total) || 1),
+          });
+          setProgressLabel(
+            savedJob.progress_label || "Recuperando análise no servidor…",
+          );
+          return;
+        }
+
+        localStorage.removeItem(STORE_PRICE_JOB_KEY);
+      }
+
+      const cutoff = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+      const { data: activeJobs } = await db
+        .from("store_price_analysis_jobs")
+        .select(
+          "id,retailer,observed_date,status,progress_current,progress_total,progress_label,created_at",
+        )
+        .eq("user_id", user.id)
+        .in("status", ["queued", "processing"])
+        .is("saved_at", null)
+        .gte("created_at", cutoff)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      const serverJob = activeJobs?.[0];
+      if (serverJob && !cancelled) {
+        localStorage.setItem(STORE_PRICE_JOB_KEY, serverJob.id);
+        setRetailer(serverJob.retailer || "");
+        setObservedDate(serverJob.observed_date || todayLocal());
+        setActiveJobId(serverJob.id);
+        setAnalyzing(true);
+        setProgress({
+          current: Math.max(0, Number(serverJob.progress_current) || 0),
+          total: Math.max(1, Number(serverJob.progress_total) || 1),
+        });
+        setProgressLabel(
+          serverJob.progress_label || "Recuperando análise no servidor…",
+        );
+      }
+    };
+
+    void recover();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
   const clearAll = () => {
-    rows.forEach((row) => URL.revokeObjectURL(row.previewUrl));
+    rows.forEach((row) => {
+      if (row.previewUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(row.previewUrl);
+      }
+    });
     setFiles([]);
     setRows([]);
     setProgress({ current: 0, total: 0 });
+    setProgressLabel("");
+    setActiveJobId(null);
+    appliedJobRef.current = null;
+    queuedStartRef.current = null;
+    autoRetryJobRef.current = null;
+    localStorage.removeItem(STORE_PRICE_JOB_KEY);
     if (inputRef.current) inputRef.current.value = "";
   };
 
