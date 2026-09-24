@@ -71,10 +71,22 @@ const safeName = (value: string) =>
     .slice(0, 90);
 
 async function sha256(file: File) {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+    return [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  } catch {
+    // Some Android gallery providers can lose direct blob access after selection.
+    // Never discard an otherwise analyzable photo just because hashing failed.
+    const fallback = new TextEncoder().encode(
+      `${file.name}|${file.size}|${file.lastModified}|${file.type}`,
+    );
+    const digest = await crypto.subtle.digest("SHA-256", fallback);
+    return [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
 }
 
 function numberInput(value: string) {
@@ -194,29 +206,54 @@ export default function StorePriceImportPage() {
     file: File,
     sourceHash: string,
   ): ReviewObservation => {
-    const candidate = observationCandidate({
-      rawName: observation.product_name,
-      brand: observation.brand,
-      retailPrice: Number(observation.retail_price),
-      packageQuantity: observation.package_quantity,
-      packageUnit: observation.package_unit,
-    });
-    const exactBarcodeProduct = observation.barcode
-      ? products.find(
-          (product) =>
-            String((product as ProductForMatch & { barcode?: string | null }).barcode ?? "")
-              .replace(/\D/g, "") ===
-            String(observation.barcode).replace(/\D/g, ""),
-        )
-      : null;
-    const match = exactBarcodeProduct
-      ? { productId: exactBarcodeProduct.id, confidence: 1, type: "exact" as const }
-      : matchFlyerItem(
-          candidate,
-          products,
-          aliases,
-          canonicalRetailerName(retailer),
-        );
+    let match: {
+      productId: string | null;
+      confidence: number;
+      type: "exact" | "equivalent" | "manual" | "unmatched";
+    } = {
+      productId: null,
+      confidence: 0,
+      type: "unmatched",
+    };
+
+    try {
+      const candidate = observationCandidate({
+        rawName: observation.product_name,
+        brand: observation.brand,
+        retailPrice: Number(observation.retail_price),
+        packageQuantity: observation.package_quantity,
+        packageUnit: observation.package_unit,
+      });
+      const exactBarcodeProduct = observation.barcode
+        ? products.find(
+            (product) =>
+              String(
+                (product as ProductForMatch & { barcode?: string | null }).barcode ?? "",
+              ).replace(/\D/g, "") ===
+              String(observation.barcode).replace(/\D/g, ""),
+          )
+        : null;
+
+      match = exactBarcodeProduct
+        ? {
+            productId: exactBarcodeProduct.id,
+            confidence: 1,
+            type: "exact" as const,
+          }
+        : matchFlyerItem(
+            candidate,
+            products,
+            aliases,
+            canonicalRetailerName(retailer),
+          );
+    } catch (error) {
+      // Product-history matching must never erase a successful visual read.
+      console.warn("store-price product match failed", {
+        file: file.name,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     return {
       localId: crypto.randomUUID(),
       file,
@@ -264,15 +301,18 @@ export default function StorePriceImportPage() {
       return;
     }
 
+    const filesToAnalyze = [...files];
+    const analysisSessionId = crypto.randomUUID();
+
     setAnalyzing(true);
     setRows([]);
-    setProgress({ current: 0, total: files.length });
+    setProgress({ current: 0, total: filesToAnalyze.length });
     const parsedRows: ReviewObservation[] = [];
     const failures: string[] = [];
 
     try {
-      for (let index = 0; index < files.length; index += 1) {
-        const file = files[index];
+      for (let index = 0; index < filesToAnalyze.length; index += 1) {
+        const file = filesToAnalyze[index];
         try {
           const sourceHash = await sha256(file);
           let lastError: unknown = null;
@@ -281,6 +321,9 @@ export default function StorePriceImportPage() {
           for (let attempt = 1; attempt <= 2; attempt += 1) {
             const body = new FormData();
             body.append("file", file, file.name || "preco-loja.jpg");
+            body.append("analysis_session_id", analysisSessionId);
+            body.append("file_index", String(index + 1));
+            body.append("file_total", String(filesToAnalyze.length));
 
             const result = await supabase.functions.invoke(
               "analyze-store-price",
@@ -306,13 +349,18 @@ export default function StorePriceImportPage() {
             );
           }
 
-          parsedRows.push(
-            matchObservation(
-              data.observation as ExtractedObservation,
-              file,
-              sourceHash,
-            ),
+          const row = matchObservation(
+            data.observation as ExtractedObservation,
+            file,
+            sourceHash,
           );
+          parsedRows.push(row);
+          setRows((current) => {
+            const withoutSameFile = current.filter(
+              (item) => item.sourceHash !== row.sourceHash,
+            );
+            return [...withoutSameFile, row];
+          });
         } catch (error) {
           failures.push(
             error instanceof Error
@@ -322,12 +370,13 @@ export default function StorePriceImportPage() {
         } finally {
           setProgress({
             current: index + 1,
-            total: files.length,
+            total: filesToAnalyze.length,
           });
+          await new Promise((resolve) => setTimeout(resolve, 120));
         }
       }
 
-      setRows(parsedRows);
+      setRows([...parsedRows]);
       if (!parsedRows.length) {
         toast({
           title: "Nenhum preço pôde ser lido",
