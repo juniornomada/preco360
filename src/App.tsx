@@ -48,6 +48,7 @@ const OfferImagesAuditPage = resilientLazy(() => import("./pages/OfferImagesAudi
 const ReceiptImportPage = resilientLazy(() => import("./pages/ReceiptImportPage"));
 const FlyerPage = resilientLazy(() => import("./pages/FlyerPage"));
 const StorePriceImportPage = resilientLazy(() => import("./pages/StorePriceImportPage"));
+const StorePriceHistoryPage = resilientLazy(() => import("./pages/StorePriceHistoryPage"));
 const FlyerHistoryPage = resilientLazy(() => import("./pages/FlyerHistoryPage"));
 const MarketBasketPage = resilientLazy(() => import("./pages/MarketBasketPage"));
 const ProfilePage = resilientLazy(() => import("./pages/ProfilePage"));
@@ -138,6 +139,7 @@ function AppRoutes() {
         <Route path="/offers" element={<OffersPage />} />
         <Route path="/offers/images" element={<OfferImagesAuditPage />} />
         <Route path="/offers/basket" element={<MarketBasketPage />} />
+        <Route path="/offers/store-prices" element={<StorePriceHistoryPage />} />
         <Route path="/radar" element={<FlyerPage />} />
         <Route path="/radar/store-prices" element={<StorePriceImportPage />} />
         <Route path="/radar/history" element={<FlyerHistoryPage />} />
