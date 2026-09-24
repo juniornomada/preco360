@@ -256,7 +256,7 @@ export default function ProductVisual({
   const visual = productVisual(name, category);
   // A valid product image always wins. Visual rules are fallback-only.
   // This prevents manually verified photos from being replaced by generic icons.
-  const safeImageUrl = imageUrl;
+  const safeImageUrl = imageUrl?.trim() || null;
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
