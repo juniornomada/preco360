@@ -7,6 +7,7 @@ import ProductSearchBar from "@/components/ProductSearchBar";
 import {
   normalizeProductSearchText,
   productMatchesSearch,
+  productSearchTokens,
 } from "@/lib/productSearch";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -237,12 +238,22 @@ export default function StorePriceHistoryPage() {
 
   const comparisonHighlights = useMemo(() => {
     const byFamily = new Map<string, ProductGroup[]>();
+    const searchTokens = productSearchTokens(search);
+
+    // When the user makes a sufficiently specific category search such as
+    // "agua sanitaria" or "cerveja sem alcool", the filtered result set is
+    // already the intended comparison family. In that case brands and
+    // descriptive suffixes must not prevent Qboa vs Ype, for example, from
+    // being compared. With no search (or a very broad one-word search), keep
+    // the stricter name-based grouping to avoid cross-category comparisons.
+    const searchedFamily =
+      searchTokens.length >= 2 ? searchTokens.join(" ") : null;
 
     for (const group of filtered) {
       const normalized = normalizedLatest(group);
       if (!normalized) continue;
 
-      const family = comparisonFamilyKey(group);
+      const family = searchedFamily ?? comparisonFamilyKey(group);
       if (!family) continue;
 
       const key = `${family}|${normalized.baseUnit}`;
@@ -296,7 +307,7 @@ export default function StorePriceHistoryPage() {
     }
 
     return highlights;
-  }, [filtered]);
+  }, [filtered, search]);
 
   return (
     <div className="page-container !pb-24 mx-auto w-full max-w-3xl">
