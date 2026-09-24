@@ -378,8 +378,12 @@ export default function StorePriceImportPage() {
 
   const matchObservation = (
     observation: ExtractedObservation,
-    file: File,
+    file: File | null,
     sourceHash: string,
+    sourceImagePath: string | null,
+    sourceFileName: string,
+    previewUrl: string,
+    retailerOverride?: string,
   ): ReviewObservation => {
     let match: {
       productId: string | null;
@@ -419,12 +423,12 @@ export default function StorePriceImportPage() {
             candidate,
             products,
             aliases,
-            canonicalRetailerName(retailer),
+            canonicalRetailerName(retailerOverride ?? retailer),
           );
     } catch (error) {
       // Product-history matching must never erase a successful visual read.
       console.warn("store-price product match failed", {
-        file: file.name,
+        file: sourceFileName,
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -432,8 +436,10 @@ export default function StorePriceImportPage() {
     return {
       localId: crypto.randomUUID(),
       file,
-      previewUrl: URL.createObjectURL(file),
+      previewUrl,
       sourceHash,
+      sourceImagePath,
+      sourceFileName,
       rawName: observation.product_name.trim(),
       brand: observation.brand ?? null,
       barcode: observation.barcode ?? null,
@@ -458,7 +464,149 @@ export default function StorePriceImportPage() {
     };
   };
 
+  useEffect(() => {
+    if (!activeJob || !user) return;
+
+    setProgress({
+      current: Math.max(0, Number(activeJob.progress_current) || 0),
+      total: Math.max(1, Number(activeJob.progress_total) || 1),
+    });
+    setProgressLabel(
+      activeJob.progress_label || "Processando fotos no servidor…",
+    );
+
+    if (activeJob.status === "queued") {
+      setAnalyzing(true);
+
+      if (queuedStartRef.current !== activeJob.id) {
+        queuedStartRef.current = activeJob.id;
+        void invokeStorePriceWorker(activeJob.id).catch((error) => {
+          console.error("Automatic store-price job start failed", error);
+          queuedStartRef.current = null;
+        });
+      }
+      return;
+    }
+
+    if (activeJob.status === "processing") {
+      setAnalyzing(true);
+      return;
+    }
+
+    if (activeJob.status === "failed") {
+      if (autoRetryJobRef.current !== activeJob.id) {
+        autoRetryJobRef.current = activeJob.id;
+        setAnalyzing(true);
+
+        void (async () => {
+          try {
+            const { error: resetError } = await db
+              .from("store_price_analysis_jobs")
+              .update({
+                status: "queued",
+                error_message: null,
+                completed_at: null,
+                progress_label:
+                  "Retomando automaticamente das fotos pendentes…",
+              })
+              .eq("user_id", user.id)
+              .eq("id", activeJob.id);
+            if (resetError) throw resetError;
+
+            queuedStartRef.current = activeJob.id;
+            await invokeStorePriceWorker(activeJob.id);
+            await queryClient.invalidateQueries({
+              queryKey: ["store-price-analysis-job", user.id, activeJob.id],
+            });
+          } catch (error: any) {
+            setAnalyzing(false);
+            toast({
+              title: "A análise ficou pausada",
+              description:
+                error?.message ||
+                activeJob.error_message ||
+                "As fotos já enviadas foram preservadas e podem ser retomadas.",
+              variant: "destructive",
+            });
+          }
+        })();
+        return;
+      }
+
+      setAnalyzing(false);
+      return;
+    }
+
+    if (
+      activeJob.status !== "completed" ||
+      activeJob.saved_at ||
+      appliedJobRef.current === activeJob.id
+    ) {
+      return;
+    }
+
+    appliedJobRef.current = activeJob.id;
+    setAnalyzing(false);
+
+    void (async () => {
+      const observations = Array.isArray(activeJob.result?.observations)
+        ? activeJob.result!.observations!
+        : [];
+      const failures = Array.isArray(activeJob.result?.failures)
+        ? activeJob.result!.failures!
+        : [];
+
+      const mapped = await Promise.all(
+        observations.map(async (entry) => {
+          const localFile = files[entry.index - 1] ?? null;
+          let previewUrl = localFile ? URL.createObjectURL(localFile) : "";
+
+          if (!previewUrl && entry.source_image_path) {
+            const { data } = await supabase.storage
+              .from("flyers")
+              .createSignedUrl(entry.source_image_path, 60 * 60);
+            previewUrl = data?.signedUrl ?? "";
+          }
+
+          return matchObservation(
+            entry.observation,
+            localFile,
+            entry.source_hash ||
+              `${activeJob.id}-${String(entry.index).padStart(3, "0")}`,
+            entry.source_image_path || null,
+            entry.source_file_name || `foto-${entry.index}.jpg`,
+            previewUrl,
+            activeJob.retailer,
+          );
+        }),
+      );
+
+      setRetailer(activeJob.retailer || retailer);
+      setObservedDate(activeJob.observed_date || observedDate);
+      setRows(mapped);
+
+      toast({
+        title: `${mapped.length} preço(s) identificado(s)`,
+        description: failures.length
+          ? `${failures.length} foto(s) ficaram sem leitura confiável. As demais foram preservadas.`
+          : "Todas as fotos foram analisadas no servidor. Confira antes de salvar.",
+      });
+    })();
+  }, [
+    activeJob,
+    user?.id,
+    files,
+    products,
+    aliases,
+    retailer,
+    observedDate,
+    queryClient,
+    toast,
+  ]);
+
   const analyzePhotos = async () => {
+    if (!user) return;
+
     if (!retailer.trim()) {
       toast({
         title: "Informe o mercado",
@@ -476,101 +624,135 @@ export default function StorePriceImportPage() {
       return;
     }
 
-    const filesToAnalyze = [...files];
-    const analysisSessionId = crypto.randomUUID();
+    const selected = [...files];
+    const jobId = crypto.randomUUID();
 
     setAnalyzing(true);
     setRows([]);
-    setProgress({ current: 0, total: filesToAnalyze.length });
-    const parsedRows: ReviewObservation[] = [];
-    const failures: string[] = [];
+    setProgress({ current: 0, total: selected.length });
+    setProgressLabel(
+      "Enviando fotos ao servidor. Mantenha esta tela aberta somente durante o envio…",
+    );
+    appliedJobRef.current = null;
+    queuedStartRef.current = null;
+    autoRetryJobRef.current = null;
 
     try {
-      for (let index = 0; index < filesToAnalyze.length; index += 1) {
-        const file = filesToAnalyze[index];
-        try {
-          const sourceHash = await sha256(file);
-          let lastError: unknown = null;
-          let data: any = null;
+      const sourceFiles: Array<{
+        index: number;
+        path: string;
+        name: string;
+        mime_type: string | null;
+        size: number;
+        hash: string;
+      }> = [];
 
-          for (let attempt = 1; attempt <= 2; attempt += 1) {
-            const body = new FormData();
-            body.append("file", file, file.name || "preco-loja.jpg");
-            body.append("analysis_session_id", analysisSessionId);
-            body.append("file_index", String(index + 1));
-            body.append("file_total", String(filesToAnalyze.length));
+      let uploaded = 0;
 
-            const result = await supabase.functions.invoke(
-              "analyze-store-price",
-              { body },
-            );
+      const uploadOne = async (file: File, index: number) => {
+        const sourceHash = await sha256(file);
+        const path =
+          `${user.id}/store-prices/${observedDate}/${jobId}/${String(
+            index + 1,
+          ).padStart(3, "0")}-${safeName(file.name || "preco.jpg")}`;
 
-            if (!result.error) {
-              data = result.data;
-              lastError = null;
-              break;
-            }
-
-            lastError = result.error;
-            if (attempt < 2) {
-              await new Promise((resolve) => setTimeout(resolve, 700));
-            }
-          }
-
-          if (lastError) throw lastError;
-          if (!data?.observation) {
-            throw new Error(
-              `${file.name}: não consegui relacionar produto e preço nessa foto.`,
-            );
-          }
-
-          const row = matchObservation(
-            data.observation as ExtractedObservation,
-            file,
-            sourceHash,
-          );
-          parsedRows.push(row);
-          setRows((current) => {
-            const withoutSameFile = current.filter(
-              (item) => item.sourceHash !== row.sourceHash,
-            );
-            return [...withoutSameFile, row];
+        const { error } = await supabase.storage
+          .from("flyers")
+          .upload(path, file, {
+            contentType: file.type || "image/jpeg",
+            upsert: false,
           });
-        } catch (error) {
-          failures.push(
-            error instanceof Error
-              ? `${file.name}: ${error.message}`
-              : `${file.name}: ${String(error)}`,
-          );
-        } finally {
-          setProgress({
-            current: index + 1,
-            total: filesToAnalyze.length,
-          });
-          await new Promise((resolve) => setTimeout(resolve, 120));
-        }
+        if (error) throw error;
+
+        sourceFiles[index] = {
+          index: index + 1,
+          path,
+          name: file.name || `preco-${index + 1}.jpg`,
+          mime_type: file.type || null,
+          size: file.size,
+          hash: sourceHash,
+        };
+
+        uploaded += 1;
+        setProgress({ current: uploaded, total: selected.length });
+        setProgressLabel(
+          `Enviando fotos ${uploaded}/${selected.length}. Depois do envio você poderá trocar de app.`,
+        );
+      };
+
+      for (let index = 0; index < selected.length; index += 2) {
+        await Promise.all(
+          selected
+            .slice(index, index + 2)
+            .map((file, offset) => uploadOne(file, index + offset)),
+        );
       }
 
-      setRows([...parsedRows]);
-      if (!parsedRows.length) {
-        toast({
-          title: "Nenhum preço pôde ser lido",
-          description:
-            failures[0] ||
-            "Tente fotos mais próximas da etiqueta e da embalagem correspondente.",
-          variant: "destructive",
+      const { error: jobError } = await db
+        .from("store_price_analysis_jobs")
+        .insert({
+          id: jobId,
+          user_id: user.id,
+          retailer: canonicalRetailerName(retailer),
+          observed_date: observedDate,
+          status: "queued",
+          progress_current: 0,
+          progress_total: selected.length,
+          progress_label:
+            "Fotos recebidas. A análise continuará no servidor mesmo se você sair da tela.",
+          source_files: sourceFiles,
+          result: { observations: [], failures: [] },
         });
-      } else {
+      if (jobError) throw jobError;
+
+      localStorage.setItem(STORE_PRICE_JOB_KEY, jobId);
+      setActiveJobId(jobId);
+      setProgress({ current: 0, total: selected.length });
+      setProgressLabel(
+        "Fotos enviadas. A análise continua no servidor — você já pode trocar de app.",
+      );
+
+      queuedStartRef.current = jobId;
+      try {
+        await invokeStorePriceWorker(jobId);
+      } catch (error) {
+        queuedStartRef.current = null;
+        await db
+          .from("store_price_analysis_jobs")
+          .update({
+            status: "queued",
+            progress_label:
+              "Fotos salvas. Aguardando o servidor iniciar a análise…",
+            warning_message:
+              "A primeira chamada não respondeu; o app tentará retomar automaticamente.",
+          })
+          .eq("user_id", user.id)
+          .eq("id", jobId);
+
         toast({
-          title: `${parsedRows.length} preço(s) identificado(s)`,
+          title: "Fotos salvas no servidor",
           description:
-            failures.length > 0
-              ? `${failures.length} foto(s) ficaram sem leitura. O sistema tentou cada uma duas vezes; você pode manter as mesmas fotos e analisar novamente.`
-              : "Confira os nomes, valores e vínculos antes de salvar.",
+            "Você não precisa reenviar. A análise será retomada automaticamente.",
         });
+        return;
       }
-    } finally {
+
+      toast({
+        title: "Análise iniciada no servidor",
+        description:
+          "As fotos já foram enviadas. Agora você pode trocar de app ou sair desta tela; o processamento continuará.",
+      });
+    } catch (error: any) {
       setAnalyzing(false);
+      setProgress({ current: 0, total: 0 });
+      setProgressLabel("");
+      toast({
+        title: "Não consegui enviar todas as fotos",
+        description:
+          error?.message ||
+          "Mantenha esta tela aberta até o envio terminar e tente novamente.",
+        variant: "destructive",
+      });
     }
   };
 
