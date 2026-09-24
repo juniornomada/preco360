@@ -134,7 +134,7 @@ async function callGemini(
   rescue = false,
 ) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 35_000);
+  const timeout = setTimeout(() => controller.abort(), 28_000);
 
   try {
     const response = await fetch(
