@@ -18,6 +18,14 @@ Você analisa UMA foto de pesquisa presencial de preço em supermercado/atacadis
 OBJETIVO
 Identifique o produto e o preço da etiqueta/cartaz que são o assunto principal da foto.
 
+IMPORTANTE SOBRE QUALIDADE DA FOTO
+- A foto pode estar inclinada, feita de lado, com perspectiva, reflexo, sombra, texto pequeno ou embalagem parcialmente visível.
+- Antes de desistir, examine a imagem inteira e procure a etiqueta/cartaz principal e a embalagem fisicamente mais relacionada a ela.
+- Considere texto legível mesmo que pequeno, desde que esteja realmente visível na imagem.
+- Não invente letras, números, marca, peso ou preço que não possam ser sustentados pela imagem.
+- Se a etiqueta estiver legível mas a embalagem não, use o nome/descrição da própria etiqueta.
+- Se a embalagem estiver legível mas a etiqueta estiver ruim, só aceite a leitura se o preço principal ainda estiver claramente visível.
+
 REGRAS
 1. Escolha somente o produto ligado à etiqueta/cartaz principal, normalmente em destaque no centro ou na parte inferior. Ignore etiquetas e produtos secundários ao fundo.
 2. Use a embalagem próxima da etiqueta para completar marca, linha/modelo, variante e tamanho. Não invente nada que não esteja visível.
@@ -107,11 +115,23 @@ function geminiError(status: number, payload: any) {
   return `Gemini ${status}: ${code} · ${String(message).slice(0, 900)}`;
 }
 
+const RESCUE_HINT = `
+Esta é uma segunda tentativa porque uma leitura anterior não ficou confiável.
+Faça uma inspeção visual mais cuidadosa da imagem inteira:
+- procure etiquetas pequenas, inclinadas ou parcialmente desfocadas;
+- relacione a etiqueta ao produto mais próximo fisicamente;
+- use nome abreviado da etiqueta quando a embalagem não puder ser lida;
+- diferencie varejo de atacado;
+- não invente informações ausentes.
+Retorne observation=null somente se produto + preço principal realmente não puderem ser sustentados pela imagem.
+`;
+
 async function callGemini(
   model: string,
   apiKey: string,
   mimeType: string,
   data: string,
+  rescue = false,
 ) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 35_000);
@@ -131,7 +151,7 @@ async function callGemini(
             {
               role: "user",
               parts: [
-                { text: PROMPT },
+                { text: rescue ? `${PROMPT}\n${RESCUE_HINT}` : PROMPT },
                 { inlineData: { mimeType, data } },
               ],
             },
@@ -195,15 +215,18 @@ Deno.serve(async (req: Request) => {
     const candidates = Array.from(new Set([preferred, ...MODELS]));
 
     let lastError = "Nenhum modelo respondeu.";
-    const attempts: Array<{ model: string; status: number }> = [];
+    let sawUsableGeminiResponse = false;
+    const attempts: Array<{ model: string; status: number; outcome?: string }> = [];
 
-    for (const model of candidates) {
+    for (let modelIndex = 0; modelIndex < candidates.length; modelIndex += 1) {
+      const model = candidates[modelIndex];
       try {
         const { response, payload } = await callGemini(
           model,
           apiKey,
           file.type || "image/jpeg",
           data,
+          modelIndex > 0,
         );
 
         attempts.push({ model, status: response.status });
@@ -232,21 +255,26 @@ Deno.serve(async (req: Request) => {
           });
         }
 
+        sawUsableGeminiResponse = true;
         const raw = geminiText(payload);
         if (!raw) {
           lastError = "A IA não retornou conteúdo.";
+          attempts[attempts.length - 1].outcome = "empty";
           continue;
         }
 
         const parsed = parseJson(raw);
         const observation = parsed?.observation ?? null;
         if (!observation) {
+          attempts[attempts.length - 1].outcome = "no_observation";
           console.log("analyze-store-price no observation", {
             model,
             file: file.name,
             size: file.size,
+            next_model: candidates[modelIndex + 1] ?? null,
           });
-          return json(200, { observation: null, model });
+          lastError = "A leitura não ficou confiável neste modelo.";
+          continue;
         }
 
         const retailPrice = Number(observation.retail_price);
@@ -256,11 +284,23 @@ Deno.serve(async (req: Request) => {
           !Number.isFinite(retailPrice) ||
           retailPrice <= 0 ||
           !Number.isFinite(confidence) ||
-          confidence < 0.65
+          confidence < 0.6
         ) {
-          return json(200, { observation: null, model });
+          attempts[attempts.length - 1].outcome = "low_confidence_or_incomplete";
+          console.log("analyze-store-price low confidence", {
+            model,
+            file: file.name,
+            size: file.size,
+            confidence,
+            has_product: Boolean(String(observation.product_name || "").trim()),
+            retail_price: retailPrice,
+            next_model: candidates[modelIndex + 1] ?? null,
+          });
+          lastError = "A leitura veio incompleta ou com baixa confiança.";
+          continue;
         }
 
+        attempts[attempts.length - 1].outcome = "success";
         console.log("analyze-store-price success", {
           model,
           file: file.name,
@@ -317,11 +357,21 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    if (sawUsableGeminiResponse) {
+      return json(200, {
+        observation: null,
+        reason: "UNREADABLE_AFTER_FALLBACK",
+        message:
+          "A informação pode estar no enquadramento, mas não ficou legível o suficiente após as tentativas de leitura.",
+        attempted_models: attempts,
+      });
+    }
+
     return json(503, {
       error: "VISION_MODELS_UNAVAILABLE",
       message: lastError,
       retryable: true,
-      attempted_models: attempts.map((item) => item.model),
+      attempted_models: attempts,
     });
   } catch (error) {
     const message =
