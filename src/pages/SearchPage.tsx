@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -147,6 +147,7 @@ export default function SearchPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -172,6 +173,20 @@ export default function SearchPage() {
       productMatchesSearch(displayProductName(product), search),
     );
   }, [products, search]);
+
+  const requestedProductId = searchParams.get("product");
+
+  useEffect(() => {
+    if (!requestedProductId || !products.length) return;
+    if (
+      selectedId !== requestedProductId &&
+      products.some((product) => product.id === requestedProductId)
+    ) {
+      setSelectedId(requestedProductId);
+      setCurrentPrice("");
+      setSupermarket("");
+    }
+  }, [requestedProductId, products, selectedId]);
 
   const selected = useMemo(
     () => products.find((product) => product.id === selectedId) ?? null,
