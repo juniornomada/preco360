@@ -4,10 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import ProductSearchBar from "@/components/ProductSearchBar";
-import { productMatchesSearch } from "@/lib/productSearch";
+import {
+  normalizeProductSearchText,
+  productMatchesSearch,
+} from "@/lib/productSearch";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
+  BadgeCheck,
   ChevronRight,
   History,
   Store,
@@ -48,6 +52,14 @@ type ProductGroup = {
   latest: StoreObservation;
   best: StoreObservation;
   median: number;
+};
+
+type ComparisonHighlight = {
+  isBest: boolean;
+  baseUnit: "kg" | "l" | "un";
+  normalizedPrice: number;
+  nextPrice: number | null;
+  savingsPercent: number | null;
 };
 
 const brl = (value: number) =>
@@ -100,6 +112,36 @@ function normalizedLabel(row: StoreObservation) {
   if (!Number.isFinite(price) || price <= 0 || !row.base_unit) return null;
   const unit = row.base_unit === "l" ? "L" : row.base_unit;
   return `${brl(price)}/${unit}`;
+}
+
+function comparisonFamilyKey(group: ProductGroup) {
+  return normalizeProductSearchText(group.name)
+    .replace(
+      /\b\d+(?:[.,]\d+)?\s*(?:kg|g|ml|l|lt|un|und|unid)\b/g,
+      " ",
+    )
+    .replace(
+      /\b(?:lata|garrafa|frasco|caixa|pacote|pct|pote|embalagem)\b/g,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizedLatest(group: ProductGroup) {
+  const value = Number(group.latest.normalized_retail_price);
+  if (
+    !Number.isFinite(value) ||
+    value <= 0 ||
+    !group.latest.base_unit
+  ) {
+    return null;
+  }
+
+  return {
+    value,
+    baseUnit: group.latest.base_unit,
+  };
 }
 
 function median(values: number[]) {
@@ -192,6 +234,69 @@ export default function StorePriceHistoryPage() {
       ),
     );
   }, [groups, search]);
+
+  const comparisonHighlights = useMemo(() => {
+    const byFamily = new Map<string, ProductGroup[]>();
+
+    for (const group of filtered) {
+      const normalized = normalizedLatest(group);
+      if (!normalized) continue;
+
+      const family = comparisonFamilyKey(group);
+      if (!family) continue;
+
+      const key = `${family}|${normalized.baseUnit}`;
+      const rows = byFamily.get(key) ?? [];
+      rows.push(group);
+      byFamily.set(key, rows);
+    }
+
+    const highlights = new Map<string, ComparisonHighlight>();
+
+    for (const familyGroups of byFamily.values()) {
+      if (familyGroups.length < 2) continue;
+
+      const ranked = familyGroups
+        .map((group) => {
+          const normalized = normalizedLatest(group)!;
+          return {
+            group,
+            value: normalized.value,
+            baseUnit: normalized.baseUnit,
+          };
+        })
+        .sort((a, b) => a.value - b.value);
+
+      const best = ranked[0];
+      const next = ranked[1] ?? null;
+
+      // Ignore virtual ties. The visual recommendation should only appear
+      // when there is a meaningful unit-price advantage.
+      const meaningfulAdvantage =
+        next && next.value > 0
+          ? (next.value - best.value) / next.value >= 0.005
+          : false;
+
+      for (const item of ranked) {
+        const isBest =
+          meaningfulAdvantage &&
+          Math.abs(item.value - best.value) < 0.0001;
+
+        highlights.set(item.group.productId, {
+          isBest,
+          baseUnit: item.baseUnit,
+          normalizedPrice: item.value,
+          nextPrice: isBest && next ? next.value : null,
+          savingsPercent:
+            isBest && next
+              ? ((next.value - item.value) / next.value) * 100
+              : null,
+        });
+      }
+    }
+
+    return highlights;
+  }, [filtered]);
 
   return (
     <div className="page-container !pb-24 mx-auto w-full max-w-3xl">
@@ -292,9 +397,23 @@ export default function StorePriceHistoryPage() {
             const bestPrice = Number(group.best.retail_price);
             const normalized = normalizedLabel(group.latest);
             const wholesale = Number(group.latest.wholesale_price);
+            const comparison = comparisonHighlights.get(group.productId);
+            const unitLabel =
+              comparison?.baseUnit === "l"
+                ? "litro"
+                : comparison?.baseUnit === "kg"
+                  ? "kg"
+                  : "unidade";
 
             return (
-              <Card key={group.productId} className="overflow-hidden">
+              <Card
+                key={group.productId}
+                className={
+                  comparison?.isBest
+                    ? "overflow-hidden border-primary/70 bg-primary/[0.035] ring-1 ring-primary/35"
+                    : "overflow-hidden"
+                }
+              >
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
@@ -302,10 +421,28 @@ export default function StorePriceHistoryPage() {
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <p className="font-bold leading-snug">{group.name}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-bold leading-snug">{group.name}</p>
+                        {comparison?.isBest && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-primary">
+                            <BadgeCheck className="h-3 w-3" />
+                            Melhor por {unitLabel}
+                          </span>
+                        )}
+                      </div>
                       <p className="mt-0.5 text-[11px] text-muted-foreground">
                         {group.rows.length} registro(s) no histórico de gôndola
                       </p>
+                      {comparison?.isBest &&
+                        comparison.savingsPercent !== null && (
+                          <p className="mt-1 text-[11px] font-semibold text-primary">
+                            {comparison.savingsPercent.toLocaleString("pt-BR", {
+                              minimumFractionDigits: 1,
+                              maximumFractionDigits: 1,
+                            })}
+                            % menor por {unitLabel} que a próxima opção comparável
+                          </p>
+                        )}
                     </div>
                   </div>
 
