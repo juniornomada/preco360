@@ -263,7 +263,7 @@ export default function StorePriceImportPage() {
     try {
       for (let start = 0; start < files.length; start += 2) {
         const batch = files.slice(start, start + 2);
-        const batchResults = await Promise.all(
+        const batchResults = await Promise.allSettled(
           batch.map(async (file) => {
             const sourceHash = await sha256(file);
             const body = new FormData();
@@ -274,7 +274,9 @@ export default function StorePriceImportPage() {
             );
             if (error) throw error;
             if (!data?.observation) {
-              throw new Error("Não consegui relacionar produto e preço nessa foto.");
+              throw new Error(
+                `${file.name}: não consegui relacionar produto e preço nessa foto.`,
+              );
             }
             return matchObservation(
               data.observation as ExtractedObservation,
@@ -282,12 +284,20 @@ export default function StorePriceImportPage() {
               sourceHash,
             );
           }),
-        ).catch((error) => {
-          failures.push(error instanceof Error ? error.message : String(error));
-          return [] as ReviewObservation[];
-        });
+        );
 
-        parsedRows.push(...batchResults);
+        for (const result of batchResults) {
+          if (result.status === "fulfilled") {
+            parsedRows.push(result.value);
+          } else {
+            failures.push(
+              result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason),
+            );
+          }
+        }
+
         setProgress({
           current: Math.min(files.length, start + batch.length),
           total: files.length,
@@ -529,15 +539,13 @@ export default function StorePriceImportPage() {
             />
 
             {files.length > 0 && (
-              <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-                {files.slice(0, 12).map((file) => (
-                  <img
-                    key={`${file.name}-${file.lastModified}`}
-                    src={URL.createObjectURL(file)}
-                    alt=""
-                    className="aspect-square w-full rounded-lg border object-cover"
-                  />
-                ))}
+              <div className="rounded-xl border bg-background/60 p-2.5">
+                <p className="text-xs font-bold">
+                  {files.length} foto(s) pronta(s) para análise
+                </p>
+                <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                  {files.map((file) => file.name).join(" · ")}
+                </p>
               </div>
             )}
 
