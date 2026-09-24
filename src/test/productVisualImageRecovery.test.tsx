@@ -33,4 +33,19 @@ describe("ProductVisual image recovery", () => {
       expect(nextImage?.className).toContain("block");
     });
   });
+  it("always prefers a supplied product image over a generic visual rule", () => {
+    const { container } = render(
+      <ProductVisual
+        name="Batata Doce Kg"
+        imageUrl="https://example.test/batata-doce.webp"
+      />,
+    );
+
+    const image = container.querySelector("img");
+    expect(image).not.toBeNull();
+    expect(image?.getAttribute("src")).toBe(
+      "https://example.test/batata-doce.webp",
+    );
+  });
+
 });
