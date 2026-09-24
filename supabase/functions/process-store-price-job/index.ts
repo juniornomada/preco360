@@ -89,6 +89,53 @@ function asArray(value: unknown) {
   return Array.isArray(value) ? value : [];
 }
 
+function transientReason(message: unknown) {
+  const value = String(message || "").toLowerCase();
+  return (
+    value.includes("resource_exhausted") ||
+    value.includes("quota") ||
+    value.includes("429") ||
+    value.includes("rate limit") ||
+    value.includes("signal has been aborted") ||
+    value.includes("aborted") ||
+    value.includes("timeout") ||
+    value.includes("timed out") ||
+    value.includes("503") ||
+    value.includes("502") ||
+    value.includes("504") ||
+    value.includes("temporarily unavailable") ||
+    value.includes("overloaded")
+  );
+}
+
+function retryDelayMs(message: unknown, attempts: number) {
+  const raw = String(message || "");
+  const explicit =
+    raw.match(/retry in\s+([0-9]+(?:\.[0-9]+)?)s/i) ||
+    raw.match(/retry after\s+([0-9]+(?:\.[0-9]+)?)\s*seconds?/i);
+
+  if (explicit) {
+    const seconds = Math.ceil(Number(explicit[1]) || 0);
+    return Math.min(90_000, Math.max(8_000, (seconds + 3) * 1000));
+  }
+
+  const backoff = [12_000, 25_000, 45_000, 60_000, 90_000];
+  return backoff[Math.min(Math.max(0, attempts - 1), backoff.length - 1)];
+}
+
+function retryMap(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {} as Record<string, any>;
+  }
+  return { ...(value as Record<string, any>) };
+}
+
+async function waitAndTrigger(jobId: string, delayMs: number) {
+  const bounded = Math.min(60_000, Math.max(1_000, delayMs));
+  await new Promise((resolve) => setTimeout(resolve, bounded));
+  await triggerNext(jobId);
+}
+
 async function downloadSource(source: SourceFile) {
   const { data, error } = await serviceClient().storage
     .from("flyers")
@@ -189,14 +236,85 @@ async function processBatch(jobId: string) {
     }
 
     const previousObservations = asArray(job.result?.observations) as any[];
-    const previousFailures = asArray(job.result?.failures) as any[];
+
+    // Older versions mistakenly promoted transient infrastructure failures
+    // (429/quota/timeouts) to final failures. Re-open them automatically.
+    const rawFailures = asArray(job.result?.failures) as any[];
+    const previousFailures = rawFailures.filter(
+      (item) => !transientReason(item?.reason),
+    );
+    const retries = retryMap(job.result?.retries);
+
+    for (const item of rawFailures) {
+      if (!transientReason(item?.reason)) continue;
+      const key = String(Number(item.index));
+      const existing = retries[key] || {};
+      retries[key] = {
+        attempts: Number(existing.attempts) || 0,
+        last_error: String(item.reason || ""),
+        next_retry_at: existing.next_retry_at || null,
+      };
+    }
+
     const processed = new Set<number>([
       ...previousObservations.map((item) => Number(item.index)),
       ...previousFailures.map((item) => Number(item.index)),
     ]);
 
-    const pending = sources.filter((source) => !processed.has(source.index));
+    const nowMs = Date.now();
+    const pending = sources.filter((source) => {
+      if (processed.has(source.index)) return false;
+      const retry = retries[String(source.index)];
+      if (!retry?.next_retry_at) return true;
+      const retryAt = new Date(retry.next_retry_at).getTime();
+      return !Number.isFinite(retryAt) || retryAt <= nowMs;
+    });
+
+    const deferred = sources.filter((source) => {
+      if (processed.has(source.index)) return false;
+      const retry = retries[String(source.index)];
+      if (!retry?.next_retry_at) return false;
+      const retryAt = new Date(retry.next_retry_at).getTime();
+      return Number.isFinite(retryAt) && retryAt > nowMs;
+    });
     if (!pending.length) {
+      if (deferred.length) {
+        const nextRetryMs = Math.min(
+          ...deferred.map((source) => {
+            const retryAt = new Date(
+              retries[String(source.index)]?.next_retry_at || "",
+            ).getTime();
+            return Number.isFinite(retryAt) ? retryAt : nowMs + 10_000;
+          }),
+        );
+        const waitMs = Math.max(1_000, nextRetryMs - nowMs);
+
+        await updateJob(jobId, {
+          status: "queued",
+          progress_current:
+            previousObservations.length + previousFailures.length,
+          progress_total: sources.length,
+          progress_label:
+            "Aguardando a janela do Gemini para repetir " +
+            deferred.length +
+            " foto(s) automaticamente…",
+          result: {
+            ...(job.result || {}),
+            observations: previousObservations,
+            failures: previousFailures,
+            retries,
+          },
+          warning_message:
+            deferred.length +
+            " foto(s) estão pendentes por limite temporário/timeout e serão tentadas novamente.",
+          error_message: null,
+          completed_at: null,
+        });
+
+        EdgeRuntime.waitUntil(waitAndTrigger(jobId, waitMs));
+        return;
+      }
+
       await updateJob(jobId, {
         status: "completed",
         progress_current: sources.length,
@@ -210,6 +328,7 @@ async function processBatch(jobId: string) {
           ...(job.result || {}),
           observations: previousObservations,
           failures: previousFailures,
+          retries,
         },
         warning_message: previousFailures.length
           ? previousFailures.length + " foto(s) ficaram sem leitura confiável."
@@ -239,6 +358,7 @@ async function processBatch(jobId: string) {
 
     let newObservation: any | null = null;
     let newFailure: any | null = null;
+    let transientError: string | null = null;
 
     try {
       const payload = await analyzeSource(source);
@@ -252,6 +372,7 @@ async function processBatch(jobId: string) {
           observation: payload.observation,
           model: payload.model || null,
         };
+        delete retries[String(source.index)];
       } else {
         newFailure = {
           index: source.index,
@@ -263,18 +384,36 @@ async function processBatch(jobId: string) {
             payload?.reason ||
             "Não foi possível relacionar produto e preço com segurança.",
         };
+        delete retries[String(source.index)];
       }
     } catch (error) {
-      newFailure = {
-        index: source.index,
-        source_file_name: source.name,
-        source_image_path: source.path,
-        source_hash: source.hash || null,
-        reason:
-          error instanceof Error
-            ? error.message
-            : String(error ?? "Falha inesperada."),
-      };
+      const reason =
+        error instanceof Error
+          ? error.message
+          : String(error ?? "Falha inesperada.");
+
+      if (transientReason(reason)) {
+        transientError = reason;
+        const key = String(source.index);
+        const priorAttempts = Number(retries[key]?.attempts) || 0;
+        const attempts = priorAttempts + 1;
+        const delayMs = retryDelayMs(reason, attempts);
+
+        retries[key] = {
+          attempts,
+          last_error: reason,
+          next_retry_at: new Date(Date.now() + delayMs).toISOString(),
+        };
+      } else {
+        newFailure = {
+          index: source.index,
+          source_file_name: source.name,
+          source_image_path: source.path,
+          source_hash: source.hash || null,
+          reason,
+        };
+        delete retries[String(source.index)];
+      }
     }
 
     const observations = newObservation
@@ -289,9 +428,10 @@ async function processBatch(jobId: string) {
       ...(job.result || {}),
       observations,
       failures,
+      retries,
     };
 
-    if (done >= sources.length) {
+    if (done >= sources.length && !Object.keys(retries).length) {
       await updateJob(jobId, {
         status: "completed",
         progress_current: sources.length,
@@ -311,26 +451,36 @@ async function processBatch(jobId: string) {
       return;
     }
 
+    const retryCount = Object.keys(retries).length;
     await updateJob(jobId, {
-      status: "processing",
+      status: transientError ? "queued" : "processing",
       progress_current: done,
       progress_total: sources.length,
-      progress_label:
-        done +
-        "/" +
-        sources.length +
-        " foto(s) processada(s). Continuando no servidor…",
+      progress_label: transientError
+        ? done +
+          "/" +
+          sources.length +
+          " concluída(s); foto " +
+          source.index +
+          " aguardando retry automático."
+        : done +
+          "/" +
+          sources.length +
+          " foto(s) processada(s). Continuando no servidor…",
       result,
-      warning_message: failures.length
-        ? failures.length + " foto(s) ficaram sem leitura confiável até agora."
-        : null,
+      warning_message: retryCount
+        ? retryCount +
+          " foto(s) aguardando retry automático por limite temporário/timeout."
+        : failures.length
+          ? failures.length + " foto(s) ficaram sem leitura confiável até agora."
+          : null,
       error_message: null,
       completed_at: null,
     });
 
-    // Persisted one photo before scheduling the next one. This keeps every
-    // invocation bounded and prevents a slow image from discarding a completed
-    // sibling when the Edge Runtime reaches its wall-clock limit.
+    // Always continue server-to-server. If the current image hit a transient
+    // limit, the next invocation will process another eligible photo first;
+    // when only deferred retries remain, it waits for the provider window.
     await triggerNext(jobId);
   } catch (error) {
     console.error("process-store-price-job", error);
