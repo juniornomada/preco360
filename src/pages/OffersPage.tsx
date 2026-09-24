@@ -3,10 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { useVoiceSearch } from "@/hooks/useVoiceSearch";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import ProductSearchBar from "@/components/ProductSearchBar";
+import {
+  normalizeProductSearchText,
+  productSearchRequestVariants,
+} from "@/lib/productSearch";
 import ProductVisual from "@/components/ProductVisual";
 import {
   BEEF_SEMANTIC_TOKENS,
@@ -44,7 +47,6 @@ import {
   ChevronRight,
   Clock3,
   History,
-  Mic,
   Radar,
   Search,
   ShoppingBasket,
@@ -885,13 +887,7 @@ export default function OffersPage() {
   const [search, setSearch] = useState("");
   const searchTimerRef = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const {
-    isListening,
-    error: voiceSearchError,
-    startListening,
-    stopListening,
-  } = useVoiceSearch();
-  const normalizedSearch = search.trim();
+  const normalizedSearch = normalizeProductSearchText(search.trim());
   const hasSearch = normalizedSearch.length >= 2;
   const today = useMemo(() => localDateKey(), []);
 
@@ -1025,13 +1021,27 @@ export default function OffersPage() {
   );
 
   const searchRequests = useMemo(() => {
+    const requests = new Set(
+      productSearchRequestVariants(normalizedSearch)
+        .map((variant) => searchTokens(variant).join(" "))
+        .filter(Boolean),
+    );
+
+    if (searchRequest) {
+      requests.add(searchRequest);
+    }
+
     if (isGenericPoncaSearch(normalizedSearch)) {
-      return [...PONCA_SEARCH_VARIANTS];
+      PONCA_SEARCH_VARIANTS.forEach((variant) => requests.add(variant));
     }
+
     if (isPowderedDrinkSearch(normalizedSearch)) {
-      return powderedDrinkSearchRequests(normalizedSearch);
+      powderedDrinkSearchRequests(normalizedSearch).forEach((variant) =>
+        requests.add(variant),
+      );
     }
-    return [searchRequest];
+
+    return [...requests];
   }, [normalizedSearch, searchRequest]);
 
   const searchRequestsKey = searchRequests.join("|");
@@ -1414,65 +1424,30 @@ export default function OffersPage() {
         </p>
       </header>
 
-      <div className="relative mb-2">
-        <Search className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          ref={searchInputRef}
-          className="h-12 pl-10 pr-12 text-base"
-          placeholder={
-            isListening
-              ? "Ouvindo o produto..."
-              : "Busque Nescau, café, leite, carne..."
+      <ProductSearchBar
+        ref={searchInputRef}
+        className="mb-2"
+        value={searchInput}
+        placeholder="Busque Nescau, café, leite, carne..."
+        autoFocus
+        onChange={(value, source) => {
+          setSearchInput(value);
+
+          if (searchTimerRef.current !== null) {
+            window.clearTimeout(searchTimerRef.current);
+            searchTimerRef.current = null;
           }
-          value={searchInput}
-          onChange={(event) => {
-            const value = event.target.value;
-            setSearchInput(value);
-            if (searchTimerRef.current !== null) {
-              window.clearTimeout(searchTimerRef.current);
-            }
-            searchTimerRef.current = window.setTimeout(() => {
-              setSearch(value);
-            }, 140);
-          }}
-          autoFocus
-        />
-        <button
-          type="button"
-          className={`absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${
-            isListening
-              ? "bg-primary/15 text-primary animate-pulse"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          }`}
-          aria-label={isListening ? "Parar busca por voz" : "Buscar produto por voz"}
-          aria-pressed={isListening}
-          title={isListening ? "Parar" : "Buscar por voz"}
-          onClick={() => {
-            if (isListening) {
-              stopListening();
-              return;
-            }
 
-            searchInputRef.current?.blur();
-            if (searchTimerRef.current !== null) {
-              window.clearTimeout(searchTimerRef.current);
-              searchTimerRef.current = null;
-            }
+          if (source === "voice") {
+            setSearch(value);
+            return;
+          }
 
-            startListening((transcript) => {
-              setSearchInput(transcript);
-              setSearch(transcript);
-            });
-          }}
-        >
-          <Mic className="h-4 w-4" />
-        </button>
-      </div>
-      {voiceSearchError && (
-        <p className="-mt-1 mb-2 px-1 text-[10px] text-destructive">
-          {voiceSearchError}
-        </p>
-      )}
+          searchTimerRef.current = window.setTimeout(() => {
+            setSearch(value);
+          }, 140);
+        }}
+      />
 
       <div className="mb-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Button
