@@ -490,6 +490,29 @@ export default function StorePriceImportPage() {
 
     if (activeJob.status === "processing") {
       setAnalyzing(true);
+
+      const updatedAtMs = activeJob.updated_at
+        ? new Date(activeJob.updated_at).getTime()
+        : 0;
+      const staleForMs = updatedAtMs ? Date.now() - updatedAtMs : 0;
+
+      if (
+        staleForMs > 150_000 &&
+        queuedStartRef.current !== activeJob.id
+      ) {
+        queuedStartRef.current = activeJob.id;
+        void invokeStorePriceWorker(activeJob.id)
+          .then(() =>
+            queryClient.invalidateQueries({
+              queryKey: ["store-price-analysis-job", user.id, activeJob.id],
+            }),
+          )
+          .catch((error) => {
+            console.error("Stale store-price job resume failed", error);
+            queuedStartRef.current = null;
+          });
+      }
+
       return;
     }
 
