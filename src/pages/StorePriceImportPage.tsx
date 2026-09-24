@@ -169,6 +169,44 @@ function displayNumber(value: number | null) {
   return String(value).replace(".", ",");
 }
 
+function normalizedObservationPrice(
+  price: number | null,
+  packageQuantity: number | null,
+  packageUnit: string | null,
+) {
+  if (
+    price === null ||
+    !Number.isFinite(price) ||
+    price <= 0 ||
+    packageQuantity === null ||
+    !Number.isFinite(packageQuantity) ||
+    packageQuantity <= 0 ||
+    !packageUnit
+  ) {
+    return null;
+  }
+
+  const pkg = inferPackage(`${packageQuantity}${packageUnit}`);
+  if (!pkg) return null;
+
+  const normalized = normalizedUnitPrice(price, pkg);
+  return {
+    normalizedPrice: normalized.normalizedPrice,
+    baseUnit: normalized.baseUnit,
+  };
+}
+
+function formatNormalizedObservationPrice(
+  value: ReturnType<typeof normalizedObservationPrice>,
+) {
+  if (!value) return "—";
+  const unit = value.baseUnit === "l" ? "L" : value.baseUnit;
+  return `${value.normalizedPrice.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  })}/${unit}`;
+}
+
 function observationCandidate(observation: {
   rawName: string;
   brand: string | null;
@@ -827,6 +865,17 @@ export default function StorePriceImportPage() {
           if (uploadError) throw uploadError;
         }
 
+        const retailReference = normalizedObservationPrice(
+          row.retailPrice,
+          row.packageQuantity,
+          row.packageUnit,
+        );
+        const wholesaleReference = normalizedObservationPrice(
+          row.wholesalePrice,
+          row.packageQuantity,
+          row.packageUnit,
+        );
+
         const { data: observation, error: observationError } = await db
           .from("store_price_observations")
           .upsert(
@@ -846,6 +895,10 @@ export default function StorePriceImportPage() {
               wholesale_min_quantity: row.wholesaleMinQuantity,
               price_basis_quantity: row.priceBasisQuantity,
               price_basis_unit: row.priceBasisUnit,
+              normalized_retail_price: retailReference?.normalizedPrice ?? null,
+              normalized_wholesale_price:
+                wholesaleReference?.normalizedPrice ?? null,
+              base_unit: retailReference?.baseUnit ?? null,
               source_image_path: sourcePath,
               source_file_name:
                 row.sourceFileName || row.file?.name || "preco-loja.jpg",
@@ -873,6 +926,10 @@ export default function StorePriceImportPage() {
               source: "store_observation",
               receipt_text: row.rawName.trim(),
               store_observation_id: observation.id,
+              package_quantity: row.packageQuantity,
+              package_unit: row.packageUnit,
+              normalized_price: retailReference?.normalizedPrice ?? null,
+              base_unit: retailReference?.baseUnit ?? null,
             },
             { onConflict: "store_observation_id" },
           );
@@ -1071,6 +1128,16 @@ export default function StorePriceImportPage() {
               const linkedProduct = row.productId
                 ? productMap.get(row.productId)
                 : null;
+              const retailReference = normalizedObservationPrice(
+                row.retailPrice,
+                row.packageQuantity,
+                row.packageUnit,
+              );
+              const wholesaleReference = normalizedObservationPrice(
+                row.wholesalePrice,
+                row.packageQuantity,
+                row.packageUnit,
+              );
               return (
                 <Card key={row.localId}>
                   <CardContent className="p-3.5">
@@ -1187,6 +1254,70 @@ export default function StorePriceImportPage() {
                         </div>
                       </div>
 
+                      <div className="grid grid-cols-[1fr_110px] gap-2">
+                        <div>
+                          <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">
+                            Conteúdo da embalagem
+                          </label>
+                          <Input
+                            inputMode="decimal"
+                            value={displayNumber(row.packageQuantity)}
+                            placeholder="Ex.: 350 ou 1,5"
+                            onChange={(event) =>
+                              updateRow(row.localId, {
+                                packageQuantity: numberInput(event.target.value),
+                              })
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">
+                            Unidade
+                          </label>
+                          <select
+                            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                            value={row.packageUnit ?? ""}
+                            onChange={(event) =>
+                              updateRow(row.localId, {
+                                packageUnit: event.target.value || null,
+                              })
+                            }
+                          >
+                            <option value="">—</option>
+                            <option value="ml">ml</option>
+                            <option value="L">L</option>
+                            <option value="g">g</option>
+                            <option value="kg">kg</option>
+                            <option value="un">un</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
+                        <p className="text-[11px] font-semibold text-muted-foreground">
+                          Referência calculada pela embalagem
+                        </p>
+                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                          <span>
+                            Varejo:{" "}
+                            <strong>{formatNormalizedObservationPrice(retailReference)}</strong>
+                          </span>
+                          {row.wholesalePrice !== null && (
+                            <span>
+                              Atacado:{" "}
+                              <strong>
+                                {formatNormalizedObservationPrice(wholesaleReference)}
+                              </strong>
+                            </span>
+                          )}
+                        </div>
+                        {!retailReference && (
+                          <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                            Confirme quantidade e unidade para o preço entrar no histórico com referência por L/kg/un.
+                          </p>
+                        )}
+                      </div>
+
                       <div>
                         <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">
                           Vincular ao histórico
@@ -1219,16 +1350,18 @@ export default function StorePriceImportPage() {
                       </div>
 
                       {(row.barcode ||
-                        row.packageQuantity ||
-                        row.wholesalePrice !== null) && (
+                        (row.wholesalePrice !== null &&
+                          row.wholesaleMinQuantity)) && (
                         <div className="rounded-lg bg-muted/60 px-3 py-2 text-[11px] text-muted-foreground">
-                          {row.packageQuantity && row.packageUnit
-                            ? `Embalagem: ${row.packageQuantity} ${row.packageUnit}`
-                            : "Embalagem não confirmada"}
-                          {row.barcode ? ` · EAN ${row.barcode}` : ""}
+                          {row.barcode ? `EAN ${row.barcode}` : ""}
+                          {row.barcode &&
+                          row.wholesalePrice !== null &&
+                          row.wholesaleMinQuantity
+                            ? " · "
+                            : ""}
                           {row.wholesalePrice !== null &&
                           row.wholesaleMinQuantity
-                            ? ` · atacado a partir de ${row.wholesaleMinQuantity} un.`
+                            ? `atacado a partir de ${row.wholesaleMinQuantity} un.`
                             : ""}
                         </div>
                       )}
