@@ -388,7 +388,7 @@ export default function FlyerPage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("products")
-        .select("id,name,category,brand,package_size,unit,stockable,image_url,image_source,prices(price,date,supermarket)")
+        .select("id,name,category,brand,package_size,unit,stockable,image_url,image_source,prices(price,date,supermarket,package_quantity,package_unit,normalized_price,base_unit)")
         .eq("user_id", user!.id)
         .order("name");
       if (error) throw error;
