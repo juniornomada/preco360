@@ -782,14 +782,27 @@ export default function StorePriceImportPage() {
 
     try {
       for (const row of validRows) {
-        const sourcePath = `${user.id}/store-prices/${observedDate}/${row.sourceHash.slice(0, 20)}-${safeName(row.file.name || "preco.jpg")}`;
-        const { error: uploadError } = await supabase.storage
-          .from("flyers")
-          .upload(sourcePath, row.file, {
-            contentType: row.file.type || "image/jpeg",
-            upsert: true,
-          });
-        if (uploadError) throw uploadError;
+        let sourcePath = row.sourceImagePath;
+
+        if (!sourcePath) {
+          if (!row.file) {
+            throw new Error(
+              `${row.sourceFileName}: a foto original não está mais disponível.`,
+            );
+          }
+
+          sourcePath = `${user.id}/store-prices/${observedDate}/${row.sourceHash.slice(
+            0,
+            20,
+          )}-${safeName(row.sourceFileName || row.file.name || "preco.jpg")}`;
+          const { error: uploadError } = await supabase.storage
+            .from("flyers")
+            .upload(sourcePath, row.file, {
+              contentType: row.file.type || "image/jpeg",
+              upsert: true,
+            });
+          if (uploadError) throw uploadError;
+        }
 
         const { data: observation, error: observationError } = await db
           .from("store_price_observations")
@@ -811,7 +824,8 @@ export default function StorePriceImportPage() {
               price_basis_quantity: row.priceBasisQuantity,
               price_basis_unit: row.priceBasisUnit,
               source_image_path: sourcePath,
-              source_file_name: row.file.name,
+              source_file_name:
+                row.sourceFileName || row.file?.name || "preco-loja.jpg",
               source_hash: row.sourceHash,
               extraction_confidence: row.confidence,
               match_confidence: row.matchConfidence,
@@ -870,6 +884,14 @@ export default function StorePriceImportPage() {
         queryClient.invalidateQueries({ queryKey: ["store-price-products"] }),
         queryClient.invalidateQueries({ queryKey: ["product-aliases"] }),
       ]);
+
+      if (activeJobId) {
+        await db
+          .from("store_price_analysis_jobs")
+          .update({ saved_at: new Date().toISOString() })
+          .eq("user_id", user.id)
+          .eq("id", activeJobId);
+      }
 
       toast({
         title: "Pesquisa em loja salva",
@@ -942,7 +964,8 @@ export default function StorePriceImportPage() {
 
             <button
               type="button"
-              className="flex w-full flex-col items-center rounded-2xl border-2 border-dashed border-primary/30 bg-primary/5 px-4 py-6 text-center"
+              disabled={analyzing || saving}
+              className="flex w-full flex-col items-center rounded-2xl border-2 border-dashed border-primary/30 bg-primary/5 px-4 py-6 text-center disabled:cursor-not-allowed disabled:opacity-60"
               onClick={() => inputRef.current?.click()}
             >
               <Camera className="h-7 w-7 text-primary" />
@@ -953,6 +976,7 @@ export default function StorePriceImportPage() {
               </span>
               <span className="mt-1 text-xs text-muted-foreground">
                 Fotografe a etiqueta e a embalagem correspondente no mesmo enquadramento.
+                Depois que o envio terminar, a análise continua no servidor mesmo em segundo plano.
               </span>
             </button>
 
@@ -982,8 +1006,14 @@ export default function StorePriceImportPage() {
               <div className="rounded-xl bg-muted p-3">
                 <div className="flex items-center gap-2 text-sm font-semibold">
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  Lendo fotos {progress.current}/{progress.total}
+                  {progress.total > 0
+                    ? `${progress.current}/${progress.total}`
+                    : "Preparando análise"}
                 </div>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  {progressLabel ||
+                    "Processando fotos no servidor. Você pode trocar de app depois que o envio terminar."}
+                </p>
               </div>
             )}
 
@@ -998,7 +1028,7 @@ export default function StorePriceImportPage() {
               ) : (
                 <Camera className="mr-2 h-4 w-4" />
               )}
-              {analyzing ? "Analisando fotos…" : "Analisar preços"}
+              {analyzing ? "Análise em andamento…" : "Analisar preços"}
             </Button>
           </CardContent>
         </Card>
@@ -1034,7 +1064,7 @@ export default function StorePriceImportPage() {
                               Leitura {Math.round(row.confidence * 100)}%
                             </p>
                             <p className="truncate text-xs text-muted-foreground">
-                              {row.file.name}
+                              {row.sourceFileName || row.file?.name || "Foto"}
                             </p>
                           </div>
                           <Button
@@ -1043,7 +1073,9 @@ export default function StorePriceImportPage() {
                             variant="ghost"
                             className="h-8 w-8 shrink-0"
                             onClick={() => {
-                              URL.revokeObjectURL(row.previewUrl);
+                              if (row.previewUrl.startsWith("blob:")) {
+                                URL.revokeObjectURL(row.previewUrl);
+                              }
                               setRows((current) =>
                                 current.filter(
                                   (item) => item.localId !== row.localId,
