@@ -35,8 +35,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import ProductSearchBar from "@/components/ProductSearchBar";
+import { productMatchesSearch } from "@/lib/productSearch";
 import {
-  Search,
   Store,
   CheckCircle2,
   TrendingDown,
@@ -54,42 +55,6 @@ const verdictStyle = {
   high: { className: "border-red-500/30 bg-red-500/10", iconClass: "text-red-600", Icon: TrendingUp },
   insufficient: { className: "border-border bg-muted/50", iconClass: "text-muted-foreground", Icon: CheckCircle2 },
 } as const;
-
-const SEARCH_ALIASES: Record<string, string> = {
-  qj: "queijo",
-  qjo: "queijo",
-  mus: "mussarela",
-  muss: "mussarela",
-  mussar: "mussarela",
-  mussarela: "mussarela",
-  mozzarella: "mussarela",
-};
-
-function searchTokens(value: string) {
-  const normalized = value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-
-  if (!normalized) return [];
-
-  return normalized.split(/\s+/).map((token) => SEARCH_ALIASES[token] ?? token);
-}
-
-function productMatchesSearch(name: string, query: string) {
-  const queryTokens = searchTokens(query);
-  if (!queryTokens.length) return true;
-
-  const nameTokens = searchTokens(name);
-  return queryTokens.every((queryToken) =>
-    nameTokens.some((nameToken) => {
-      if (nameToken.includes(queryToken) || queryToken.includes(nameToken)) return true;
-      return queryToken.length >= 4 && nameToken.length >= 3 && queryToken.startsWith(nameToken);
-    }),
-  );
-}
 
 function packageLabel(
   quantity: number | string | null,
@@ -280,15 +245,12 @@ export default function SearchPage() {
         </p>
       </header>
 
-      <div className="relative mb-3">
-        <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Café, leite, banana, mussarela..."
-          className="h-11 pl-9"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-      </div>
+      <ProductSearchBar
+        className="mb-3"
+        value={search}
+        onChange={(value) => setSearch(value)}
+        placeholder="Busque café, leite, banana, mussarela..."
+      />
 
       {!selected && (
         <div className="space-y-2">
