@@ -107,52 +107,36 @@ async function analyzeSource(source: SourceFile) {
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!url || !key) throw new Error("Servidor de análise indisponível.");
 
-  let lastError = "Falha ao analisar a foto.";
+  const file = await downloadSource(source);
+  const body = new FormData();
+  body.append("file", file, source.name || `foto-${source.index}.jpg`);
+  body.append("analysis_session_id", "server-job");
+  body.append("file_index", String(source.index));
+  body.append("file_total", "0");
 
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const file = await downloadSource(source);
-    const body = new FormData();
-    body.append("file", file, source.name || `foto-${source.index}.jpg`);
-    body.append("analysis_session_id", "server-job");
-    body.append("file_index", String(source.index));
-    body.append("file_total", "0");
+  const response = await fetch(url + "/functions/v1/analyze-store-price", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + key,
+    },
+    body,
+  });
 
-    const response = await fetch(url + "/functions/v1/analyze-store-price", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + key,
-      },
-      body,
-    });
+  const payload = await response
+    .json()
+    .catch(async () => ({ message: await response.text().catch(() => "") }));
 
-    const payload = await response
-      .json()
-      .catch(async () => ({ message: await response.text().catch(() => "") }));
-
-    if (response.ok) {
-      return payload;
-    }
-
-    lastError =
-      payload?.message ||
-      payload?.error ||
-      `Falha HTTP ${response.status} ao analisar a foto.`;
-
-    if (
-      attempt < 2 &&
-      (response.status === 429 ||
-        response.status === 502 ||
-        response.status === 503 ||
-        response.status === 504)
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 900));
-      continue;
-    }
-
-    throw new Error(String(lastError));
+  if (response.ok) {
+    return payload;
   }
 
-  throw new Error(lastError);
+  throw new Error(
+    String(
+      payload?.message ||
+        payload?.error ||
+        `Falha HTTP ${response.status} ao analisar a foto.`,
+    ),
+  );
 }
 
 async function triggerNext(jobId: string) {
@@ -236,7 +220,7 @@ async function processBatch(jobId: string) {
       return;
     }
 
-    const batch = pending.slice(0, 2);
+    const source = pending[0];
     const alreadyDone = sources.length - pending.length;
 
     await updateJob(jobId, {
@@ -244,9 +228,8 @@ async function processBatch(jobId: string) {
       progress_current: alreadyDone,
       progress_total: sources.length,
       progress_label:
-        "Analisando foto" +
-        (batch.length > 1 ? "s " : " ") +
-        batch.map((item) => item.index).join(" e ") +
+        "Analisando foto " +
+        source.index +
         " de " +
         sources.length +
         " no servidor…",
@@ -254,62 +237,52 @@ async function processBatch(jobId: string) {
       completed_at: null,
     });
 
-    const settled = await Promise.allSettled(
-      batch.map(async (source) => {
-        const payload = await analyzeSource(source);
-        return { source, payload };
-      }),
-    );
+    let newObservation: any | null = null;
+    let newFailure: any | null = null;
 
-    const newObservations: any[] = [];
-    const newFailures: any[] = [];
+    try {
+      const payload = await analyzeSource(source);
 
-    settled.forEach((entry, offset) => {
-      const source = batch[offset];
-
-      if (entry.status === "fulfilled" && entry.value.payload?.observation) {
-        newObservations.push({
+      if (payload?.observation) {
+        newObservation = {
           index: source.index,
           source_file_name: source.name,
           source_image_path: source.path,
           source_hash: source.hash || null,
-          observation: entry.value.payload.observation,
-          model: entry.value.payload.model || null,
-        });
-        return;
-      }
-
-      if (entry.status === "fulfilled") {
-        newFailures.push({
+          observation: payload.observation,
+          model: payload.model || null,
+        };
+      } else {
+        newFailure = {
           index: source.index,
           source_file_name: source.name,
           source_image_path: source.path,
           source_hash: source.hash || null,
           reason:
-            entry.value.payload?.message ||
-            entry.value.payload?.reason ||
+            payload?.message ||
+            payload?.reason ||
             "Não foi possível relacionar produto e preço com segurança.",
-        });
-        return;
+        };
       }
-
-      newFailures.push({
+    } catch (error) {
+      newFailure = {
         index: source.index,
         source_file_name: source.name,
         source_image_path: source.path,
         source_hash: source.hash || null,
         reason:
-          entry.reason instanceof Error
-            ? entry.reason.message
-            : String(entry.reason ?? "Falha inesperada."),
-      });
-    });
+          error instanceof Error
+            ? error.message
+            : String(error ?? "Falha inesperada."),
+      };
+    }
 
-    const observations = mergeByIndex(
-      previousObservations,
-      newObservations,
-    );
-    const failures = mergeByIndex(previousFailures, newFailures);
+    const observations = newObservation
+      ? mergeByIndex(previousObservations, [newObservation])
+      : previousObservations;
+    const failures = newFailure
+      ? mergeByIndex(previousFailures, [newFailure])
+      : previousFailures;
     const done = observations.length + failures.length;
 
     const result = {
@@ -355,6 +328,9 @@ async function processBatch(jobId: string) {
       completed_at: null,
     });
 
+    // Persisted one photo before scheduling the next one. This keeps every
+    // invocation bounded and prevents a slow image from discarding a completed
+    // sibling when the Edge Runtime reaches its wall-clock limit.
     await triggerNext(jobId);
   } catch (error) {
     console.error("process-store-price-job", error);
