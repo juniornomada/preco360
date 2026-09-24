@@ -7,9 +7,9 @@ const corsHeaders = {
 };
 
 const MODELS = [
-  "gemini-2.5-flash-lite",
+  "gemini-3.5-flash-lite",
+  "gemini-3.5-flash",
   "gemini-3-flash-preview",
-  "gemini-3.1-flash-lite",
 ] as const;
 
 const PROMPT = `
@@ -114,7 +114,7 @@ async function callGemini(
   data: string,
 ) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
+  const timeout = setTimeout(() => controller.abort(), 35_000);
 
   try {
     const response = await fetch(
