@@ -207,6 +207,69 @@ function formatNormalizedObservationPrice(
   })}/${unit}`;
 }
 
+function packageLabel(
+  quantity: number | null,
+  unit: string | null,
+) {
+  if (
+    quantity === null ||
+    !Number.isFinite(quantity) ||
+    quantity <= 0 ||
+    !unit
+  ) {
+    return "";
+  }
+
+  const normalizedUnit = unit.trim().toLowerCase();
+  const shownUnit =
+    normalizedUnit === "l" || normalizedUnit === "lt" ? "L" : normalizedUnit;
+  const shownQuantity = quantity.toLocaleString("pt-BR", {
+    maximumFractionDigits: 3,
+  });
+  return `${shownQuantity} ${shownUnit}`;
+}
+
+function productNameWithPackage(
+  name: string,
+  quantity: number | null,
+  unit: string | null,
+) {
+  const clean = name.trim();
+  if (!clean) return clean;
+  if (inferPackage(clean)) return clean;
+
+  const label = packageLabel(quantity, unit);
+  return label ? `${clean} ${label}` : clean;
+}
+
+function productUniqueKey(name: string) {
+  return normalizeSearchText(name).replace(/\s+/g, "");
+}
+
+function packageVariantCompatible(
+  product: ProductForMatch | null | undefined,
+  quantity: number | null,
+  unit: string | null,
+) {
+  if (!product) return false;
+
+  const observed =
+    quantity && unit ? inferPackage(`${quantity}${unit}`) : null;
+  const productPackage =
+    product.package_size && product.unit
+      ? inferPackage(`${product.package_size}${product.unit}`)
+      : inferPackage(product.name);
+
+  if (!observed || !productPackage) return true;
+  if (observed.baseUnit !== productPackage.baseUnit) return false;
+
+  const ratio =
+    Math.min(observed.baseQuantity, productPackage.baseQuantity) /
+    Math.max(observed.baseQuantity, productPackage.baseQuantity);
+
+  return ratio >= 0.97;
+}
+
 function observationCandidate(observation: {
   rawName: string;
   brand: string | null;
@@ -843,6 +906,121 @@ export default function StorePriceImportPage() {
 
     try {
       for (const row of validRows) {
+        let productId = row.productId;
+        let effectiveMatchType = row.matchType;
+        let effectiveMatchConfidence = row.matchConfidence;
+
+        const initiallyLinkedProduct = productId
+          ? productMap.get(productId)
+          : null;
+
+        if (
+          productId &&
+          initiallyLinkedProduct &&
+          !packageVariantCompatible(
+            initiallyLinkedProduct,
+            row.packageQuantity,
+            row.packageUnit,
+          )
+        ) {
+          productId = null;
+          effectiveMatchType = "unmatched";
+          effectiveMatchConfidence = 0;
+        }
+
+        if (productId) {
+          const linkedProduct = productMap.get(productId);
+          if (
+            linkedProduct &&
+            row.packageQuantity &&
+            row.packageUnit &&
+            (!linkedProduct.package_size || !linkedProduct.unit)
+          ) {
+            const { error: packageUpdateError } = await db
+              .from("products")
+              .update({
+                package_size: row.packageQuantity,
+                unit: row.packageUnit,
+              })
+              .eq("user_id", user.id)
+              .eq("id", productId);
+            if (packageUpdateError) throw packageUpdateError;
+          }
+        }
+
+        if (!productId) {
+          const productName = productNameWithPackage(
+            row.rawName,
+            row.packageQuantity,
+            row.packageUnit,
+          );
+          const normalizedName = productUniqueKey(productName);
+
+          let existingProduct: any = null;
+
+          if (row.barcode) {
+            const { data, error } = await db
+              .from("products")
+              .select("id,name,package_size,unit")
+              .eq("user_id", user.id)
+              .eq("barcode", row.barcode)
+              .maybeSingle();
+            if (error) throw error;
+            existingProduct = data;
+          }
+
+          if (!existingProduct && normalizedName) {
+            const { data, error } = await db
+              .from("products")
+              .select("id,name,package_size,unit")
+              .eq("user_id", user.id)
+              .eq("normalized_name", normalizedName)
+              .maybeSingle();
+            if (error) throw error;
+            existingProduct = data;
+          }
+
+          if (existingProduct) {
+            productId = existingProduct.id;
+          } else {
+            const { data: createdProduct, error: createProductError } = await db
+              .from("products")
+              .insert({
+                user_id: user.id,
+                name: productName,
+                normalized_name: normalizedName || null,
+                category: "Geral",
+                brand: row.brand,
+                barcode: row.barcode,
+                package_size: row.packageQuantity,
+                unit: row.packageUnit,
+              })
+              .select("id")
+              .single();
+
+            if (createProductError) {
+              if (createProductError.code !== "23505" || !normalizedName) {
+                throw createProductError;
+              }
+
+              const { data: concurrentProduct, error: concurrentLookupError } =
+                await db
+                  .from("products")
+                  .select("id")
+                  .eq("user_id", user.id)
+                  .eq("normalized_name", normalizedName)
+                  .single();
+              if (concurrentLookupError) throw concurrentLookupError;
+              productId = concurrentProduct.id;
+            } else {
+              productId = createdProduct.id;
+            }
+          }
+
+          effectiveMatchType = "exact";
+          effectiveMatchConfidence = 1;
+        }
+
         let sourcePath = row.sourceImagePath;
 
         if (!sourcePath) {
@@ -881,7 +1059,7 @@ export default function StorePriceImportPage() {
           .upsert(
             {
               user_id: user.id,
-              product_id: row.productId,
+              product_id: productId,
               supermarket,
               observed_date: observedDate,
               raw_name: row.rawName.trim(),
@@ -904,8 +1082,8 @@ export default function StorePriceImportPage() {
                 row.sourceFileName || row.file?.name || "preco-loja.jpg",
               source_hash: row.sourceHash,
               extraction_confidence: row.confidence,
-              match_confidence: row.matchConfidence,
-              match_type: row.matchType,
+              match_confidence: effectiveMatchConfidence,
+              match_type: effectiveMatchType,
               notes: row.notes,
             },
             { onConflict: "user_id,source_hash" },
@@ -914,12 +1092,12 @@ export default function StorePriceImportPage() {
           .single();
         if (observationError) throw observationError;
 
-        if (row.productId) {
+        if (productId) {
           linked += 1;
           const { error: priceError } = await db.from("prices").upsert(
             {
               user_id: user.id,
-              product_id: row.productId,
+              product_id: productId,
               supermarket,
               price: row.retailPrice,
               date: observedDate,
@@ -935,7 +1113,10 @@ export default function StorePriceImportPage() {
           );
           if (priceError) throw priceError;
 
-          if (row.matchType === "manual" || row.matchConfidence >= 0.9) {
+          if (
+            effectiveMatchType === "manual" ||
+            effectiveMatchConfidence >= 0.9
+          ) {
             const normalizedAlias = normalizeSearchText(row.rawName);
             const { data: existingAlias } = await db
               .from("product_aliases")
@@ -948,7 +1129,7 @@ export default function StorePriceImportPage() {
             if (!existingAlias) {
               await db.from("product_aliases").insert({
                 user_id: user.id,
-                product_id: row.productId,
+                product_id: productId,
                 alias: row.rawName.trim(),
                 normalized_alias: normalizedAlias,
                 retailer: supermarket,
