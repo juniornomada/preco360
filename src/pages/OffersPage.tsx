@@ -1474,7 +1474,7 @@ export default function OffersPage() {
         </p>
       )}
 
-      <div className="mb-2 grid grid-cols-3 gap-2">
+      <div className="mb-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Button
           type="button"
           variant="outline"
@@ -1485,6 +1485,15 @@ export default function OffersPage() {
         >
           <Radar className="h-3.5 w-3.5 text-primary" />
           Radar
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-9 gap-1.5 rounded-xl text-xs font-bold"
+          onClick={() => navigate("/offers/store-prices")}
+        >
+          <Store className="h-3.5 w-3.5 text-primary" />
+          Gôndola
         </Button>
         <Button
           type="button"
