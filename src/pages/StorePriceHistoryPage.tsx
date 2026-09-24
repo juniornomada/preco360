@@ -1,17 +1,15 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { useVoiceSearch } from "@/hooks/useVoiceSearch";
+import ProductSearchBar from "@/components/ProductSearchBar";
+import { productMatchesSearch } from "@/lib/productSearch";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
   ChevronRight,
   History,
-  Mic,
-  Search,
   Store,
   TrendingDown,
 } from "lucide-react";
@@ -62,20 +60,6 @@ function dateBr(value?: string | null) {
   if (!value) return "—";
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
-}
-
-function searchText(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    // "sem alcool", "zero alcool" and "0,0/0.0 alcool" are the same
-    // shopping intent. Canonicalize before punctuation is stripped so 0.0
-    // remains recognizable.
-    .replace(/\b(?:zero|0[.,]?0?)\s*%?\s*alcool\b/g, "sem alcool")
-    .replace(/\bsem\s+alcool\b/g, "sem alcool")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
 }
 
 function packageLabel(
@@ -132,14 +116,7 @@ function median(values: number[]) {
 export default function StorePriceHistoryPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [search, setSearch] = useState("");
-  const {
-    isListening,
-    error: voiceSearchError,
-    startListening,
-    stopListening,
-  } = useVoiceSearch();
 
   const { data: observations = [], isLoading, error } = useQuery<
     StoreObservation[]
@@ -206,19 +183,14 @@ export default function StorePriceHistoryPage() {
   }, [observations]);
 
   const filtered = useMemo(() => {
-    const query = searchText(search);
-    if (!query) return groups;
+    if (!search.trim()) return groups;
 
-    const tokens = query.split(/\s+/).filter(Boolean);
-    return groups.filter((group) => {
-      const haystack = searchText(
-        [
-          group.name,
-          ...group.rows.map((row) => row.supermarket),
-        ].join(" "),
-      );
-      return tokens.every((token) => haystack.includes(token));
-    });
+    return groups.filter((group) =>
+      productMatchesSearch(
+        [group.name, ...group.rows.map((row) => row.supermarket)].join(" "),
+        search,
+      ),
+    );
   }, [groups, search]);
 
   return (
@@ -257,51 +229,12 @@ export default function StorePriceHistoryPage() {
         </Button>
       </div>
 
-      <div className="relative mb-1">
-        <Search className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          ref={searchInputRef}
-          className="h-12 pl-10 pr-12"
-          placeholder={
-            isListening
-              ? "Ouvindo o produto..."
-              : "Busque Heineken 350 ml, suco, Qboa..."
-          }
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <button
-          type="button"
-          className={`absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${
-            isListening
-              ? "bg-primary/15 text-primary animate-pulse"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          }`}
-          aria-label={isListening ? "Parar busca por voz" : "Buscar produto por voz"}
-          aria-pressed={isListening}
-          title={isListening ? "Parar" : "Buscar por voz"}
-          onClick={() => {
-            if (isListening) {
-              stopListening();
-              return;
-            }
-
-            searchInputRef.current?.blur();
-            void startListening((transcript) => {
-              setSearch(transcript);
-            });
-          }}
-        >
-          <Mic className="h-4 w-4" />
-        </button>
-      </div>
-
-      {voiceSearchError && (
-        <p className="mb-3 px-1 text-[10px] text-destructive">
-          {voiceSearchError}
-        </p>
-      )}
-      {!voiceSearchError && <div className="mb-3" />}
+      <ProductSearchBar
+        className="mb-3"
+        value={search}
+        onChange={(value) => setSearch(value)}
+        placeholder="Busque Heineken 350 ml, suco, Qboa..."
+      />
 
       {isLoading && (
         <Card className="border-dashed">
