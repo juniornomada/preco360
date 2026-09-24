@@ -7,14 +7,9 @@ const corsHeaders = {
 };
 
 const MODELS = [
-  "gemini-3.5-flash-lite",
-  "gemini-3.1-flash-lite",
-  "gemini-3.5-flash",
-  "gemini-3.6-flash",
-  "gemini-3.7-flash",
-  "gemini-3.8-flash",
-  "gemini-3-flash-preview",
   "gemini-2.5-flash-lite",
+  "gemini-3-flash-preview",
+  "gemini-3.1-flash-lite",
 ] as const;
 
 const PROMPT = `
@@ -119,7 +114,7 @@ async function callGemini(
   data: string,
 ) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 55_000);
+  const timeout = setTimeout(() => controller.abort(), 20_000);
 
   try {
     const response = await fetch(
@@ -246,6 +241,11 @@ Deno.serve(async (req: Request) => {
         const parsed = parseJson(raw);
         const observation = parsed?.observation ?? null;
         if (!observation) {
+          console.log("analyze-store-price no observation", {
+            model,
+            file: file.name,
+            size: file.size,
+          });
           return json(200, { observation: null, model });
         }
 
@@ -260,6 +260,14 @@ Deno.serve(async (req: Request) => {
         ) {
           return json(200, { observation: null, model });
         }
+
+        console.log("analyze-store-price success", {
+          model,
+          file: file.name,
+          size: file.size,
+          confidence,
+          product: String(observation.product_name || "").slice(0, 120),
+        });
 
         return json(200, {
           observation: {
