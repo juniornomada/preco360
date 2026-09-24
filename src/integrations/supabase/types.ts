@@ -19,10 +19,15 @@ export type Database = {
           created_at: string
           date: string
           id: string
+          base_unit: string | null
           image_url: string | null
+          normalized_price: number | null
+          package_quantity: number | null
+          package_unit: string | null
           price: number
           product_id: string
           receipt_text: string | null
+          store_observation_id: string | null
           supermarket: string
           user_id: string
         }
@@ -30,10 +35,15 @@ export type Database = {
           created_at?: string
           date?: string
           id?: string
+          base_unit?: string | null
           image_url?: string | null
+          normalized_price?: number | null
+          package_quantity?: number | null
+          package_unit?: string | null
           price: number
           product_id: string
           receipt_text?: string | null
+          store_observation_id?: string | null
           supermarket: string
           user_id: string
         }
@@ -41,10 +51,15 @@ export type Database = {
           created_at?: string
           date?: string
           id?: string
+          base_unit?: string | null
           image_url?: string | null
+          normalized_price?: number | null
+          package_quantity?: number | null
+          package_unit?: string | null
           price?: number
           product_id?: string
           receipt_text?: string | null
+          store_observation_id?: string | null
           supermarket?: string
           user_id?: string
         }
