@@ -987,6 +987,8 @@ export default function StorePriceImportPage() {
           if (existingProduct) {
             productId = existingProduct.id;
           } else {
+            // products.normalized_name is GENERATED ALWAYS in Postgres.
+            // Never send it from the client; the database derives it from name.
             const { data: createdProduct, error: createProductError } = await db
               .from("products")
               .insert({
