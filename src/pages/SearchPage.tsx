@@ -9,6 +9,8 @@ type ProductSummary = {
   id: string;
   name: string;
   category: string | null;
+  package_size: number | string | null;
+  unit: string | null;
   price_count: number | string;
   latest_price: number | string | null;
   latest_date: string | null;
@@ -25,6 +27,11 @@ type PriceHistoryRow = {
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { analyzePrice, formatBRL } from "@/lib/priceAnalysis";
+import {
+  formatNormalizedPrice,
+  inferPackage,
+  normalizedUnitPrice,
+} from "@/lib/flyerAnalysis";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -84,6 +91,52 @@ function productMatchesSearch(name: string, query: string) {
   );
 }
 
+function packageLabel(
+  quantity: number | string | null,
+  unit: string | null,
+) {
+  const numericQuantity = Number(quantity);
+  if (
+    !Number.isFinite(numericQuantity) ||
+    numericQuantity <= 0 ||
+    !unit
+  ) {
+    return "";
+  }
+
+  const normalizedUnit = unit.trim().toLowerCase();
+  const shownUnit =
+    normalizedUnit === "l" || normalizedUnit === "lt" ? "L" : normalizedUnit;
+  return `${numericQuantity.toLocaleString("pt-BR", {
+    maximumFractionDigits: 3,
+  })} ${shownUnit}`;
+}
+
+function displayProductName(product: ProductSummary) {
+  const clean = product.name.trim();
+  if (!clean) return clean;
+  if (inferPackage(clean)) return clean;
+
+  const label = packageLabel(product.package_size, product.unit);
+  return label ? `${clean} ${label}` : clean;
+}
+
+function normalizedSummaryPrice(
+  product: ProductSummary,
+  price: number | string | null,
+) {
+  const numericPrice = Number(price);
+  if (!Number.isFinite(numericPrice) || numericPrice <= 0) return null;
+
+  const pkg =
+    product.package_size && product.unit
+      ? inferPackage(`${product.package_size}${product.unit}`)
+      : inferPackage(product.name);
+  if (!pkg) return null;
+
+  return normalizedUnitPrice(numericPrice, pkg);
+}
+
 function formatDateBr(value?: string | null) {
   if (!value) return "sem histórico";
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -115,7 +168,9 @@ export default function SearchPage() {
 
   const filtered = useMemo(() => {
     if (!products) return [];
-    return products.filter((product) => productMatchesSearch(product.name, search));
+    return products.filter((product) =>
+      productMatchesSearch(displayProductName(product), search),
+    );
   }, [products, search]);
 
   const selected = useMemo(
@@ -145,6 +200,11 @@ export default function SearchPage() {
           date: selected.latest_date,
           supermarket: selected.latest_supermarket ?? "",
         }
+      : null;
+  const selectedDisplayName = selected ? displayProductName(selected) : "";
+  const selectedNormalizedLatest =
+    selected && selectedLatest
+      ? normalizedSummaryPrice(selected, selectedLatest.price)
       : null;
 
   const numericPrice = Number(currentPrice.replace(",", "."));
@@ -181,7 +241,7 @@ export default function SearchPage() {
 
       toast({
         title: "Preço registrado",
-        description: `${selected.name} por ${formatBRL(numericPrice)} em ${supermarket.trim()}.`,
+        description: `${displayProductName(selected)} por ${formatBRL(numericPrice)} em ${supermarket.trim()}.`,
       });
       setCurrentPrice("");
       queryClient.invalidateQueries({ queryKey: ["product-summaries", user.id] });
@@ -239,6 +299,10 @@ export default function SearchPage() {
                     date: product.latest_date,
                   }
                 : null;
+            const displayName = displayProductName(product);
+            const normalizedLatest = latest
+              ? normalizedSummaryPrice(product, latest.price)
+              : null;
             return (
               <button
                 type="button"
@@ -250,12 +314,21 @@ export default function SearchPage() {
                   <TrendingDown className="h-5 w-5 text-primary" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold">{product.name}</p>
+                  <p className="truncate font-semibold">{displayName}</p>
                   <p className="text-xs text-muted-foreground">{Number(product.price_count ?? 0)} preço(s) no histórico</p>
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-bold">{latest ? formatBRL(latest.price) : "Sem preço"}</p>
-                  <p className="text-[11px] text-muted-foreground">{latest ? formatDateBr(latest.date) : "sem histórico"}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {latest
+                      ? normalizedLatest
+                        ? `${formatNormalizedPrice(
+                            normalizedLatest.normalizedPrice,
+                            normalizedLatest.baseUnit,
+                          )} · ${formatDateBr(latest.date)}`
+                        : formatDateBr(latest.date)
+                      : "sem histórico"}
+                  </p>
                 </div>
                 <ChevronRight className="h-4 w-4 text-muted-foreground" />
               </button>
@@ -280,7 +353,7 @@ export default function SearchPage() {
                 <p className="text-xs font-medium text-muted-foreground">Produto</p>
                 <div className="mt-1 flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="text-xl font-bold">{selected.name}</h2>
+                    <h2 className="text-xl font-bold">{selectedDisplayName}</h2>
                     <p className="text-xs text-muted-foreground">{selected.category}</p>
                   </div>
                   <Button variant="outline" size="sm" className="shrink-0" onClick={() => navigate(`/product/${selected.id}`)}>Ver histórico</Button>
@@ -291,7 +364,17 @@ export default function SearchPage() {
                 <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2.5">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Último preço registrado</p>
-                    <p className="mt-0.5 text-lg font-extrabold">{formatBRL(selectedLatest.price)}</p>
+                    <p className="mt-0.5 text-lg font-extrabold">
+                      {formatBRL(selectedLatest.price)}
+                    </p>
+                    {selectedNormalizedLatest && (
+                      <p className="text-[11px] font-semibold text-primary">
+                        {formatNormalizedPrice(
+                          selectedNormalizedLatest.normalizedPrice,
+                          selectedNormalizedLatest.baseUnit,
+                        )}
+                      </p>
+                    )}
                   </div>
                   <div className="min-w-0 text-right text-xs text-muted-foreground">
                     <p className="truncate font-medium text-foreground/80">{selectedLatest.supermarket}</p>
