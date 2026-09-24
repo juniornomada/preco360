@@ -39,7 +39,15 @@ export type ProductForMatch = {
   stockable?: boolean | null;
   image_url?: string | null;
   image_source?: string | null;
-  prices?: Array<{ price: number | string; date?: string | null; supermarket?: string | null }> | null;
+  prices?: Array<{
+    price: number | string;
+    date?: string | null;
+    supermarket?: string | null;
+    package_quantity?: number | string | null;
+    package_unit?: string | null;
+    normalized_price?: number | string | null;
+    base_unit?: string | null;
+  }> | null;
 };
 
 export type AliasForMatch = {
@@ -1292,11 +1300,52 @@ function median(values: number[]) {
   return ordered.length % 2 ? ordered[mid] : (ordered[mid - 1] + ordered[mid]) / 2;
 }
 
-function normalizedHistorical(product: ProductForMatch, rawPrice: number | string) {
-  const price = Number(rawPrice);
+function normalizedHistorical(
+  product: ProductForMatch,
+  entry: {
+    price: number | string;
+    package_quantity?: number | string | null;
+    package_unit?: string | null;
+    normalized_price?: number | string | null;
+    base_unit?: string | null;
+  },
+) {
+  const price = Number(entry.price);
   if (!Number.isFinite(price) || price <= 0) return null;
-  const pkg = product.package_size && product.unit ? inferPackage(`${product.package_size}${product.unit}`) : inferPackage(product.name);
-  return normalizedUnitPrice(price, pkg);
+
+  const storedNormalized = Number(entry.normalized_price);
+  const storedBaseUnit =
+    entry.base_unit === "l" ||
+    entry.base_unit === "kg" ||
+    entry.base_unit === "un"
+      ? entry.base_unit
+      : null;
+
+  if (
+    storedBaseUnit &&
+    Number.isFinite(storedNormalized) &&
+    storedNormalized > 0
+  ) {
+    return {
+      normalizedPrice: storedNormalized,
+      baseUnit: storedBaseUnit,
+    };
+  }
+
+  const observedPackage = packageInfoFromQuantity(
+    entry.package_quantity,
+    entry.package_unit,
+  );
+  if (observedPackage) {
+    return normalizedUnitPrice(price, observedPackage);
+  }
+
+  const productPackage =
+    product.package_size && product.unit
+      ? inferPackage(`${product.package_size}${product.unit}`)
+      : inferPackage(product.name);
+
+  return normalizedUnitPrice(price, productPackage);
 }
 
 export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductForMatch | null,
@@ -1325,7 +1374,7 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
 
   const purchases = [...purchaseSources.values()].flatMap((source) =>
     (source.prices ?? [])
-      .map((entry) => normalizedHistorical(source, entry.price))
+      .map((entry) => normalizedHistorical(source, entry))
       .filter((entry) => entry?.baseUnit === candidate.baseUnit)
       .map((entry) => entry!.normalizedPrice),
   );
