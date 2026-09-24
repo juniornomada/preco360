@@ -140,7 +140,7 @@ export default function StorePriceImportPage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("products")
-        .select("id,name,category,brand,package_size,unit")
+        .select("id,name,category,brand,barcode,package_size,unit")
         .eq("user_id", user!.id)
         .order("name");
       if (error) throw error;
@@ -201,12 +201,22 @@ export default function StorePriceImportPage() {
       packageQuantity: observation.package_quantity,
       packageUnit: observation.package_unit,
     });
-    const match = matchFlyerItem(
-      candidate,
-      products,
-      aliases,
-      canonicalRetailerName(retailer),
-    );
+    const exactBarcodeProduct = observation.barcode
+      ? products.find(
+          (product) =>
+            String((product as ProductForMatch & { barcode?: string | null }).barcode ?? "")
+              .replace(/\D/g, "") ===
+            String(observation.barcode).replace(/\D/g, ""),
+        )
+      : null;
+    const match = exactBarcodeProduct
+      ? { productId: exactBarcodeProduct.id, confidence: 1, type: "exact" as const }
+      : matchFlyerItem(
+          candidate,
+          products,
+          aliases,
+          canonicalRetailerName(retailer),
+        );
     return {
       localId: crypto.randomUUID(),
       file,
