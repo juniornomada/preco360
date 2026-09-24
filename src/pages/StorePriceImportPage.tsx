@@ -271,47 +271,60 @@ export default function StorePriceImportPage() {
     const failures: string[] = [];
 
     try {
-      for (let start = 0; start < files.length; start += 2) {
-        const batch = files.slice(start, start + 2);
-        const batchResults = await Promise.allSettled(
-          batch.map(async (file) => {
-            const sourceHash = await sha256(file);
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        try {
+          const sourceHash = await sha256(file);
+          let lastError: unknown = null;
+          let data: any = null;
+
+          for (let attempt = 1; attempt <= 2; attempt += 1) {
             const body = new FormData();
             body.append("file", file, file.name || "preco-loja.jpg");
-            const { data, error } = await supabase.functions.invoke(
+
+            const result = await supabase.functions.invoke(
               "analyze-store-price",
               { body },
             );
-            if (error) throw error;
-            if (!data?.observation) {
-              throw new Error(
-                `${file.name}: não consegui relacionar produto e preço nessa foto.`,
-              );
+
+            if (!result.error) {
+              data = result.data;
+              lastError = null;
+              break;
             }
-            return matchObservation(
+
+            lastError = result.error;
+            if (attempt < 2) {
+              await new Promise((resolve) => setTimeout(resolve, 700));
+            }
+          }
+
+          if (lastError) throw lastError;
+          if (!data?.observation) {
+            throw new Error(
+              `${file.name}: não consegui relacionar produto e preço nessa foto.`,
+            );
+          }
+
+          parsedRows.push(
+            matchObservation(
               data.observation as ExtractedObservation,
               file,
               sourceHash,
-            );
-          }),
-        );
-
-        for (const result of batchResults) {
-          if (result.status === "fulfilled") {
-            parsedRows.push(result.value);
-          } else {
-            failures.push(
-              result.reason instanceof Error
-                ? result.reason.message
-                : String(result.reason),
-            );
-          }
+            ),
+          );
+        } catch (error) {
+          failures.push(
+            error instanceof Error
+              ? `${file.name}: ${error.message}`
+              : `${file.name}: ${String(error)}`,
+          );
+        } finally {
+          setProgress({
+            current: index + 1,
+            total: files.length,
+          });
         }
-
-        setProgress({
-          current: Math.min(files.length, start + batch.length),
-          total: files.length,
-        });
       }
 
       setRows(parsedRows);
@@ -328,7 +341,7 @@ export default function StorePriceImportPage() {
           title: `${parsedRows.length} preço(s) identificado(s)`,
           description:
             failures.length > 0
-              ? `${failures.length} foto(s) ficaram sem leitura e podem ser reenviadas.`
+              ? `${failures.length} foto(s) ficaram sem leitura. O sistema tentou cada uma duas vezes; você pode manter as mesmas fotos e analisar novamente.`
               : "Confira os nomes, valores e vínculos antes de salvar.",
         });
       }
