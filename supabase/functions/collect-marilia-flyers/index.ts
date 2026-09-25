@@ -775,7 +775,7 @@ async function taustePublications(){
   });
 }
 
-async function tausteReaderPages(collectionHash:string){
+async function tausteReaderPages(collectionHash:string,fullView:string){
   const accountId="9D99E5AF8D6";
   const token=btoa(accountId+"+"+collectionHash);
   const authUrl=new URL("https://content-private.flipsnack.com/authorization");
@@ -785,7 +785,8 @@ async function tausteReaderPages(collectionHash:string){
     headers:{
       "user-agent":UA,
       "accept":"application/json,*/*",
-      "referer":"https://www.flipsnack.com/taustesupermercado/",
+      "referer":fullView,
+      "origin":"https://player.flipsnack.com",
     },
   });
   if(!auth.ok) throw new Error("Flipsnack authorization HTTP "+auth.status);
@@ -879,7 +880,7 @@ async function collectTauste(db:any, report:any[], onlyTitle=""){
 
     let reader:any;
     try{
-      reader=await tausteReaderPages(collectionHash);
+      reader=await tausteReaderPages(collectionHash,fullView);
     }catch(e){
       failed++;
       await writeRegistry(db,known,{
