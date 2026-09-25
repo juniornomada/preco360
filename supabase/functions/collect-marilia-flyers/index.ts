@@ -757,6 +757,24 @@ function tausteCollectionHash(publication:any){
   return coverMatch?.[1]||"";
 }
 
+async function tausteSourceFlyers(){
+  const url=Deno.env.get("SUPABASE_URL");
+  const service=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if(!url||!service) throw new Error("Configuração Supabase indisponível");
+  const r=await fetch(url+"/functions/v1/tauste-flyer-source",{
+    method:"POST",
+    headers:{
+      "authorization":"Bearer "+service,
+      "content-type":"application/json",
+    },
+    body:"{}",
+  });
+  const body=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error("Fonte Tauste HTTP "+r.status+(body?.error?": "+body.error:""));
+  if(!Array.isArray(body?.flyers)) throw new Error("Fonte Tauste retornou formato inesperado");
+  return body.flyers;
+}
+
 async function taustePublications(){
   const profile="https://www.flipsnack.com/taustesupermercado/";
   const api=new URL("https://api.flipsnack.com/v2/publications/related");
@@ -826,7 +844,7 @@ async function collectTauste(db:any, report:any[], onlyTitle=""){
   const sourcePage="https://www.flipsnack.com/taustesupermercado/";
   let publications:any[]=[];
   try{
-    publications=await taustePublications();
+    publications=await tausteSourceFlyers();
   }catch(e){
     report.push({retailer:"Tauste",endpoint:sourcePage,result:"erro",error:String(e),files:0,offers:0});
     report.push({retailer:"Tauste",endpoint:sourcePage,result:"resumo",found:0,imported:0,unchanged:0,failed:1});
@@ -835,19 +853,19 @@ async function collectTauste(db:any, report:any[], onlyTitle=""){
 
   if(onlyTitle){
     const wanted=tausteNormalize(onlyTitle);
-    publications=publications.filter((p:any)=>tausteNormalize(p?.name)===wanted || tausteNormalize(String(p?.name||"").replace(/^ofertas\s+tauste\s+/i,""))===wanted);
+    publications=publications.filter((p:any)=>{
+      const name=tausteNormalize(p?.title);
+      return name===wanted || tausteNormalize(String(p?.title||"").replace(/^ofertas\s+tauste\s+/i,""))===wanted;
+    });
   }
 
   let imported=0,unchanged=0,failed=0;
   for(const publication of publications){
-    const collectionHash=tausteCollectionHash(publication);
-    const sourceTitle=String(publication?.name||"Ofertas Tauste Marília").trim();
+    const collectionHash=String(publication?.collection_hash||"").trim();
+    const sourceTitle=String(publication?.title||"Ofertas Tauste Marília").trim();
     const title=sourceTitle.replace(/^Ofertas\s+Tauste\s+/i,"Ofertas ");
-    const publishedAt=String(publication?.datePublished||"").trim()||null;
-    const directLink=String(publication?.directLink||"").trim();
-    const fullView=directLink
-      ? "https://www.flipsnack.com/taustesupermercado/"+directLink.replace(/\.html(?:$|[?#])/i,"/full-view.html")
-      : sourcePage;
+    const publishedAt=String(publication?.published_at||"").trim()||null;
+    const fullView=String(publication?.source_url||sourcePage).trim()||sourcePage;
     const sourceKey="tauste:flipsnack:"+collectionHash;
     const now=new Date().toISOString();
 
@@ -882,7 +900,15 @@ async function collectTauste(db:any, report:any[], onlyTitle=""){
 
     let reader:any;
     try{
-      reader=await tausteReaderPages(collectionHash,fullView);
+      const pages=Array.isArray(publication?.pages)
+        ? publication.pages.map((page:any,index:number)=>({
+            ...page,
+            index:Number(page?.position)||index+1,
+          })).filter((page:any)=>page?.url)
+        : [];
+      if(!collectionHash) throw new Error("Publicação Tauste sem identificador estável");
+      if(!pages.length) throw new Error("Publicação Tauste sem páginas oficiais");
+      reader={pages,title:sourceTitle,updated_at:publication?.updated_at||null};
     }catch(e){
       failed++;
       await writeRegistry(db,known,{
