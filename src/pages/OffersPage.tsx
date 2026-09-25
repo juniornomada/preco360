@@ -255,6 +255,19 @@ function storePackageBaseQuantity(row: StoreReferenceRow) {
     : null;
 }
 
+function historicalPackageLabel(
+  quantity?: number | string | null,
+  unit?: string | null,
+) {
+  const numeric = Number(quantity);
+  const normalizedUnit = String(unit ?? "").trim().toLowerCase();
+  if (!Number.isFinite(numeric) || numeric <= 0 || !normalizedUnit) return null;
+
+  return `${numeric.toLocaleString("pt-BR", {
+    maximumFractionDigits: 3,
+  })} ${normalizedUnit}`;
+}
+
 function purchaseReferenceValue(
   row: PurchasePriceRow,
   product?: ProductForMatch | null,
@@ -1479,11 +1492,6 @@ export default function OffersPage() {
     [matchingStoreReferences],
   );
 
-  const latestStoreReferenceValue = useMemo(
-    () => (latestStoreReference ? storeReferenceValue(latestStoreReference) : null),
-    [latestStoreReference],
-  );
-
   const bestStoreReference = useMemo(() => {
     if (!matchingStoreReferences.length) return null;
 
@@ -1506,6 +1514,11 @@ export default function OffersPage() {
       return String(b.observed_date).localeCompare(String(a.observed_date));
     })[0];
   }, [matchingStoreReferences]);
+
+  const bestStoreReferenceValue = useMemo(
+    () => (bestStoreReference ? storeReferenceValue(bestStoreReference) : null),
+    [bestStoreReference],
+  );
 
   const productById = useMemo(
     () =>
@@ -1736,18 +1749,16 @@ export default function OffersPage() {
   const currentVsStore = useMemo(() => {
     if (!bestCurrentOffer || !bestStoreReference) return null;
 
-    const storeNormalized = Number(bestStoreReference.normalized_retail_price);
+    const storeReference = storeReferenceValue(bestStoreReference);
     if (
-      !Number.isFinite(storeNormalized) ||
-      storeNormalized <= 0 ||
-      !bestStoreReference.base_unit ||
-      bestCurrentOffer.candidate.baseUnit !== bestStoreReference.base_unit
+      !storeReference ||
+      bestCurrentOffer.candidate.baseUnit !== storeReference.baseUnit
     ) {
       return null;
     }
 
     const current = bestCurrentOffer.candidate.normalizedPrice;
-    const previous = storeNormalized;
+    const previous = storeReference.value;
     if (!Number.isFinite(current) || current <= 0) return null;
 
     const diffPct = ((current - previous) / previous) * 100;
@@ -1761,56 +1772,11 @@ export default function OffersPage() {
     };
   }, [bestCurrentOffer, bestStoreReference]);
 
-  const referencePackage = useMemo(() => {
-    if (!reference360) return null;
-
-    const fromOffer = bestCurrentOffer?.candidate.packageInfo;
-    if (
-      fromOffer &&
-      fromOffer.baseUnit === reference360.baseUnit &&
-      fromOffer.baseQuantity > 0
-    ) {
-      return {
-        baseQuantity: fromOffer.baseQuantity,
-        baseUnit: fromOffer.baseUnit,
-      };
-    }
-
-    if (latestStoreReference) {
-      const pkg = storePackageBaseQuantity(latestStoreReference);
-      if (pkg?.baseUnit === reference360.baseUnit && pkg.baseQuantity > 0) {
-        return pkg;
-      }
-    }
-
-    if (latestReceiptReference) {
-      const pkg = purchasePackageBaseQuantity(
-        latestReceiptReference,
-        productById.get(latestReceiptReference.product_id),
-      );
-      if (pkg?.baseUnit === reference360.baseUnit && pkg.baseQuantity > 0) {
-        return pkg;
-      }
-    }
-
-    return reference360.baseUnit === "un"
-      ? { baseQuantity: 1, baseUnit: "un" as const }
-      : null;
-  }, [
-    bestCurrentOffer,
-    latestReceiptReference,
-    latestStoreReference,
-    productById,
-    reference360,
-  ]);
-
   const decisionReference = useMemo(() => {
     if (!reference360) return null;
 
-    const factor = referencePackage?.baseQuantity ?? 1;
-    const packageMode = !!referencePackage;
-    const central = reference360.value * factor;
-    const historical = reference360.values.map((value) => value * factor);
+    const central = reference360.value;
+    const historical = reference360.values;
 
     let low =
       historical.length >= 4
@@ -1831,10 +1797,9 @@ export default function OffersPage() {
       low,
       high,
       waitAbove,
-      packageMode,
       baseUnit: reference360.baseUnit,
     };
-  }, [reference360, referencePackage]);
+  }, [reference360]);
 
   const networkReferences = useMemo(() => {
     type NetworkReference = {
@@ -1845,6 +1810,7 @@ export default function OffersPage() {
       source: "cupom" | "gôndola";
       date: string;
       productId: string | null;
+      packageLabel: string | null;
     };
 
     const candidates: NetworkReference[] = [];
@@ -1865,6 +1831,10 @@ export default function OffersPage() {
         source: "cupom",
         date: String(row.date ?? ""),
         productId: row.product_id,
+        packageLabel: historicalPackageLabel(
+          row.package_quantity,
+          row.package_unit,
+        ),
       });
     }
 
@@ -1881,6 +1851,10 @@ export default function OffersPage() {
         source: "gôndola",
         date: String(row.observed_date ?? ""),
         productId: row.product_id,
+        packageLabel: historicalPackageLabel(
+          row.package_quantity,
+          row.package_unit,
+        ),
       });
     }
 
@@ -2035,7 +2009,7 @@ export default function OffersPage() {
         !isLoading &&
         !error &&
         !loadingStoreReferences &&
-        (latestReceiptReference || latestStoreReference || reference360) && (
+        (latestReceiptReference || bestStoreReference || reference360) && (
           <>
             <section className="mb-4 rounded-[22px] border border-primary/35 bg-gradient-to-br from-primary/[0.08] via-card to-card p-3 sm:p-4 shadow-sm">
               <div className="mb-3 flex items-start gap-3">
@@ -2103,27 +2077,35 @@ export default function OffersPage() {
                       Gôndola
                     </p>
                   </div>
-                  {latestStoreReference ? (
+                  {bestStoreReference ? (
                     <>
                       <p className="text-[10px] text-muted-foreground sm:text-xs">
-                        Última gôndola
+                        Melhor gôndola
                       </p>
                       <p className="mt-0.5 truncate text-[10px] text-muted-foreground sm:text-xs">
-                        {canonicalRetailerName(latestStoreReference.supermarket) ||
-                          latestStoreReference.supermarket}{" "}
-                        · {dateBr(latestStoreReference.observed_date)}
+                        {canonicalRetailerName(bestStoreReference.supermarket) ||
+                          bestStoreReference.supermarket}{" "}
+                        · {dateBr(bestStoreReference.observed_date)}
                       </p>
                       <p className="mt-2 text-[clamp(1rem,4.5vw,1.5rem)] font-extrabold leading-none">
-                        {brl(Number(latestStoreReference.retail_price))}
+                        {bestStoreReferenceValue
+                          ? formatNormalizedPrice(
+                              bestStoreReferenceValue.value,
+                              bestStoreReferenceValue.baseUnit,
+                            )
+                          : brl(Number(bestStoreReference.retail_price))}
                       </p>
-                      {latestStoreReferenceValue && (
-                        <p className="mt-1 text-[10px] text-muted-foreground sm:text-xs">
-                          {formatNormalizedPrice(
-                            latestStoreReferenceValue.value,
-                            latestStoreReferenceValue.baseUnit,
-                          )}
-                        </p>
-                      )}
+                      <p className="mt-1 text-[10px] text-muted-foreground sm:text-xs">
+                        {historicalPackageLabel(
+                          bestStoreReference.package_quantity,
+                          bestStoreReference.package_unit,
+                        )
+                          ? `${historicalPackageLabel(
+                              bestStoreReference.package_quantity,
+                              bestStoreReference.package_unit,
+                            )} · ${brl(Number(bestStoreReference.retail_price))}`
+                          : `Embalagem ${brl(Number(bestStoreReference.retail_price))}`}
+                      </p>
                     </>
                   ) : (
                     <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
@@ -2147,27 +2129,23 @@ export default function OffersPage() {
                         Preço adequado
                       </p>
                       <p className="mt-2 text-[clamp(1rem,4.5vw,1.5rem)] font-extrabold leading-none">
-                        {decisionReference.packageMode
-                          ? brl(decisionReference.central)
-                          : formatNormalizedPrice(
-                              decisionReference.central,
-                              decisionReference.baseUnit,
-                            )}
+                        {formatNormalizedPrice(
+                          decisionReference.central,
+                          decisionReference.baseUnit,
+                        )}
                       </p>
                       <p className="mt-2 text-[10px] leading-snug text-muted-foreground sm:text-xs">
                         Faixa normal:
                         <br />
-                        {decisionReference.packageMode
-                          ? `${brl(decisionReference.low)} a ${brl(
-                              decisionReference.high,
-                            )}`
-                          : `${formatNormalizedPrice(
-                              decisionReference.low,
-                              decisionReference.baseUnit,
-                            )} a ${formatNormalizedPrice(
-                              decisionReference.high,
-                              decisionReference.baseUnit,
-                            )}`}
+                        {formatNormalizedPrice(
+                          decisionReference.low,
+                          decisionReference.baseUnit,
+                        )}{" "}
+                        a{" "}
+                        {formatNormalizedPrice(
+                          decisionReference.high,
+                          decisionReference.baseUnit,
+                        )}
                       </p>
                     </>
                   ) : (
@@ -2228,21 +2206,17 @@ export default function OffersPage() {
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-foreground">
                       Bom preço até{" "}
-                      {decisionReference.packageMode
-                        ? brl(decisionReference.central)
-                        : formatNormalizedPrice(
-                            decisionReference.central,
-                            decisionReference.baseUnit,
-                          )}
+                      {formatNormalizedPrice(
+                        decisionReference.central,
+                        decisionReference.baseUnit,
+                      )}
                     </p>
                     <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
                       Acima de{" "}
-                      {decisionReference.packageMode
-                        ? brl(decisionReference.waitAbove)
-                        : formatNormalizedPrice(
-                            decisionReference.waitAbove,
-                            decisionReference.baseUnit,
-                          )}
+                      {formatNormalizedPrice(
+                        decisionReference.waitAbove,
+                        decisionReference.baseUnit,
+                      )}
                       , vale esperar outra oferta se a compra puder aguardar.
                     </p>
                   </div>
@@ -2319,15 +2293,19 @@ export default function OffersPage() {
                         </div>
 
                         <div className="shrink-0 text-right">
-                          <p className="font-extrabold">{brl(reference.price)}</p>
-                          <p className="text-[10px] text-muted-foreground sm:text-xs">
-                            {reference.source} · {dateBr(reference.date)}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground sm:text-xs">
+                          <p className="font-extrabold">
                             {formatNormalizedPrice(
                               reference.normalized,
                               reference.baseUnit,
                             )}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground sm:text-xs">
+                            {reference.packageLabel
+                              ? `${reference.packageLabel} · ${brl(reference.price)}`
+                              : `Embalagem ${brl(reference.price)}`}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground sm:text-xs">
+                            {reference.source} · {dateBr(reference.date)}
                           </p>
                         </div>
 
