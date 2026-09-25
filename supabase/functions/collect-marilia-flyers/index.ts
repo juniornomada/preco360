@@ -742,7 +742,7 @@ async function collectConfianca(db:any, report:any[]){
 }
 
 
-const TAUSTE_BROWSER_UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+const TAUSTE_BROWSER_UA="Mozilla/5.0";
 const TAUSTE_ACCOUNT_ID="9D99E5AF8D6";
 
 function tausteNormalize(value:unknown){
@@ -759,21 +759,66 @@ function tausteCollectionHash(publication:any){
 }
 
 async function tausteResolvePublication(collectionHash:string,fullView:string){
-  const url=Deno.env.get("SUPABASE_URL");
-  const service=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if(!url||!service) throw new Error("Configuração Supabase indisponível");
-  const r=await fetch(url+"/functions/v1/tauste-flyer-source",{
-    method:"POST",
+  const token=btoa(TAUSTE_ACCOUNT_ID+"+"+collectionHash);
+  const authUrl=new URL("https://content-private.flipsnack.com/authorization");
+  authUrl.searchParams.set("hash",token);
+  authUrl.searchParams.set("domain","www.flipsnack.com");
+  const auth=await fetch(authUrl,{
     headers:{
-      "authorization":"Bearer "+service,
-      "content-type":"application/json",
+      "user-agent":TAUSTE_BROWSER_UA,
+      "accept":"application/json,*/*",
+      "referer":"https://www.flipsnack.com/taustesupermercado/",
+      "origin":"https://player.flipsnack.com",
     },
-    body:JSON.stringify({collection_hash:collectionHash,source_url:fullView}),
   });
-  const body=await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error("Fonte Tauste HTTP "+r.status+(body?.error?": "+body.error:""));
-  if(!Array.isArray(body?.pages)||!body.pages.length) throw new Error("Fonte Tauste não retornou páginas");
-  return body;
+  if(!auth.ok) throw new Error("Flipsnack authorization HTTP "+auth.status);
+  const authData=await auth.json();
+  const signature=String(authData?.signature?.[collectionHash]||"");
+  if(!signature) throw new Error("Flipsnack não forneceu assinatura para a publicação");
+
+  const signedBase="https://d3u72tnj701eui.cloudfront.net/"+TAUSTE_ACCOUNT_ID+"/collections/"+collectionHash+"/";
+  const dataResponse=await fetch(signedBase+"data.json?"+signature,{
+    headers:{
+      "user-agent":TAUSTE_BROWSER_UA,
+      "accept":"application/json,*/*",
+      "referer":"https://player.flipsnack.com/",
+    },
+  });
+  if(!dataResponse.ok) throw new Error("Flipsnack data.json HTTP "+dataResponse.status);
+  const data=await dataResponse.json();
+  const title=String(data?.properties?.title||"").trim();
+  if(!tausteNormalize(title).includes("marilia")) throw new Error("A publicação do Flipsnack não confirmou Marília");
+
+  const rawOrder=Array.isArray(data?.pages?.order)?data.pages.order:[];
+  const ids=rawOrder.flat().map((id:any)=>String(id||"").trim()).filter(Boolean);
+  if(!ids.length) throw new Error("A publicação Tauste não possui páginas");
+
+  const pages=ids.map((id:string,index:number)=>{
+    const page=data?.pages?.data?.[id]||{};
+    const sourceHash=String(page?.source?.hash||"").trim();
+    const sourcePage=Math.max(1,Number(page?.source?.page||0)+1);
+    if(!sourceHash) return null;
+    return {
+      id,
+      position:index+1,
+      source_hash:sourceHash,
+      source_page:sourcePage,
+      url:signedBase+"items/"+encodeURIComponent(sourceHash)+"/covers/page_"+sourcePage+"/original?"+signature,
+      type:String(page?.type||"jpg"),
+      width:Number(page?.width)||null,
+      height:Number(page?.height)||null,
+    };
+  }).filter(Boolean);
+
+  if(!pages.length) throw new Error("Fonte Tauste não retornou páginas");
+  return {
+    collection_hash:collectionHash,
+    title:title||"Ofertas Tauste Marília",
+    source_url:fullView,
+    updated_at:Number(data?.properties?.dateLastUpdate)||null,
+    page_count:pages.length,
+    pages,
+  };
 }
 
 async function taustePublications(){
