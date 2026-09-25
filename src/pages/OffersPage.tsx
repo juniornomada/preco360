@@ -2178,14 +2178,56 @@ export default function OffersPage() {
                 </div>
               </div>
 
+              {bestCurrentOffer && (
+                <div className="mt-2.5 rounded-2xl border-2 border-primary/55 bg-primary/[0.12] p-3 shadow-[0_0_24px_hsl(var(--primary)/0.08)]">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/20">
+                      <TrendingUp className="h-5 w-5 text-primary" />
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">
+                        Melhor compra agora
+                      </p>
+                      <div className="mt-0.5 flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-base font-extrabold sm:text-lg">
+                            {canonicalRetailerName(bestCurrentOffer.flyer?.retailer) ||
+                              bestCurrentOffer.flyer?.retailer ||
+                              "Supermercado"}
+                          </p>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">
+                            Se precisa comprar agora, esta é a opção mais barata entre as ofertas vigentes.
+                          </p>
+                        </div>
+
+                        <div className="shrink-0 text-right">
+                          <p className="text-xl font-black leading-none text-primary">
+                            {brl(bestCurrentOffer.candidate.price)}
+                          </p>
+                          {bestCurrentOffer.candidate.baseUnit !== "un" && (
+                            <p className="mt-1 text-[11px] font-bold text-primary/85">
+                              {formatNormalizedPrice(
+                                bestCurrentOffer.candidate.normalizedPrice,
+                                bestCurrentOffer.candidate.baseUnit,
+                              )}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {decisionReference && (
-                <div className="mt-2.5 flex items-start gap-2.5 rounded-2xl border border-primary/35 bg-primary/[0.06] p-2.5 sm:p-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/15">
-                    <TrendingUp className="h-5 w-5 text-primary" />
+                <div className="mt-2 flex items-start gap-2.5 rounded-2xl border border-border/80 bg-background/30 p-2.5 sm:p-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                    <TrendingUp className="h-4 w-4 text-primary" />
                   </span>
                   <div className="min-w-0">
-                    <p className="font-extrabold text-primary">
-                      Bom preço se encontrar até{" "}
+                    <p className="text-sm font-bold text-foreground">
+                      Bom preço até{" "}
                       {decisionReference.packageMode
                         ? brl(decisionReference.central)
                         : formatNormalizedPrice(
@@ -2193,15 +2235,15 @@ export default function OffersPage() {
                             decisionReference.baseUnit,
                           )}
                     </p>
-                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                      Abaixo disso, vale comprar. Acima de{" "}
+                    <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                      Acima de{" "}
                       {decisionReference.packageMode
                         ? brl(decisionReference.waitAbove)
                         : formatNormalizedPrice(
                             decisionReference.waitAbove,
                             decisionReference.baseUnit,
                           )}
-                      , vale esperar oferta se a compra não for urgente.
+                      , vale esperar outra oferta se a compra puder aguardar.
                     </p>
                   </div>
                 </div>
@@ -2223,7 +2265,7 @@ export default function OffersPage() {
                     const status =
                       index === 0
                         ? {
-                            label: "melhor referência",
+                            label: "melhor referência histórica",
                             className:
                               "border-primary/35 bg-primary/10 text-primary",
                             Icon: Trophy,
@@ -2487,8 +2529,8 @@ export default function OffersPage() {
               ? hasSearch && isFamilyBest
               : hasSearch && index === 0;
             const bestLabel = isBroadFamilySearch
-              ? `Melhor oportunidade · ${familyLabel(entry.family)}`
-              : "Melhor oportunidade encontrada";
+              ? `Melhor compra agora · ${familyLabel(entry.family)}`
+              : "Melhor compra agora";
 
             return (
               <Card
