@@ -89,6 +89,21 @@ class RouteErrorBoundary extends Component<
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("Route render error", error, info);
+
+    void fetch("/api/client-error", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({
+        message: error?.message ?? String(error),
+        name: error?.name ?? "Error",
+        stack: error?.stack ?? null,
+        componentStack: info.componentStack ?? null,
+        path: window.location.pathname,
+        href: window.location.href,
+        userAgent: navigator.userAgent,
+      }),
+    }).catch(() => {});
   }
 
   render() {
