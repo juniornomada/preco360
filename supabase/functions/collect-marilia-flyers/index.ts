@@ -166,6 +166,188 @@ async function collectAtacadao(db:any, report:any[], onlyTitle=""){
 
 async function fetchSafe(url:string,method="GET"){const r=await fetch(url,{method,redirect:"follow",headers:{"user-agent":UA,"accept":"text/html,application/pdf,image/*,*/*"}});return r}
 function candidates(html:string,base:string,retailer:string){const out=new Map<string,string>();const re=/(?:href|src)\s*=\s*["']([^"'#]+)["']/gi;for(const m of html.matchAll(re)){const u=abs(m[1],base);if(!u)continue;const l=u.toLowerCase();const isPdf=/\.pdf(?:$|\?)/.test(l);const isImage=/\.(?:jpe?g|png|webp)(?:$|\?)/.test(l);const flyerHint=/(folheto|encarte|tabloid|oferta|catalog|flipbook|publication)/.test(l);const isPublication=/flipsnack\.com\/(?!taustesupermercado\/?$)[^?#]+/.test(l);if(isPdf||(isImage&&flyerHint)||isPublication)out.set(clean(u),u)}if(retailer==="Tauste"){for(const m of html.matchAll(/https?:\\?\/\\?\/[^\"'<> ]*flipsnack[^\"'<> ]+/gi)){const u=m[0].replaceAll("\\/","/");out.set(clean(u),u)}}return [...out.values()]}
+
+async function collectMaxAtacadista(db:any, report:any[], onlyTitle=""){
+  const bridge="https://preco360.vercel.app/api/max-flyers";
+  const sourcePage="https://www.maxatacadista.com.br/lojas/";
+  let payload:any;
+  try{
+    const r=await fetch(bridge,{headers:{"accept":"application/json","user-agent":UA}});
+    if(!r.ok) throw new Error("Vercel bridge HTTP "+r.status);
+    payload=await r.json();
+  }catch(e){
+    report.push({retailer:"Max Atacadista",endpoint:sourcePage,result:"erro",error:String(e)});
+    return;
+  }
+
+  let flyers=Array.isArray(payload?.flyers)?payload.flyers:[];
+  if(onlyTitle) flyers=flyers.filter((f:any)=>String(f?.title||"").toLowerCase()===onlyTitle.toLowerCase());
+  let imported=0,unchanged=0,failed=0;
+
+  for(const flyer of flyers){
+    const id=String(flyer?.id||"").trim();
+    const pages=Array.isArray(flyer?.pages)?flyer.pages.filter((p:any)=>p?.url):[];
+    if(!id||!pages.length) continue;
+
+    const sourceKey="max:"+id;
+    const now=new Date().toISOString();
+    const title=String(flyer?.title||("Encarte "+id)).trim();
+    const unitNames=(Array.isArray(flyer?.stores)?flyer.stores:[]).map((s:any)=>String(s?.name||"").trim()).filter(Boolean);
+    const {data:known}=await db.from("flyer_source_registry").select("*")
+      .eq("user_id",USER_ID).eq("retailer","Max Atacadista").eq("city","Marília").eq("source_key",sourceKey).maybeSingle();
+
+    if(known && (known.status==="processed"||known.status==="expired")){
+      await db.from("flyer_source_registry").update({last_seen_at:now,status:known.status}).eq("id",known.id);
+      report.push({
+        retailer:"Max Atacadista",endpoint:sourcePage,title,
+        validity:{from:known.valid_from||null,to:known.valid_to||null},
+        result:known.status==="expired"?"expirado já conhecido":"já conhecido antes do download",
+        files:0,offers:0,units:unitNames,
+      });
+      unchanged++;
+      continue;
+    }
+
+    const downloaded:any[]=[];
+    let pageFailed=false;
+    for(let i=0;i<pages.length;i++){
+      const page=pages[i];
+      try{
+        const r=await fetchSafe(String(page.url));
+        if(!r.ok) throw new Error("HTTP "+r.status);
+        const ct=r.headers.get("content-type")||"image/jpeg";
+        const bytes=new Uint8Array(await r.arrayBuffer());
+        if(!bytes.length) throw new Error("imagem vazia");
+        downloaded.push({index:i+1,url:String(page.url),bytes,ct,hash:await sha(bytes),filename:String(page.filename||("page-"+(i+1)+".jpeg"))});
+      }catch(e){
+        pageFailed=true;
+        failed++;
+        report.push({retailer:"Max Atacadista",endpoint:sourcePage,title,result:"erro",error:"Página "+(i+1)+": "+String(e),files:0,offers:0});
+        break;
+      }
+    }
+    if(pageFailed||!downloaded.length) continue;
+
+    const manifest=downloaded.map(p=>p.hash).join("|");
+    const combinedHash=await sha(new TextEncoder().encode(manifest));
+    const [{data:saved},{data:jobs}]=await Promise.all([
+      db.from("flyers").select("id").eq("user_id",USER_ID).eq("file_hash",combinedHash).limit(1),
+      db.from("flyer_import_jobs").select("id,status,result").eq("user_id",USER_ID).eq("file_hash",combinedHash).in("status",["queued","processing","refining","completed"]).order("created_at",{ascending:false}).limit(1),
+    ]);
+
+    if(saved?.length){
+      const flyerId=saved[0].id;
+      const {count:offerCount}=await db.from("flyer_items").select("id",{count:"exact",head:true}).eq("flyer_id",flyerId);
+      await writeRegistry(db,known,{
+        user_id:USER_ID,retailer:"Max Atacadista",city:"Marília",source_key:sourceKey,
+        source_url:pages[0].url,source_title:title,file_hash:combinedHash,last_seen_at:now,last_downloaded_at:now,
+        last_processed_at:known?.last_processed_at||now,status:"processed",last_error:null,
+        metadata_fingerprint:[id,pages.length,...unitNames].join("|"),
+      });
+      report.push({retailer:"Max Atacadista",endpoint:sourcePage,title,result:"duplicado pelo hash após download",files:downloaded.length,offers:offerCount||0,units:unitNames});
+      unchanged++;
+      continue;
+    }
+
+    if(jobs?.length){
+      const existingJob=jobs[0];
+      if(existingJob.status==="completed"){
+        try{
+          const fr=await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/finalize-flyer-job`,{
+            method:"POST",
+            headers:{authorization:`Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,"content-type":"application/json"},
+            body:JSON.stringify({job_id:existingJob.id}),
+          });
+          if(fr.ok){
+            const fin=await fr.json().catch(()=>({}));
+            await writeRegistry(db,known,{
+              user_id:USER_ID,retailer:"Max Atacadista",city:"Marília",source_key:sourceKey,
+              source_url:pages[0].url,source_title:title,file_hash:combinedHash,last_seen_at:now,last_downloaded_at:now,
+              last_processed_at:now,status:"processed",last_error:null,
+              valid_from:fin?.valid_from||known?.valid_from||null,valid_to:fin?.valid_to||known?.valid_to||null,
+              metadata_fingerprint:[id,pages.length,...unitNames].join("|"),
+            });
+            report.push({retailer:"Max Atacadista",endpoint:sourcePage,title,result:"processado recuperado",files:downloaded.length,offers:fin?.offers_saved||0,job_id:existingJob.id,units:unitNames});
+            imported++;
+            continue;
+          }else{
+            const body=await fr.json().catch(()=>({}));
+            if(body?.error==="FLYER_EXPIRED"){
+              await writeRegistry(db,known,{
+                user_id:USER_ID,retailer:"Max Atacadista",city:"Marília",source_key:sourceKey,
+                source_url:pages[0].url,source_title:title,file_hash:combinedHash,last_seen_at:now,last_downloaded_at:now,
+                status:"expired",valid_to:body?.valid_to||null,last_error:null,
+                metadata_fingerprint:[id,pages.length,...unitNames].join("|"),
+              });
+              report.push({retailer:"Max Atacadista",endpoint:sourcePage,title,result:"expirado",files:downloaded.length,offers:0,job_id:existingJob.id,units:unitNames});
+              unchanged++;
+              continue;
+            }
+          }
+        }catch{}
+      }
+      report.push({retailer:"Max Atacadista",endpoint:sourcePage,title,result:"já em processamento",files:0,offers:0,job_id:existingJob.id,status:existingJob.status,units:unitNames});
+      unchanged++;
+      continue;
+    }
+
+    const jobId=crypto.randomUUID();
+    const sourceFiles:any[]=[];
+    let uploadFailed=false;
+    for(const page of downloaded){
+      const safeName=page.filename.replace(/[^a-zA-Z0-9._-]+/g,"-").replace(/-+/g,"-").slice(-120)||("page-"+page.index+".jpeg");
+      const path=`${USER_ID}/imports/${jobId}/page-${String(page.index).padStart(3,"0")}-${safeName}`;
+      const {error}=await db.storage.from("flyers").upload(path,page.bytes,{contentType:page.ct||"image/jpeg",upsert:false});
+      if(error){
+        uploadFailed=true;
+        failed++;
+        report.push({retailer:"Max Atacadista",endpoint:sourcePage,title,result:"erro",error:"Upload página "+page.index+": "+error.message,files:0,offers:0});
+        break;
+      }
+      sourceFiles.push({path,name:page.filename,mime_type:page.ct||"image/jpeg",size:page.bytes.length});
+    }
+    if(uploadFailed) continue;
+
+    const initialResult={auto_import:true,source_title:title,source_url:pages[0].url,source_key:sourceKey,city:"Marília",official_store_ids:(flyer.stores||[]).map((s:any)=>s.id)};
+    const {data:job,error:jobErr}=await db.from("flyer_import_jobs").insert({
+      id:jobId,user_id:USER_ID,
+      source_file_path:sourceFiles[0].path,
+      source_file_name:`Max Atacadista · ${title} · ${sourceFiles.length} imagem(ns)`,
+      source_files:sourceFiles,mime_type:sourceFiles[0].mime_type,
+      file_hash:combinedHash,page_count:sourceFiles.length,status:"queued",
+      progress_current:0,progress_total:sourceFiles.length,progress_label:"Arquivo recebido. Aguardando processamento…",
+      retailer:"Max Atacadista",valid_from:null,valid_to:null,result:initialResult,
+    }).select("id").single();
+
+    if(jobErr){
+      failed++;
+      report.push({retailer:"Max Atacadista",endpoint:sourcePage,title,result:"erro",error:jobErr.message,files:sourceFiles.length,offers:0});
+      continue;
+    }
+
+    await writeRegistry(db,known,{
+      user_id:USER_ID,retailer:"Max Atacadista",city:"Marília",source_key:sourceKey,
+      source_url:pages[0].url,source_title:title,file_hash:combinedHash,last_seen_at:now,last_downloaded_at:now,
+      status:"downloaded",last_error:null,metadata_fingerprint:[id,pages.length,...unitNames].join("|"),
+    });
+
+    const pr=await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/process-flyer-job`,{
+      method:"POST",
+      headers:{authorization:`Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,"content-type":"application/json"},
+      body:JSON.stringify({job_id:job.id,mode:"start"}),
+    });
+    if(!pr.ok){
+      failed++;
+      report.push({retailer:"Max Atacadista",endpoint:sourcePage,title,result:"erro ao iniciar processamento",files:sourceFiles.length,offers:0,job_id:job.id,error:"worker HTTP "+pr.status,units:unitNames});
+      continue;
+    }
+    imported++;
+    report.push({retailer:"Max Atacadista",endpoint:sourcePage,title,result:"novo enviado para processamento",files:sourceFiles.length,pages:sourceFiles.length,offers:0,job_id:job.id,units:unitNames});
+  }
+
+  report.push({retailer:"Max Atacadista",endpoint:sourcePage,result:"resumo",found:flyers.length,imported,unchanged,failed});
+}
+
 Deno.serve(async(req)=>{
  if(req.method==="OPTIONS") return new Response("ok",{headers:corsHeaders});
  if(req.method!=="POST")return new Response("POST only",{status:405,headers:corsHeaders});
@@ -179,6 +361,10 @@ Deno.serve(async(req)=>{
   if(requestedRetailer && src.retailer!==requestedRetailer) continue;
   if(src.retailer==="Atacadão"){
     await collectAtacadao(db,report,requestedTitle);
+    continue;
+  }
+  if(src.retailer==="Max Atacadista"){
+    await collectMaxAtacadista(db,report,requestedTitle);
     continue;
   }
   let page:any=null, used="", err="";
