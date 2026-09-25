@@ -743,6 +743,7 @@ async function collectConfianca(db:any, report:any[]){
 
 
 const TAUSTE_BROWSER_UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+const TAUSTE_ACCOUNT_ID="9D99E5AF8D6";
 
 function tausteNormalize(value:unknown){
   return String(value??"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/\s+/g," ").trim();
@@ -840,7 +841,7 @@ async function tausteReaderPages(collectionHash:string,fullView:string){
   return {pages,title:title||"Ofertas Tauste Marília",updated_at:data?.properties?.dateLastUpdate||null};
 }
 
-async function collectTauste(db:any, report:any[], onlyTitle=""){
+async function collectTauste(db:any, report:any[], onlyTitle="", manifest:any=null){
   const sourcePage="https://www.flipsnack.com/taustesupermercado/";
   let publications:any[]=[];
   try{
@@ -904,12 +905,39 @@ async function collectTauste(db:any, report:any[], onlyTitle=""){
     let reader:any;
     try{
       if(!collectionHash) throw new Error("Publicação Tauste sem identificador estável");
-      const resolved=await tausteResolvePublication(collectionHash,fullView);
-      const pages=resolved.pages.map((page:any,index:number)=>({
-        ...page,
-        index:Number(page?.position)||index+1,
-      })).filter((page:any)=>page?.url);
-      reader={pages,title:String(resolved?.title||sourceTitle),updated_at:resolved?.updated_at||null};
+
+      const manifestHash=String(manifest?.collection_hash||"").trim();
+      if(manifest && manifestHash===collectionHash){
+        const manifestSource=String(manifest?.source_url||"").trim();
+        if(manifestSource && clean(manifestSource)!==clean(fullView)){
+          throw new Error("Manifesto Tauste não corresponde à publicação oficial");
+        }
+        const rawPages=Array.isArray(manifest?.pages)?manifest.pages:[];
+        if(!rawPages.length||rawPages.length>20){
+          throw new Error("Manifesto Tauste com quantidade de páginas inválida");
+        }
+        const expectedPath="/"+TAUSTE_ACCOUNT_ID+"/collections/"+collectionHash+"/covers/";
+        const pages=rawPages.map((page:any,index:number)=>{
+          const url=String(page?.url||"").trim();
+          let parsed:URL;
+          try{parsed=new URL(url)}catch{throw new Error("URL de página Tauste inválida")}
+          if(parsed.protocol!=="https:" || parsed.hostname!=="d3u72tnj701eui.cloudfront.net" || !parsed.pathname.startsWith(expectedPath)){
+            throw new Error("Página Tauste fora da origem oficial esperada");
+          }
+          if(!parsed.searchParams.has("Policy") || !parsed.searchParams.has("Signature") || !parsed.searchParams.has("Key-Pair-Id")){
+            throw new Error("Página Tauste sem assinatura oficial temporária");
+          }
+          return {...page,url,index:Number(page?.position)||index+1};
+        });
+        reader={pages,title:sourceTitle,updated_at:manifest?.updated_at||null};
+      }else{
+        const resolved=await tausteResolvePublication(collectionHash,fullView);
+        const pages=resolved.pages.map((page:any,index:number)=>({
+          ...page,
+          index:Number(page?.position)||index+1,
+        })).filter((page:any)=>page?.url);
+        reader={pages,title:String(resolved?.title||sourceTitle),updated_at:resolved?.updated_at||null};
+      }
     }catch(e){
       failed++;
       await writeRegistry(db,known,{
@@ -1082,7 +1110,7 @@ Deno.serve(async(req)=>{
     continue;
   }
   if(src.retailer==="Tauste"){
-    await collectTauste(db,report,requestedTitle);
+    await collectTauste(db,report,requestedTitle,body?.tauste_manifest??null);
     continue;
   }
   if(src.retailer==="Kawakami"){
