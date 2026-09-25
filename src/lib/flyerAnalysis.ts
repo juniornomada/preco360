@@ -308,8 +308,38 @@ function explicitPackCount(value: string) {
   return sizeThenCount ? Number(sizeThenCount[1]) : null;
 }
 
+function normalizedOfferNotes(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((item) => String(item ?? "").trim())
+            .filter(Boolean);
+        }
+      } catch {
+        // Keep the original text as a single note.
+      }
+    }
+
+    return [trimmed];
+  }
+
+  return [];
+}
+
 function packageUnitPrice(offerNotes: string[] | null | undefined) {
-  const raw = (offerNotes ?? []).join(" ");
+  const raw = normalizedOfferNotes(offerNotes).join(" ");
   const match = raw.match(
     /(?:1\s*)?un(?:idade)?\s+(?:sai|saem)\s+por\s*:?[ ]*r\$\s*(\d+(?:[.,]\d{2}))/i,
   );
@@ -349,7 +379,7 @@ export function offerPackageInfo(
     return { quantity: 1, unit: "un", baseUnit: "un", baseQuantity: 1 };
   }
 
-  const combined = [rawName, ...(offerNotes ?? [])].join(" ");
+  const combined = [rawName, ...normalizedOfferNotes(offerNotes)].join(" ");
   let pkg =
     inferPackage(combined) ??
     packageInfoFromQuantity(packageQuantity, packageUnit);
