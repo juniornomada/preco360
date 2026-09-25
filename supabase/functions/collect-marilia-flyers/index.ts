@@ -761,7 +761,7 @@ async function tausteSourceFlyers(){
   const url=Deno.env.get("SUPABASE_URL");
   const service=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if(!url||!service) throw new Error("Configuração Supabase indisponível");
-  const r=await fetch(url+"/functions/v1/tauste-flyer-source",{
+  const r=await fetch(url+"/functions/v1/probe-tauste",{
     method:"POST",
     headers:{
       "authorization":"Bearer "+service,
