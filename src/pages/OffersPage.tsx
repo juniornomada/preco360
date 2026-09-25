@@ -1848,7 +1848,7 @@ export default function OffersPage() {
         !isLoading &&
         !error &&
         !loadingStoreReferences &&
-        (bestCurrentOffer || bestStoreReference) && (
+        (bestCurrentOffer || bestStoreReference || latestReceiptReference || reference360) && (
           <Card className="mb-4 border-primary/20">
             <CardContent className="p-4">
               <div className="mb-3">
@@ -1857,23 +1857,18 @@ export default function OffersPage() {
                 </p>
                 <p className="mt-0.5 text-sm font-bold">
                   {bestCurrentOffer
-                    ? bestStoreReference
-                      ? "Oferta vigente x preço de gôndola"
-                      : "Melhor oferta vigente encontrada"
-                    : "Sem oferta vigente — usando sua referência de gôndola"}
+                    ? "Oferta vigente + seu histórico"
+                    : "Sem oferta vigente — usando seu histórico de preços"}
                 </p>
-                {!bestCurrentOffer && bestStoreReference && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Nenhuma rede pesquisada tem oferta vigente para este produto agora.
-                  </p>
-                )}
+                {!bestCurrentOffer &&
+                  (bestStoreReference || latestReceiptReference || reference360) && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Nenhuma rede pesquisada tem oferta vigente para este produto agora. Use as referências abaixo para decidir se vale comprar ou esperar.
+                    </p>
+                  )}
               </div>
 
-              <div className={`grid gap-2 ${
-                bestCurrentOffer && bestStoreReference
-                  ? "grid-cols-2"
-                  : "grid-cols-1"
-              }`}>
+              <div className="grid gap-2 sm:grid-cols-3">
                 {bestCurrentOffer && (
                   <div
                     className={`rounded-xl border p-3 ${
@@ -1898,9 +1893,11 @@ export default function OffersPage() {
                         ? ` ${packageLabel(bestCurrentOffer.item)}`
                         : ""}
                     </p>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      {canonicalRetailerName(bestCurrentOffer.flyer.retailer)}
-                    </p>
+                    <RetailerLogo
+                      retailer={bestCurrentOffer.flyer.retailer}
+                      className="mt-1"
+                      showName
+                    />
                     <p className="mt-2 text-lg font-extrabold">
                       {brl(bestCurrentOffer.candidate.price)}
                     </p>
@@ -1935,10 +1932,12 @@ export default function OffersPage() {
                       {bestStoreReference.products?.name ||
                         bestStoreReference.raw_name}
                     </p>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      {bestStoreReference.supermarket} ·{" "}
-                      {dateBr(bestStoreReference.observed_date)}
-                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <RetailerLogo retailer={bestStoreReference.supermarket} showName />
+                      <span className="text-[10px] text-muted-foreground">
+                        · {dateBr(bestStoreReference.observed_date)}
+                      </span>
+                    </div>
                     <p className="mt-2 text-lg font-extrabold">
                       {brl(Number(bestStoreReference.retail_price))}
                     </p>
@@ -1953,7 +1952,89 @@ export default function OffersPage() {
                       )}
                   </div>
                 )}
+
+                {latestReceiptReference && (
+                  <div className="rounded-xl border border-border bg-muted/30 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                        Cupom fiscal
+                      </p>
+                      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-bold text-muted-foreground">
+                        Pago antes
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs font-bold">
+                      {productById.get(latestReceiptReference.product_id)?.name ??
+                        "Preço já pago"}
+                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <RetailerLogo
+                        retailer={latestReceiptReference.supermarket}
+                        showName
+                      />
+                      <span className="text-[10px] text-muted-foreground">
+                        · {dateBr(latestReceiptReference.date)}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-lg font-extrabold">
+                      {brl(Number(latestReceiptReference.price))}
+                    </p>
+                    {latestReceiptReferenceValue && (
+                      <p className="text-[10px] font-semibold text-primary">
+                        {formatNormalizedPrice(
+                          latestReceiptReferenceValue.value,
+                          latestReceiptReferenceValue.baseUnit,
+                        )}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
+
+              {reference360 && (
+                <div className="mt-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">
+                        Referência 360
+                      </p>
+                      <p className="mt-0.5 text-xl font-extrabold text-primary">
+                        {formatNormalizedPrice(
+                          reference360.value,
+                          reference360.baseUnit,
+                        )}
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-primary/20 bg-background px-2 py-1 text-[10px] font-bold text-muted-foreground">
+                      {reference360.count} registro(s)
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    Calculada pela mediana dos registros comparáveis mais
+                    recentes: <strong>{reference360.receiptCount}</strong> de
+                    cupom fiscal e <strong>{reference360.shelfCount}</strong>{" "}
+                    de gôndola.
+                  </p>
+                  {currentVsReference &&
+                    Math.abs(currentVsReference.diffPct) >= 0.5 && (
+                      <p className="mt-1 text-[11px] font-medium text-foreground/80">
+                        A melhor oferta vigente está{" "}
+                        <strong className="text-primary">
+                          {Math.abs(currentVsReference.diffPct).toLocaleString(
+                            "pt-BR",
+                            {
+                              minimumFractionDigits: 1,
+                              maximumFractionDigits: 1,
+                            },
+                          )}
+                          %
+                        </strong>{" "}
+                        {currentVsReference.diffPct < 0 ? "abaixo" : "acima"} da
+                        sua referência 360 por unidade-base.
+                      </p>
+                    )}
+                </div>
+              )}
 
               {currentVsStore && Math.abs(currentVsStore.diffPct) >= 0.5 && (
                 <p className="mt-2 text-[11px] text-muted-foreground">
