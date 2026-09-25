@@ -17,12 +17,12 @@ function normalize(value: unknown) {
 }
 
 function collectionHash(publication: any) {
-  const direct = String(publication?.directLink ?? "");
-  const directMatch = direct.match(/-([a-z0-9_-]{8,})\.html(?:$|[?#])/i);
-  if (directMatch?.[1]) return directMatch[1];
-
   const cover = String(publication?.coverImgSrc ?? "");
-  return cover.match(/\/collections\/([^/]+)\//i)?.[1] ?? "";
+  const coverMatch = cover.match(/\/collections\/([^/]+)\//i);
+  if (coverMatch?.[1]) return coverMatch[1];
+
+  const direct = String(publication?.directLink ?? "");
+  return direct.match(/-([a-z0-9]{10})\.html(?:$|[?#])/i)?.[1] ?? "";
 }
 
 function fullViewUrl(publication: any) {
