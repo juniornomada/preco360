@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import ProductSearchBar from "@/components/ProductSearchBar";
+import RetailerLogo from "@/components/RetailerLogo";
 import {
   normalizeProductSearchText,
   productMatchesSearch,
@@ -506,9 +507,11 @@ export default function StorePriceHistoryPage() {
                   </div>
 
                   <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground/85">
-                    <span className="font-medium">
-                      {group.latest.supermarket}
-                    </span>
+                    <RetailerLogo
+                      retailer={group.latest.supermarket}
+                      showName
+                      nameClassName="font-medium text-foreground/80"
+                    />
                     <span>·</span>
                     <span>{dateBr(group.latest.observed_date)}</span>
                   </div>
