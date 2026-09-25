@@ -12,6 +12,7 @@ import {
   productSearchRequestVariants,
 } from "@/lib/productSearch";
 import ProductVisual from "@/components/ProductVisual";
+import RetailerLogo from "@/components/RetailerLogo";
 import {
   BEEF_SEMANTIC_TOKENS,
   FISH_SEMANTIC_TOKENS,
@@ -123,6 +124,12 @@ type PurchasePriceRow = {
   price: number | string;
   date?: string | null;
   supermarket?: string | null;
+  source?: string | null;
+  normalized_price?: number | string | null;
+  base_unit?: "kg" | "l" | "un" | null;
+  package_quantity?: number | string | null;
+  package_unit?: string | null;
+  receipt_text?: string | null;
 };
 
 type StoreReferenceRow = {
@@ -182,6 +189,78 @@ const verdictUi = {
 
 const brl = (value: number) =>
   value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+type HistoricalReferenceValue = {
+  value: number;
+  baseUnit: "kg" | "l" | "un";
+};
+
+function medianValue(values: number[]) {
+  const sorted = values
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function purchaseReferenceValue(
+  row: PurchasePriceRow,
+  product?: ProductForMatch | null,
+): HistoricalReferenceValue | null {
+  const normalized = Number(row.normalized_price);
+  if (
+    Number.isFinite(normalized) &&
+    normalized > 0 &&
+    (row.base_unit === "kg" || row.base_unit === "l" || row.base_unit === "un")
+  ) {
+    return { value: normalized, baseUnit: row.base_unit };
+  }
+
+  const price = Number(row.price);
+  if (!Number.isFinite(price) || price <= 0) return null;
+
+  const rowPackage =
+    Number(row.package_quantity) > 0 && row.package_unit
+      ? inferPackage(`${row.package_quantity}${row.package_unit}`)
+      : null;
+  const productPackage =
+    product && Number(product.package_size) > 0 && product.unit
+      ? inferPackage(`${product.package_size}${product.unit}`)
+      : product?.name
+        ? inferPackage(product.name)
+        : null;
+  const pkg = rowPackage ?? productPackage;
+  if (!pkg) return null;
+
+  return normalizedUnitPrice(price, pkg);
+}
+
+function storeReferenceValue(
+  row: StoreReferenceRow,
+): HistoricalReferenceValue | null {
+  const normalized = Number(row.normalized_retail_price);
+  if (
+    Number.isFinite(normalized) &&
+    normalized > 0 &&
+    (row.base_unit === "kg" || row.base_unit === "l" || row.base_unit === "un")
+  ) {
+    return { value: normalized, baseUnit: row.base_unit };
+  }
+
+  const price = Number(row.retail_price);
+  if (!Number.isFinite(price) || price <= 0) return null;
+
+  const pkg =
+    Number(row.package_quantity) > 0 && row.package_unit
+      ? inferPackage(`${row.package_quantity}${row.package_unit}`)
+      : inferPackage(row.raw_name);
+  if (!pkg) return null;
+
+  return normalizedUnitPrice(price, pkg);
+}
 
 function localDateKey(date = new Date()) {
   const year = date.getFullYear();
