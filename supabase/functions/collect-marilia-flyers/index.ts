@@ -6,7 +6,7 @@ const SOURCES = [
   { retailer:"Atacadão", urls:["https://www.atacadao.com.br/loja/marilia"], city:"Marília" },
   { retailer:"Max Atacadista", urls:["https://www.maxatacadista.com.br/lojas/","https://www.maxatacadista.com.br/"], city:"Marília" },
   { retailer:"Kawakami", urls:["https://institucional.kawakami.com.br/oferta/marilia","https://institucional.kawakami.com.br/ofertas/marilia","https://institucional.kawakami.com.br/ofertas"], city:"Marília" },
-  { retailer:"Confiança", urls:["https://www.clienteconfianca.com.br/tabloide-confianca/marilia","https://www.clienteconfianca.com.br/tabloide/marilia","https://www.clienteconfianca.com.br/ofertas"], city:"Marília" },
+  { retailer:"Confiança", urls:["https://clienteconfianca.com.br/ofertas-marilia.html","https://www.clienteconfianca.com.br/ofertas.html"], city:"Marília" },
   { retailer:"Tauste", urls:["https://institucional.tauste.com.br/ofertas","https://www.flipsnack.com/taustesupermercado/"], city:"Marília" },
 ] as const;
 const USER_ID="e596fdb9-5827-438a-a01a-f452822ad757";
@@ -543,6 +543,190 @@ async function collectKawakami(db:any, report:any[]){
   report.push({retailer:"Kawakami",endpoint:used,result:"resumo",found:1,imported:1,unchanged:0,failed:0});
 }
 
+
+function confiancaPdfLinks(html:string,base:string){
+  const links:string[]=[];
+  for(const match of html.matchAll(/href\s*=\s*["']([^"']+\.pdf(?:\?[^"']*)?)["']/gi)){
+    const url=abs(match[1].replace(/&amp;/g,"&"),base);
+    if(url && /clienteconfianca\.com\.br/i.test(url) && !links.includes(url)) links.push(url);
+  }
+  return links;
+}
+
+async function collectConfianca(db:any, report:any[]){
+  const sourcePage="https://clienteconfianca.com.br/ofertas-marilia.html";
+  let html="",used=sourcePage;
+  try{
+    const r=await fetchSafe(sourcePage);
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    html=await r.text();
+    used=r.url;
+  }catch(e){
+    report.push({retailer:"Confiança",endpoint:sourcePage,result:"erro",error:String(e)});
+    return;
+  }
+
+  const plain=textOnly(html);
+  if(!/Mar[ií]lia/i.test(plain) && !/Ofertas Confian[cç]a\s*-\s*Mar[ií]lia/i.test(html)){
+    report.push({retailer:"Confiança",endpoint:used,result:"erro",error:"A página oficial não confirmou Marília"});
+    return;
+  }
+
+  const pdfs=confiancaPdfLinks(html,used);
+  if(!pdfs.length){
+    report.push({retailer:"Confiança",endpoint:used,result:"sem asset oficial obtível com segurança",files:0,offers:0});
+    report.push({retailer:"Confiança",endpoint:used,result:"resumo",found:0,imported:0,unchanged:0,failed:0});
+    return;
+  }
+
+  let imported=0,unchanged=0,failed=0;
+  for(const pdfUrl of pdfs){
+    const canonical=clean(pdfUrl);
+    const filename=decodeURIComponent(new URL(pdfUrl).pathname.split("/").pop()||"tabloide.pdf");
+    const sourceKey="confianca:marilia:"+canonical;
+    const title="Ofertas Marília";
+    const now=new Date().toISOString();
+
+    const {data:known}=await db.from("flyer_source_registry").select("*")
+      .eq("user_id",USER_ID).eq("retailer","Confiança").eq("city","Marília").eq("source_key",sourceKey).maybeSingle();
+
+    if((known?.status==="processed"||known?.status==="unchanged"||known?.status==="expired") && known?.file_hash){
+      await db.from("flyer_source_registry").update({last_seen_at:now,status:known.status==="unchanged"?"processed":known.status}).eq("id",known.id);
+      report.push({
+        retailer:"Confiança",endpoint:used,title,
+        validity:{from:known.valid_from||null,to:known.valid_to||null},
+        result:known.status==="expired"?"expirado já conhecido":"já conhecido antes do download",
+        files:0,offers:0,
+      });
+      unchanged++;
+      continue;
+    }
+
+    let response:Response;
+    try{response=await fetchSafe(pdfUrl)}catch(e){
+      failed++;
+      await writeRegistry(db,known,{
+        user_id:USER_ID,retailer:"Confiança",city:"Marília",source_key:sourceKey,source_url:canonical,source_title:title,
+        last_seen_at:now,status:"failed",last_error:String(e),
+      });
+      report.push({retailer:"Confiança",endpoint:used,title,result:"erro",error:String(e),files:0,offers:0});
+      continue;
+    }
+    if(!response.ok){
+      failed++;
+      report.push({retailer:"Confiança",endpoint:used,title,result:"erro",error:"PDF HTTP "+response.status,files:0,offers:0});
+      continue;
+    }
+
+    const ct=response.headers.get("content-type")||"application/pdf";
+    const bytes=new Uint8Array(await response.arrayBuffer());
+    if(!bytes.length || (!/pdf/i.test(ct) && !/\.pdf(?:\?|$)/i.test(pdfUrl))){
+      failed++;
+      report.push({retailer:"Confiança",endpoint:used,title,result:"erro",error:"Arquivo oficial não é PDF válido",files:0,offers:0});
+      continue;
+    }
+
+    const hash=await sha(bytes);
+    const [{data:saved},{data:jobs}]=await Promise.all([
+      db.from("flyers").select("id,valid_from,valid_to").eq("user_id",USER_ID).eq("file_hash",hash).limit(1),
+      db.from("flyer_import_jobs").select("id,status,result,valid_from,valid_to").eq("user_id",USER_ID).eq("file_hash",hash)
+        .in("status",["queued","processing","refining","completed"]).order("created_at",{ascending:false}).limit(1),
+    ]);
+
+    if(saved?.length){
+      const flyer=saved[0];
+      const {count}=await db.from("flyer_items").select("id",{count:"exact",head:true}).eq("flyer_id",flyer.id);
+      await writeRegistry(db,known,{
+        user_id:USER_ID,retailer:"Confiança",city:"Marília",source_key:sourceKey,source_url:canonical,source_title:title,
+        valid_from:flyer.valid_from||null,valid_to:flyer.valid_to||null,file_hash:hash,last_seen_at:now,last_downloaded_at:now,
+        last_processed_at:now,status:"processed",last_error:null,
+      });
+      report.push({retailer:"Confiança",endpoint:used,title,validity:{from:flyer.valid_from||null,to:flyer.valid_to||null},result:"duplicado pelo hash após download",files:1,offers:count||0});
+      unchanged++;
+      continue;
+    }
+
+    if(jobs?.length){
+      const existing=jobs[0];
+      if(existing.status==="completed"){
+        const fr=await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/finalize-flyer-job`,{
+          method:"POST",
+          headers:{authorization:`Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,"content-type":"application/json"},
+          body:JSON.stringify({job_id:existing.id}),
+        });
+        const body=await fr.json().catch(()=>({}));
+        if(fr.ok){
+          await writeRegistry(db,known,{
+            user_id:USER_ID,retailer:"Confiança",city:"Marília",source_key:sourceKey,source_url:canonical,source_title:title,
+            valid_from:body?.valid_from||existing.valid_from||null,valid_to:body?.valid_to||existing.valid_to||null,
+            file_hash:hash,last_seen_at:now,last_downloaded_at:now,last_processed_at:now,status:"processed",last_error:null,
+          });
+          report.push({retailer:"Confiança",endpoint:used,title,validity:{from:body?.valid_from||null,to:body?.valid_to||null},result:"processado recuperado",files:1,offers:body?.offers_saved||0,job_id:existing.id});
+          imported++;
+          continue;
+        }
+        if(body?.error==="FLYER_EXPIRED"){
+          await writeRegistry(db,known,{
+            user_id:USER_ID,retailer:"Confiança",city:"Marília",source_key:sourceKey,source_url:canonical,source_title:title,
+            valid_from:existing.valid_from||null,valid_to:body?.valid_to||existing.valid_to||null,file_hash:hash,
+            last_seen_at:now,last_downloaded_at:now,status:"expired",last_error:null,
+          });
+          report.push({retailer:"Confiança",endpoint:used,title,result:"expirado",files:1,offers:0,job_id:existing.id});
+          unchanged++;
+          continue;
+        }
+      }
+      report.push({retailer:"Confiança",endpoint:used,title,result:"já em processamento",files:0,offers:0,job_id:existing.id,status:existing.status});
+      unchanged++;
+      continue;
+    }
+
+    const pages=pdfPageCount(bytes);
+    const path=`auto/marilia/confianca/${hash}.pdf`;
+    const {error:upErr}=await db.storage.from("flyers").upload(path,bytes,{contentType:"application/pdf",upsert:false});
+    if(upErr && !/already exists|resource already exists|duplicate/i.test(upErr.message)){
+      failed++;
+      report.push({retailer:"Confiança",endpoint:used,title,result:"erro",error:upErr.message,files:0,offers:0});
+      continue;
+    }
+
+    const initialResult={auto_import:true,source_title:title,source_url:canonical,source_key:sourceKey,city:"Marília"};
+    const {data:job,error:jobErr}=await db.from("flyer_import_jobs").insert({
+      user_id:USER_ID,source_file_path:path,source_file_name:`Confiança - Marília - ${filename}`,mime_type:"application/pdf",
+      file_hash:hash,page_count:pages,status:"queued",progress_current:0,progress_total:pages,
+      progress_label:"Arquivo recebido. Aguardando processamento…",retailer:"Confiança",valid_from:null,valid_to:null,result:initialResult,
+    }).select("id").single();
+
+    if(jobErr){
+      failed++;
+      report.push({retailer:"Confiança",endpoint:used,title,result:"erro",error:jobErr.message,files:1,offers:0});
+      continue;
+    }
+
+    await writeRegistry(db,known,{
+      user_id:USER_ID,retailer:"Confiança",city:"Marília",source_key:sourceKey,source_url:canonical,source_title:title,
+      file_hash:hash,last_seen_at:now,last_downloaded_at:now,status:"downloaded",last_error:null,
+      metadata_fingerprint:canonical,
+    });
+
+    const pr=await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/process-flyer-job`,{
+      method:"POST",
+      headers:{authorization:`Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,"content-type":"application/json"},
+      body:JSON.stringify({job_id:job.id,mode:"start"}),
+    });
+    if(!pr.ok){
+      failed++;
+      report.push({retailer:"Confiança",endpoint:used,title,result:"erro ao iniciar processamento",files:1,pages,offers:0,job_id:job.id,error:"worker HTTP "+pr.status});
+      continue;
+    }
+
+    imported++;
+    report.push({retailer:"Confiança",endpoint:used,title,result:"novo enviado para processamento",files:1,pages,offers:0,job_id:job.id});
+  }
+
+  report.push({retailer:"Confiança",endpoint:used,result:"resumo",found:pdfs.length,imported,unchanged,failed});
+}
+
 Deno.serve(async(req)=>{
  if(req.method==="OPTIONS") return new Response("ok",{headers:corsHeaders});
  if(req.method!=="POST")return new Response("POST only",{status:405,headers:corsHeaders});
@@ -564,6 +748,10 @@ Deno.serve(async(req)=>{
   }
   if(src.retailer==="Kawakami"){
     await collectKawakami(db,report);
+    continue;
+  }
+  if(src.retailer==="Confiança"){
+    await collectConfianca(db,report);
     continue;
   }
   let page:any=null, used="", err="";
