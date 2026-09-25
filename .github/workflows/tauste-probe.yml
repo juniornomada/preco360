@@ -1,0 +1,97 @@
+name: Tauste Probe
+
+on:
+  push:
+    paths:
+      - ".github/workflows/tauste-probe.yml"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: npm install --no-audit --no-fund
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Probe official Tauste Marília publication
+        run: |
+          cat > tauste-probe.mjs <<'EOF'
+          import { chromium } from '@playwright/test';
+          import fs from 'node:fs';
+
+          const target='https://www.flipsnack.com/taustesupermercado/ofertas-tauste-mar-lia-cmlwj5p7t9.html';
+          const interesting=/(flipsnack|cloudfront|collection|page_|config|manifest|json|image|asset|publication)/i;
+          const events=[];
+          const browser=await chromium.launch({headless:true});
+          const context=await browser.newContext({
+            locale:'pt-BR',
+            timezoneId:'America/Sao_Paulo',
+            viewport:{width:1440,height:1000},
+            userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+          });
+          const page=await context.newPage();
+          page.on('request', req=>{
+            if(interesting.test(req.url())) events.push({kind:'request',method:req.method(),type:req.resourceType(),url:req.url()});
+          });
+          page.on('response', res=>{
+            if(interesting.test(res.url())) events.push({kind:'response',status:res.status(),contentType:res.headers()['content-type']||null,url:res.url()});
+          });
+
+          let navStatus=null,navError=null;
+          try{
+            const res=await page.goto(target,{waitUntil:'domcontentloaded',timeout:60000});
+            navStatus=res?.status()??null;
+            await page.waitForTimeout(12000);
+          }catch(e){navError=String(e)}
+
+          const frameInfo=page.frames().map(f=>({url:f.url(),name:f.name()}));
+          const frameData=[];
+          for(const frame of page.frames()){
+            if(!/player\.flipsnack\.com/i.test(frame.url())) continue;
+            const html=await frame.content().catch(()=> '');
+            const urls=[...new Set([...html.matchAll(/https?:\\?\/\\?\/[^"'<>\\s]+/g)].map(m=>m[0].replaceAll('\\/','/').replace(/&amp;/g,'&')))]
+              .filter(u=>interesting.test(u));
+            const texts=await frame.locator('body').innerText().catch(()=> '');
+            frameData.push({
+              url:frame.url(),
+              htmlLength:html.length,
+              urls:urls.slice(0,300),
+              bodySample:texts.slice(0,8000),
+              pageSnippets:['page_1','collections/items','collection','manifest','pages','config'].map(k=>{
+                const i=html.toLowerCase().indexOf(k.toLowerCase());
+                return i>=0?{key:k,sample:html.slice(Math.max(0,i-1500),Math.min(html.length,i+6000))}:null;
+              }).filter(Boolean)
+            });
+          }
+
+          const dedup=[];
+          const seen=new Set();
+          for(const e of events){
+            const key=e.kind+'|'+e.url+'|'+(e.status??'');
+            if(seen.has(key)) continue;
+            seen.add(key);
+            dedup.push(e);
+          }
+
+          const result={ranAt:new Date().toISOString(),target,navStatus,navError,finalUrl:page.url(),title:await page.title(),frameInfo,frameData,interestingNetwork:dedup.slice(0,1000)};
+          fs.writeFileSync('tauste-probe.json',JSON.stringify(result,null,2));
+          console.log(JSON.stringify(result,null,2));
+          await browser.close();
+          EOF
+          node tauste-probe.mjs
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tauste-probe
+          path: tauste-probe.json
+          if-no-files-found: warn
