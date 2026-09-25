@@ -1655,6 +1655,23 @@ export default function OffersPage() {
     })[0];
   }, [analyzed]);
 
+  const currentVsReference = useMemo(() => {
+    if (!bestCurrentOffer || !reference360) return null;
+    if (bestCurrentOffer.candidate.baseUnit !== reference360.baseUnit) {
+      return null;
+    }
+
+    const current = bestCurrentOffer.candidate.normalizedPrice;
+    if (!Number.isFinite(current) || current <= 0 || reference360.value <= 0) {
+      return null;
+    }
+
+    return {
+      current,
+      diffPct: ((current - reference360.value) / reference360.value) * 100,
+    };
+  }, [bestCurrentOffer, reference360]);
+
   const currentVsStore = useMemo(() => {
     if (!bestCurrentOffer || !bestStoreReference) return null;
 
