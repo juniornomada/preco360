@@ -60,8 +60,8 @@ async function collectAtacadao(db:any, report:any[], onlyTitle=""){
     const {data:known}=await db.from("flyer_source_registry").select("*")
       .eq("user_id",USER_ID).eq("retailer","Atacadão").eq("city","Marília").eq("source_key",sourceKey).maybeSingle();
 
-    if(known?.status==="processed" && known?.valid_from===flyer.valid_from && known?.valid_to===flyer.valid_to && known?.file_hash){
-      await db.from("flyer_source_registry").update({last_seen_at:now,status:"unchanged"}).eq("id",known.id);
+    if((known?.status==="processed" || known?.status==="unchanged") && known?.valid_from===flyer.valid_from && known?.valid_to===flyer.valid_to && known?.file_hash){
+      await db.from("flyer_source_registry").update({last_seen_at:now,status:"processed"}).eq("id",known.id);
       report.push({retailer:"Atacadão",endpoint:sourcePage,title:flyer.title,validity:{from:flyer.valid_from,to:flyer.valid_to},result:"já conhecido antes do download",files:0,offers:0});
       unchanged++;
       continue;
@@ -348,6 +348,201 @@ async function collectMaxAtacadista(db:any, report:any[], onlyTitle=""){
   report.push({retailer:"Max Atacadista",endpoint:sourcePage,result:"resumo",found:flyers.length,imported,unchanged,failed});
 }
 
+
+function ptMonth(value:unknown){
+  const key=String(value??"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+  const months:Record<string,number>={janeiro:1,fevereiro:2,marco:3,abril:4,maio:5,junho:6,julho:7,agosto:8,setembro:9,outubro:10,novembro:11,dezembro:12};
+  return months[key]||0;
+}
+function isoDate(year:number,month:number,day:number){
+  return `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+}
+function kawakamiValidity(html:string){
+  const plain=textOnly(html);
+  let m=plain.match(/OFERTAS\s+V[ÁA]LIDAS\s+DE\s+(\d{1,2})\s+A\s+(\d{1,2})\s+DE\s+([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ]+)\s+DE\s+(\d{4})/i);
+  if(m){
+    const month=ptMonth(m[3]),year=Number(m[4]);
+    if(month) return {from:isoDate(year,month,Number(m[1])),to:isoDate(year,month,Number(m[2]))};
+  }
+  m=plain.match(/OFERTAS\s+V[ÁA]LIDAS\s+DE\s+(\d{1,2})\s+DE\s+([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ]+)\s+A\s+(\d{1,2})\s+DE\s+([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ]+)\s+DE\s+(\d{4})/i);
+  if(m){
+    const month1=ptMonth(m[2]),month2=ptMonth(m[4]),year=Number(m[5]);
+    if(month1&&month2) return {from:isoDate(year,month1,Number(m[1])),to:isoDate(year,month2,Number(m[3]))};
+  }
+  return {from:null as string|null,to:null as string|null};
+}
+function kawakamiPages(html:string,base:string){
+  const pages:string[]=[];
+  for(const match of html.matchAll(/<a\b([^>]*)>/gi)){
+    const attrs=match[1];
+    if(!/class\s*=\s*["'][^"']*img-tabloide/i.test(attrs)) continue;
+    const href=attrs.match(/href\s*=\s*["']([^"']+)["']/i)?.[1];
+    if(!href) continue;
+    const url=abs(href.replace(/&amp;/g,"&"),base);
+    if(url && !pages.includes(url)) pages.push(url);
+  }
+  return pages;
+}
+
+async function collectKawakami(db:any, report:any[]){
+  const sourcePage="https://institucional.kawakami.com.br/oferta/marilia";
+  let html="",used=sourcePage;
+  try{
+    const r=await fetchSafe(sourcePage);
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    html=await r.text();
+    used=r.url;
+  }catch(e){
+    report.push({retailer:"Kawakami",endpoint:sourcePage,result:"erro",error:String(e)});
+    return;
+  }
+
+  if(!/Ofertas\s*-\s*Mar[ií]lia/i.test(textOnly(html))){
+    report.push({retailer:"Kawakami",endpoint:used,result:"erro",error:"A página oficial não confirmou Marília"});
+    return;
+  }
+
+  const val=kawakamiValidity(html);
+  const pages=kawakamiPages(html,used);
+  const today=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+
+  if(!val.from||!val.to){
+    report.push({retailer:"Kawakami",endpoint:used,result:"erro",error:"Validade oficial não identificada com segurança",files:0,offers:0});
+    return;
+  }
+  if(val.to<today){
+    report.push({retailer:"Kawakami",endpoint:used,validity:val,result:"sem novo encarte vigente",files:0,offers:0});
+    return;
+  }
+  if(!pages.length){
+    report.push({retailer:"Kawakami",endpoint:used,validity:val,result:"sem asset oficial obtível com segurança",files:0,offers:0});
+    return;
+  }
+
+  const sourceKey=`kawakami:marilia:${val.from}:${val.to}`;
+  const title="Ofertas";
+  const now=new Date().toISOString();
+  const {data:known}=await db.from("flyer_source_registry").select("*")
+    .eq("user_id",USER_ID).eq("retailer","Kawakami").eq("city","Marília").eq("source_key",sourceKey).maybeSingle();
+
+  if((known?.status==="processed"||known?.status==="unchanged") && known?.file_hash && known?.valid_from===val.from && known?.valid_to===val.to){
+    await db.from("flyer_source_registry").update({last_seen_at:now,status:"processed"}).eq("id",known.id);
+    report.push({retailer:"Kawakami",endpoint:used,title,validity:val,result:"já conhecido antes do download",files:0,offers:0});
+    report.push({retailer:"Kawakami",endpoint:used,result:"resumo",found:1,imported:0,unchanged:1,failed:0});
+    return;
+  }
+
+  const downloaded:any[]=[];
+  for(let i=0;i<pages.length;i++){
+    try{
+      const r=await fetchSafe(pages[i]);
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      const ct=r.headers.get("content-type")||"image/png";
+      const bytes=new Uint8Array(await r.arrayBuffer());
+      if(!bytes.length) throw new Error("imagem vazia");
+      downloaded.push({index:i+1,url:pages[i],bytes,ct,hash:await sha(bytes)});
+    }catch(e){
+      await writeRegistry(db,known,{
+        user_id:USER_ID,retailer:"Kawakami",city:"Marília",source_key:sourceKey,source_url:used,source_title:title,
+        valid_from:val.from,valid_to:val.to,last_seen_at:now,status:"failed",last_error:"Página "+(i+1)+": "+String(e),
+      });
+      report.push({retailer:"Kawakami",endpoint:used,title,validity:val,result:"erro",error:"Página "+(i+1)+": "+String(e),files:i,offers:0});
+      report.push({retailer:"Kawakami",endpoint:used,result:"resumo",found:1,imported:0,unchanged:0,failed:1});
+      return;
+    }
+  }
+
+  const combinedHash=await sha(new TextEncoder().encode(downloaded.map(p=>p.hash).join("|")));
+  const [{data:saved},{data:jobs}]=await Promise.all([
+    db.from("flyers").select("id").eq("user_id",USER_ID).eq("file_hash",combinedHash).limit(1),
+    db.from("flyer_import_jobs").select("id,status,result").eq("user_id",USER_ID).eq("file_hash",combinedHash).in("status",["queued","processing","refining","completed"]).order("created_at",{ascending:false}).limit(1),
+  ]);
+
+  if(saved?.length){
+    const flyerId=saved[0].id;
+    await db.from("flyers").update({retailer:"Kawakami",title:"Kawakami · Ofertas",valid_from:val.from,valid_to:val.to,city:"Marília"}).eq("id",flyerId);
+    const {count}=await db.from("flyer_items").select("id",{count:"exact",head:true}).eq("flyer_id",flyerId);
+    await writeRegistry(db,known,{
+      user_id:USER_ID,retailer:"Kawakami",city:"Marília",source_key:sourceKey,source_url:used,source_title:title,
+      valid_from:val.from,valid_to:val.to,file_hash:combinedHash,last_seen_at:now,last_downloaded_at:now,last_processed_at:now,
+      status:"processed",last_error:null,metadata_fingerprint:[val.from,val.to,pages.length].join("|"),
+    });
+    report.push({retailer:"Kawakami",endpoint:used,title,validity:val,result:"duplicado pelo hash após download",files:downloaded.length,offers:count||0});
+    report.push({retailer:"Kawakami",endpoint:used,result:"resumo",found:1,imported:0,unchanged:1,failed:0});
+    return;
+  }
+
+  if(jobs?.length){
+    const existing=jobs[0];
+    if(existing.status==="completed"){
+      const fr=await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/finalize-flyer-job`,{
+        method:"POST",headers:{authorization:`Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,"content-type":"application/json"},
+        body:JSON.stringify({job_id:existing.id}),
+      });
+      if(fr.ok){
+        const fin=await fr.json().catch(()=>({}));
+        await writeRegistry(db,known,{
+          user_id:USER_ID,retailer:"Kawakami",city:"Marília",source_key:sourceKey,source_url:used,source_title:title,
+          valid_from:val.from,valid_to:val.to,file_hash:combinedHash,last_seen_at:now,last_downloaded_at:now,last_processed_at:now,
+          status:"processed",last_error:null,metadata_fingerprint:[val.from,val.to,pages.length].join("|"),
+        });
+        report.push({retailer:"Kawakami",endpoint:used,title,validity:val,result:"processado recuperado",files:downloaded.length,offers:fin?.offers_saved||0,job_id:existing.id});
+        report.push({retailer:"Kawakami",endpoint:used,result:"resumo",found:1,imported:1,unchanged:0,failed:0});
+        return;
+      }
+    }
+    report.push({retailer:"Kawakami",endpoint:used,title,validity:val,result:"já em processamento",files:0,offers:0,job_id:existing.id,status:existing.status});
+    report.push({retailer:"Kawakami",endpoint:used,result:"resumo",found:1,imported:0,unchanged:1,failed:0});
+    return;
+  }
+
+  const jobId=crypto.randomUUID();
+  const sourceFiles:any[]=[];
+  for(const page of downloaded){
+    const ext=/png/i.test(page.ct)?"png":/webp/i.test(page.ct)?"webp":"jpg";
+    const path=`${USER_ID}/imports/${jobId}/page-${String(page.index).padStart(3,"0")}.${ext}`;
+    const {error}=await db.storage.from("flyers").upload(path,page.bytes,{contentType:page.ct,upsert:false});
+    if(error){
+      report.push({retailer:"Kawakami",endpoint:used,title,validity:val,result:"erro",error:"Upload página "+page.index+": "+error.message,files:sourceFiles.length,offers:0});
+      report.push({retailer:"Kawakami",endpoint:used,result:"resumo",found:1,imported:0,unchanged:0,failed:1});
+      return;
+    }
+    sourceFiles.push({path,name:`Kawakami Marília - página ${page.index}.${ext}`,mime_type:page.ct,size:page.bytes.length});
+  }
+
+  const initialResult={auto_import:true,source_title:title,source_url:used,source_key:sourceKey,city:"Marília",valid_from:val.from,valid_to:val.to};
+  const {data:job,error:jobErr}=await db.from("flyer_import_jobs").insert({
+    id:jobId,user_id:USER_ID,source_file_path:sourceFiles[0].path,source_file_name:`Kawakami · Ofertas ${val.from} a ${val.to} · ${sourceFiles.length} imagem(ns)`,
+    source_files:sourceFiles,mime_type:sourceFiles[0].mime_type,file_hash:combinedHash,page_count:sourceFiles.length,status:"queued",
+    progress_current:0,progress_total:sourceFiles.length,progress_label:"Arquivo recebido. Aguardando processamento…",
+    retailer:"Kawakami",valid_from:val.from,valid_to:val.to,result:initialResult,
+  }).select("id").single();
+
+  if(jobErr){
+    report.push({retailer:"Kawakami",endpoint:used,title,validity:val,result:"erro",error:jobErr.message,files:sourceFiles.length,offers:0});
+    report.push({retailer:"Kawakami",endpoint:used,result:"resumo",found:1,imported:0,unchanged:0,failed:1});
+    return;
+  }
+
+  await writeRegistry(db,known,{
+    user_id:USER_ID,retailer:"Kawakami",city:"Marília",source_key:sourceKey,source_url:used,source_title:title,
+    valid_from:val.from,valid_to:val.to,file_hash:combinedHash,last_seen_at:now,last_downloaded_at:now,status:"downloaded",last_error:null,
+    metadata_fingerprint:[val.from,val.to,pages.length].join("|"),
+  });
+
+  const pr=await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/process-flyer-job`,{
+    method:"POST",headers:{authorization:`Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,"content-type":"application/json"},
+    body:JSON.stringify({job_id:job.id,mode:"start"}),
+  });
+  if(!pr.ok){
+    report.push({retailer:"Kawakami",endpoint:used,title,validity:val,result:"erro ao iniciar processamento",files:sourceFiles.length,offers:0,job_id:job.id,error:"worker HTTP "+pr.status});
+    report.push({retailer:"Kawakami",endpoint:used,result:"resumo",found:1,imported:0,unchanged:0,failed:1});
+    return;
+  }
+  report.push({retailer:"Kawakami",endpoint:used,title,validity:val,result:"novo enviado para processamento",files:sourceFiles.length,pages:sourceFiles.length,offers:0,job_id:job.id});
+  report.push({retailer:"Kawakami",endpoint:used,result:"resumo",found:1,imported:1,unchanged:0,failed:0});
+}
+
 Deno.serve(async(req)=>{
  if(req.method==="OPTIONS") return new Response("ok",{headers:corsHeaders});
  if(req.method!=="POST")return new Response("POST only",{status:405,headers:corsHeaders});
@@ -365,6 +560,10 @@ Deno.serve(async(req)=>{
   }
   if(src.retailer==="Max Atacadista"){
     await collectMaxAtacadista(db,report,requestedTitle);
+    continue;
+  }
+  if(src.retailer==="Kawakami"){
+    await collectKawakami(db,report);
     continue;
   }
   let page:any=null, used="", err="";
