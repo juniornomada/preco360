@@ -77,6 +77,12 @@ async function resolveInBrowser(browser: any, publication: any) {
       "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
     });
 
+    const token = Buffer.from(ACCOUNT_ID + "+" + hash).toString("base64");
+    const playerUrl =
+      "https://player.flipsnack.com/?hash=" +
+      encodeURIComponent(token) +
+      "&forceWidget=1";
+
     const dataResponsePromise = page.waitForResponse(
       (response: any) => {
         const url = response.url();
@@ -90,12 +96,13 @@ async function resolveInBrowser(browser: any, publication: any) {
       { timeout: 45_000 },
     );
 
-    const navigation = await page.goto(sourceUrl, {
+    const navigation = await page.goto(playerUrl, {
       waitUntil: "domcontentloaded",
       timeout: 45_000,
+      referer: sourceUrl,
     });
     if (navigation && navigation.status() >= 400) {
-      throw new Error("PUBLICATION_HTTP_" + navigation.status());
+      throw new Error("PLAYER_HTTP_" + navigation.status());
     }
 
     const dataResponse = await dataResponsePromise;
