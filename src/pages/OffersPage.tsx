@@ -2114,7 +2114,7 @@ export default function OffersPage() {
       {!isLoading &&
         !error &&
         activeFlyerCount === 0 &&
-        !(hasSearch && bestStoreReference) && (
+        !(hasSearch && (bestStoreReference || latestReceiptReference || reference360)) && (
         <Card className="border-dashed">
           <CardContent className="p-7 text-center">
             <Clock3 className="mx-auto h-8 w-8 text-primary" />
@@ -2150,7 +2150,7 @@ export default function OffersPage() {
         activeFlyerCount > 0 &&
         search.trim().length !== 1 &&
         analyzed.length === 0 &&
-        !bestStoreReference && (
+        !bestStoreReference && !latestReceiptReference && !reference360 && (
           <Card className="border-dashed">
             <CardContent className="p-7 text-center">
               <Tags className="mx-auto h-8 w-8 text-primary" />
