@@ -1447,6 +1447,106 @@ export default function OffersPage() {
     })[0];
   }, [matchingStoreReferences]);
 
+  const productById = useMemo(
+    () =>
+      new Map(
+        (productContext?.products ?? []).map((product) => [product.id, product]),
+      ),
+    [productContext],
+  );
+
+  const matchingReceiptReferences = useMemo(() => {
+    if (!directSearchProductIds.length) return [];
+    const wanted = new Set(directSearchProductIds);
+
+    return purchasePrices
+      .filter(
+        (row) => row.source === "receipt" && wanted.has(row.product_id),
+      )
+      .sort((a, b) =>
+        String(b.date ?? "").localeCompare(String(a.date ?? "")),
+      );
+  }, [directSearchProductIds, purchasePrices]);
+
+  const latestReceiptReference = matchingReceiptReferences[0] ?? null;
+
+  const latestReceiptReferenceValue = useMemo(
+    () =>
+      latestReceiptReference
+        ? purchaseReferenceValue(
+            latestReceiptReference,
+            productById.get(latestReceiptReference.product_id),
+          )
+        : null,
+    [latestReceiptReference, productById],
+  );
+
+  const reference360 = useMemo(() => {
+    const candidates: Array<{
+      source: "receipt" | "shelf";
+      value: number;
+      baseUnit: "kg" | "l" | "un";
+      date: string;
+    }> = [];
+
+    for (const row of matchingReceiptReferences) {
+      const reference = purchaseReferenceValue(
+        row,
+        productById.get(row.product_id),
+      );
+      if (!reference) continue;
+
+      candidates.push({
+        source: "receipt",
+        value: reference.value,
+        baseUnit: reference.baseUnit,
+        date: String(row.date ?? ""),
+      });
+    }
+
+    for (const row of matchingStoreReferences) {
+      const reference = storeReferenceValue(row);
+      if (!reference) continue;
+
+      candidates.push({
+        source: "shelf",
+        value: reference.value,
+        baseUnit: reference.baseUnit,
+        date: String(row.observed_date ?? ""),
+      });
+    }
+
+    if (!candidates.length) return null;
+
+    const unitCounts = candidates.reduce(
+      (acc, item) => {
+        acc[item.baseUnit] += 1;
+        return acc;
+      },
+      { kg: 0, l: 0, un: 0 },
+    );
+
+    const baseUnit = (Object.entries(unitCounts).sort(
+      (a, b) => b[1] - a[1],
+    )[0]?.[0] ?? "un") as "kg" | "l" | "un";
+
+    const comparable = candidates
+      .filter((item) => item.baseUnit === baseUnit)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 20);
+
+    const value = medianValue(comparable.map((item) => item.value));
+    if (!value) return null;
+
+    return {
+      value,
+      baseUnit,
+      count: comparable.length,
+      receiptCount: comparable.filter((item) => item.source === "receipt").length,
+      shelfCount: comparable.filter((item) => item.source === "shelf").length,
+    };
+  }, [matchingReceiptReferences, matchingStoreReferences, productById]);
+
   const analyzed = useMemo(() => {
     if (!hasSearch || !preparedOffers.length) return [];
 
