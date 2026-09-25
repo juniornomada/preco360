@@ -78,12 +78,37 @@ async function resolveInBrowser(browser: any, publication: any) {
     });
 
     const token = Buffer.from(ACCOUNT_ID + "+" + hash).toString("base64");
-    const playerUrl = "https://player.flipsnack.com/?forceWidget=1";
-    const authorization = new URL(
-      "https://content-private.flipsnack.com/authorization",
+    const playerUrl =
+      "https://player.flipsnack.com/?hash=" +
+      encodeURIComponent(token) +
+      "&forceWidget=1";
+
+    const dataPromise = new Promise<{ data: any; url: string }>(
+      (resolve, reject) => {
+        const onResponse = async (response: any) => {
+          const responseUrl = response.url();
+          if (
+            !responseUrl.includes(
+              "/" + ACCOUNT_ID + "/collections/" + hash + "/data.json",
+            )
+          ) {
+            return;
+          }
+
+          page.off("response", onResponse);
+          try {
+            if (response.status() !== 200) {
+              reject(new Error("DATA_HTTP_" + response.status()));
+              return;
+            }
+            resolve({ data: await response.json(), url: responseUrl });
+          } catch (error) {
+            reject(error);
+          }
+        };
+        page.on("response", onResponse);
+      },
     );
-    authorization.searchParams.set("hash", token);
-    authorization.searchParams.set("domain", "www.flipsnack.com");
 
     const navigation = await page.goto(playerUrl, {
       waitUntil: "domcontentloaded",
@@ -94,57 +119,18 @@ async function resolveInBrowser(browser: any, publication: any) {
       throw new Error("PLAYER_HTTP_" + navigation.status());
     }
 
-    const authorizationResult = await page.evaluate(
-      async (authorizationUrl: string) => {
-        const response = await fetch(authorizationUrl, {
-          method: "GET",
-          credentials: "omit",
-          headers: { accept: "application/json,*/*" },
-        });
-        return {
-          status: response.status,
-          text: await response.text(),
-        };
-      },
-      authorization.toString(),
-    );
+    const captured = await Promise.race([
+      dataPromise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("DATA_CAPTURE_TIMEOUT")), 15_000),
+      ),
+    ]);
 
-    if (authorizationResult.status !== 200) {
-      throw new Error("AUTH_HTTP_" + authorizationResult.status);
-    }
-
-    let authorizationData: any;
-    try {
-      authorizationData = JSON.parse(authorizationResult.text);
-    } catch {
-      throw new Error("AUTH_RESPONSE_INVALID");
-    }
-
-    const signature = String(
-      authorizationData?.signature?.[hash] ?? "",
-    );
-    if (!signature) throw new Error("AUTH_SIGNATURE_MISSING");
-
-    const dataUrl =
-      "https://d3u72tnj701eui.cloudfront.net/" +
-      ACCOUNT_ID +
-      "/collections/" +
-      hash +
-      "/data.json?" +
-      signature;
-
-    const dataResponse = await fetch(dataUrl, {
-      headers: {
-        "user-agent": BROWSER_UA,
-        accept: "application/json,*/*",
-        referer: "https://player.flipsnack.com/",
-      },
-    });
-    if (!dataResponse.ok) {
-      throw new Error("DATA_HTTP_" + dataResponse.status);
-    }
-
-    const data = await dataResponse.json();
+    const data = captured.data;
+    const signedQuery = captured.url.includes("?")
+      ? captured.url.split("?").slice(1).join("?")
+      : "";
+    if (!signedQuery) throw new Error("DATA_SIGNATURE_MISSING");
     const title = String(data?.properties?.title ?? "").trim();
     if (!normalize(title).includes("marilia")) {
       throw new Error("PUBLICATION_NOT_MARILIA");
@@ -159,22 +145,29 @@ async function resolveInBrowser(browser: any, publication: any) {
         const id = String(pageId ?? "").trim();
         if (!id) return null;
         const pageData = data?.pages?.data?.[id] ?? {};
-        const coverVersion = Number(pageData?.coverVersion) || 1;
+        const sourceHash = String(pageData?.source?.hash ?? "").trim();
+        const sourcePage = Math.max(
+          1,
+          Number(pageData?.source?.page ?? 0) + 1,
+        );
+        if (!sourceHash) return null;
 
         return {
           id,
           position: index + 1,
+          source_hash: sourceHash,
+          source_page: sourcePage,
           url:
             "https://d3u72tnj701eui.cloudfront.net/" +
             ACCOUNT_ID +
             "/collections/" +
             hash +
-            "/covers/" +
-            encodeURIComponent(id) +
+            "/items/" +
+            encodeURIComponent(sourceHash) +
+            "/covers/page_" +
+            sourcePage +
             "/original?" +
-            signature +
-            "&v=" +
-            coverVersion,
+            signedQuery,
           type: String(pageData?.type ?? "jpg"),
           width: Number(pageData?.width) || null,
           height: Number(pageData?.height) || null,
