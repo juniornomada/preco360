@@ -253,10 +253,14 @@ export default function ProductVisual({
   imageUrl?: string | null;
   compact?: boolean;
 }) {
-  const visual = productVisual(name, category);
+  const safeName = typeof name === "string" ? name : String(name ?? "");
+  const safeCategory =
+    typeof category === "string" ? category : category == null ? null : String(category);
+  const visual = productVisual(safeName, safeCategory);
   // A valid product image always wins. Visual rules are fallback-only.
-  // This prevents manually verified photos from being replaced by generic icons.
-  const safeImageUrl = imageUrl?.trim() || null;
+  // This prevents malformed DB values from breaking the whole search result.
+  const safeImageUrl =
+    typeof imageUrl === "string" && imageUrl.trim() ? imageUrl.trim() : null;
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
