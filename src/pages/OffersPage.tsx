@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import ProductSearchBar from "@/components/ProductSearchBar";
 import {
   normalizeProductSearchText,
+  productMatchesSearch,
   productSearchRequestVariants,
 } from "@/lib/productSearch";
 import ProductVisual from "@/components/ProductVisual";
@@ -122,6 +123,25 @@ type PurchasePriceRow = {
   price: number | string;
   date?: string | null;
   supermarket?: string | null;
+};
+
+type StoreReferenceRow = {
+  id: string;
+  product_id: string | null;
+  supermarket: string;
+  observed_date: string;
+  raw_name: string;
+  retail_price: number | string;
+  normalized_retail_price: number | string | null;
+  base_unit: "kg" | "l" | "un" | null;
+  package_quantity: number | string | null;
+  package_unit: string | null;
+  products:
+    | {
+        id: string;
+        name: string;
+      }
+    | null;
 };
 
 const verdictOrder = {
@@ -891,6 +911,32 @@ export default function OffersPage() {
   const hasSearch = normalizedSearch.length >= 2;
   const today = useMemo(() => localDateKey(), []);
 
+  const {
+    data: storeReferenceRows = [],
+    isLoading: loadingStoreReferences,
+    error: storeReferencesError,
+  } = useQuery<StoreReferenceRow[]>({
+    queryKey: ["offers-store-references", user?.id],
+    enabled: !!user && hasSearch,
+    staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      const { data, error } = await db
+        .from("store_price_observations")
+        .select(
+          "id,product_id,supermarket,observed_date,raw_name,retail_price,normalized_retail_price,base_unit,package_quantity,package_unit,products(id,name)",
+        )
+        .eq("user_id", user!.id)
+        .not("product_id", "is", null)
+        .order("observed_date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(600);
+
+      if (error) throw error;
+      return (data ?? []) as StoreReferenceRow[];
+    },
+  });
+
   useEffect(() => {
     return () => {
       if (searchTimerRef.current !== null) {
@@ -1089,7 +1135,11 @@ export default function OffersPage() {
   const isLoading =
     loadingFlyers ||
     (hasSearch && (loadingProductContext || loadingSearchRows));
-  const error = flyersError || productContextError || searchRowsError;
+  const error =
+    flyersError ||
+    productContextError ||
+    searchRowsError ||
+    storeReferencesError;
 
   const baseOffers = useMemo(() => {
     if (!hasSearch || !productContext || !searchRows.length) return [];
@@ -1261,6 +1311,44 @@ export default function OffersPage() {
       });
   }, [baseOffers, productContext, purchasePrices]);
 
+  const matchingStoreReferences = useMemo(() => {
+    if (!hasSearch) return [];
+
+    return storeReferenceRows.filter((row) =>
+      productMatchesSearch(
+        `${row.raw_name} ${row.products?.name ?? ""}`,
+        normalizedSearch,
+      ),
+    );
+  }, [hasSearch, normalizedSearch, storeReferenceRows]);
+
+  const bestStoreReference = useMemo(() => {
+    if (!matchingStoreReferences.length) return null;
+
+    return [...matchingStoreReferences].sort((a, b) => {
+      const aNormalized = Number(a.normalized_retail_price);
+      const bNormalized = Number(b.normalized_retail_price);
+      const aHasNormalized =
+        Number.isFinite(aNormalized) && aNormalized > 0 && !!a.base_unit;
+      const bHasNormalized =
+        Number.isFinite(bNormalized) && bNormalized > 0 && !!b.base_unit;
+
+      if (
+        aHasNormalized &&
+        bHasNormalized &&
+        a.base_unit === b.base_unit &&
+        Math.abs(aNormalized - bNormalized) > 0.0001
+      ) {
+        return aNormalized - bNormalized;
+      }
+
+      const packageDiff = Number(a.retail_price) - Number(b.retail_price);
+      if (Math.abs(packageDiff) > 0.0001) return packageDiff;
+
+      return String(b.observed_date).localeCompare(String(a.observed_date));
+    })[0];
+  }, [matchingStoreReferences]);
+
   const analyzed = useMemo(() => {
     if (!hasSearch || !preparedOffers.length) return [];
 
@@ -1354,6 +1442,48 @@ export default function OffersPage() {
 
     return sortedGroups.flatMap((group) => group.sorted);
   }, [preparedOffers, hasSearch, normalizedSearch]);
+
+  const bestCurrentOffer = useMemo(() => {
+    if (!analyzed.length) return null;
+
+    return [...analyzed].sort((a, b) => {
+      if (a.candidate.baseUnit === b.candidate.baseUnit) {
+        const normalizedDiff =
+          a.candidate.normalizedPrice - b.candidate.normalizedPrice;
+        if (Math.abs(normalizedDiff) > 0.0001) return normalizedDiff;
+      }
+
+      return a.candidate.price - b.candidate.price;
+    })[0];
+  }, [analyzed]);
+
+  const currentVsStore = useMemo(() => {
+    if (!bestCurrentOffer || !bestStoreReference) return null;
+
+    const storeNormalized = Number(bestStoreReference.normalized_retail_price);
+    if (
+      !Number.isFinite(storeNormalized) ||
+      storeNormalized <= 0 ||
+      !bestStoreReference.base_unit ||
+      bestCurrentOffer.candidate.baseUnit !== bestStoreReference.base_unit
+    ) {
+      return null;
+    }
+
+    const current = bestCurrentOffer.candidate.normalizedPrice;
+    const previous = storeNormalized;
+    if (!Number.isFinite(current) || current <= 0) return null;
+
+    const diffPct = ((current - previous) / previous) * 100;
+
+    return {
+      current,
+      previous,
+      diffPct,
+      currentIsBetter: current < previous - 0.0001,
+      storeIsBetter: previous < current - 0.0001,
+    };
+  }, [bestCurrentOffer, bestStoreReference]);
 
   const explicitSearchFamily = useMemo(
     () => queryOfferFamily(normalizedSearch),
