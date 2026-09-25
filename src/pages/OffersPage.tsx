@@ -1135,11 +1135,7 @@ export default function OffersPage() {
   const isLoading =
     loadingFlyers ||
     (hasSearch && (loadingProductContext || loadingSearchRows));
-  const error =
-    flyersError ||
-    productContextError ||
-    searchRowsError ||
-    storeReferencesError;
+  const error = flyersError || productContextError || searchRowsError;
 
   const baseOffers = useMemo(() => {
     if (!hasSearch || !productContext || !searchRows.length) return [];
@@ -1629,6 +1625,173 @@ export default function OffersPage() {
         </span>
       </div>
 
+      {hasSearch &&
+        !isLoading &&
+        !error &&
+        !loadingStoreReferences &&
+        (bestCurrentOffer || bestStoreReference) && (
+          <Card className="mb-4 border-primary/20">
+            <CardContent className="p-4">
+              <div className="mb-3">
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-primary">
+                  Resumo para decidir
+                </p>
+                <p className="mt-0.5 text-sm font-bold">
+                  {bestCurrentOffer
+                    ? bestStoreReference
+                      ? "Oferta vigente x preço de gôndola"
+                      : "Melhor oferta vigente encontrada"
+                    : "Sem oferta vigente — usando sua referência de gôndola"}
+                </p>
+                {!bestCurrentOffer && bestStoreReference && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Nenhuma rede pesquisada tem oferta vigente para este produto agora.
+                  </p>
+                )}
+              </div>
+
+              <div className={`grid gap-2 ${
+                bestCurrentOffer && bestStoreReference
+                  ? "grid-cols-2"
+                  : "grid-cols-1"
+              }`}>
+                {bestCurrentOffer && (
+                  <div
+                    className={`rounded-xl border p-3 ${
+                      currentVsStore?.currentIsBetter
+                        ? "border-primary/55 bg-primary/5"
+                        : "border-border bg-muted/30"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                        Oferta vigente
+                      </p>
+                      {currentVsStore?.currentIsBetter && (
+                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold text-primary">
+                          Melhor agora
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs font-bold">
+                      {compactOfferName(bestCurrentOffer.item)}
+                      {packageLabel(bestCurrentOffer.item)
+                        ? ` ${packageLabel(bestCurrentOffer.item)}`
+                        : ""}
+                    </p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {canonicalRetailerName(bestCurrentOffer.flyer.retailer)}
+                    </p>
+                    <p className="mt-2 text-lg font-extrabold">
+                      {brl(bestCurrentOffer.candidate.price)}
+                    </p>
+                    <p className="text-[10px] font-semibold text-primary">
+                      {formatNormalizedPrice(
+                        bestCurrentOffer.candidate.normalizedPrice,
+                        bestCurrentOffer.candidate.baseUnit,
+                      )}
+                    </p>
+                  </div>
+                )}
+
+                {bestStoreReference && (
+                  <div
+                    className={`rounded-xl border p-3 ${
+                      currentVsStore?.storeIsBetter || !bestCurrentOffer
+                        ? "border-primary/55 bg-primary/5"
+                        : "border-border bg-muted/30"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                        Gôndola
+                      </p>
+                      {(currentVsStore?.storeIsBetter || !bestCurrentOffer) && (
+                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold text-primary">
+                          {bestCurrentOffer ? "Melhor referência" : "Referência"}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs font-bold">
+                      {bestStoreReference.products?.name ||
+                        bestStoreReference.raw_name}
+                    </p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {bestStoreReference.supermarket} ·{" "}
+                      {dateBr(bestStoreReference.observed_date)}
+                    </p>
+                    <p className="mt-2 text-lg font-extrabold">
+                      {brl(Number(bestStoreReference.retail_price))}
+                    </p>
+                    {Number(bestStoreReference.normalized_retail_price) > 0 &&
+                      bestStoreReference.base_unit && (
+                        <p className="text-[10px] font-semibold text-primary">
+                          {formatNormalizedPrice(
+                            Number(bestStoreReference.normalized_retail_price),
+                            bestStoreReference.base_unit,
+                          )}
+                        </p>
+                      )}
+                  </div>
+                )}
+              </div>
+
+              {currentVsStore && Math.abs(currentVsStore.diffPct) >= 0.5 && (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  {currentVsStore.currentIsBetter ? (
+                    <>
+                      A oferta vigente está{" "}
+                      <strong className="text-primary">
+                        {Math.abs(currentVsStore.diffPct).toLocaleString("pt-BR", {
+                          minimumFractionDigits: 1,
+                          maximumFractionDigits: 1,
+                        })}
+                        %
+                      </strong>{" "}
+                      abaixo da sua referência de gôndola por unidade-base.
+                    </>
+                  ) : (
+                    <>
+                      Sua referência de gôndola está{" "}
+                      <strong className="text-primary">
+                        {Math.abs(currentVsStore.diffPct).toLocaleString("pt-BR", {
+                          minimumFractionDigits: 1,
+                          maximumFractionDigits: 1,
+                        })}
+                        %
+                      </strong>{" "}
+                      abaixo da melhor oferta vigente por unidade-base.
+                    </>
+                  )}
+                </p>
+              )}
+
+              {bestStoreReference?.product_id && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(
+                      `/search?product=${encodeURIComponent(
+                        bestStoreReference.product_id!,
+                      )}`,
+                    )
+                  }
+                  className="mt-3 flex h-9 w-full items-center justify-between rounded-xl border border-border/80 px-3 text-xs font-semibold text-foreground/80 transition hover:border-primary/30 hover:bg-muted/50"
+                >
+                  <span>Comparar com o preço que encontrei agora</span>
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+      {hasSearch && storeReferencesError && (
+        <p className="mb-3 text-[10px] text-muted-foreground">
+          As ofertas vigentes foram carregadas, mas a referência de gôndola não pôde ser consultada agora.
+        </p>
+      )}
+
       {hasSearch && isLoading && (
         <Card className="border-dashed">
           <CardContent className="p-7 text-center text-sm text-muted-foreground">
@@ -1648,7 +1811,10 @@ export default function OffersPage() {
         </Card>
       )}
 
-      {!isLoading && !error && activeFlyerCount === 0 && (
+      {!isLoading &&
+        !error &&
+        activeFlyerCount === 0 &&
+        !(hasSearch && bestStoreReference) && (
         <Card className="border-dashed">
           <CardContent className="p-7 text-center">
             <Clock3 className="mx-auto h-8 w-8 text-primary" />
@@ -1683,7 +1849,8 @@ export default function OffersPage() {
         !error &&
         activeFlyerCount > 0 &&
         search.trim().length !== 1 &&
-        analyzed.length === 0 && (
+        analyzed.length === 0 &&
+        !bestStoreReference && (
           <Card className="border-dashed">
             <CardContent className="p-7 text-center">
               <Tags className="mx-auto h-8 w-8 text-primary" />
