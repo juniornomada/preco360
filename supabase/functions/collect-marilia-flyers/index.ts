@@ -98,8 +98,17 @@ async function collectAtacadao(db:any, report:any[], onlyTitle=""){
       db.from("flyer_import_jobs").select("id,status,result").eq("user_id",USER_ID).eq("file_hash",hash).in("status",["queued","processing","refining","completed"]).order("created_at",{ascending:false}).limit(1),
     ]);
     if(saved?.length){
-      await writeRegistry(db,known,{user_id:USER_ID,retailer:"Atacadão",city:"Marília",source_key:sourceKey,source_url:flyer.url,source_title:flyer.title,valid_from:flyer.valid_from,valid_to:flyer.valid_to,...head,file_hash:hash,last_seen_at:now,last_downloaded_at:now,last_processed_at:now,status:"processed",last_error:null});
-      report.push({retailer:"Atacadão",endpoint:sourcePage,title:flyer.title,validity:{from:flyer.valid_from,to:flyer.valid_to},result:"duplicado pelo hash após download",files:1,offers:0});
+      const flyerId=saved[0].id;
+      await db.from("flyers").update({
+        retailer:"Atacadão",
+        title:"Atacadão · "+flyer.title,
+        valid_from:flyer.valid_from,
+        valid_to:flyer.valid_to,
+        city:"Marília",
+      }).eq("id",flyerId);
+      const {count:offerCount}=await db.from("flyer_items").select("id",{count:"exact",head:true}).eq("flyer_id",flyerId);
+      await writeRegistry(db,known,{user_id:USER_ID,retailer:"Atacadão",city:"Marília",source_key:sourceKey,source_url:flyer.url,source_title:flyer.title,valid_from:flyer.valid_from,valid_to:flyer.valid_to,...head,file_hash:hash,last_seen_at:now,last_downloaded_at:now,last_processed_at:known?.last_processed_at||now,status:"processed",last_error:null});
+      report.push({retailer:"Atacadão",endpoint:sourcePage,title:flyer.title,validity:{from:flyer.valid_from,to:flyer.valid_to},result:"duplicado pelo hash após download",files:1,offers:offerCount||0});
       unchanged++;
       continue;
     }
