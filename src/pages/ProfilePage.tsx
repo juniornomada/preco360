@@ -60,6 +60,12 @@ export default function ProfilePage() {
     }
   };
 
+  const formatValidity = (value?: string | null) => {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const date = new Date(value + "T12:00:00");
+    return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString("pt-BR");
+  };
+
   return (
     <div className="page-container">
       <h1 className="mb-6 text-xl font-bold">Perfil</h1>
@@ -114,8 +120,13 @@ export default function ProfilePage() {
                     <span className="font-medium">{row.retailer}</span>
                     <span className="text-muted-foreground">{row.result}</span>
                   </div>
-                  {row.validity?.to && <p className="mt-1 text-muted-foreground">Validade até {new Date(row.validity.to + "T12:00:00").toLocaleDateString("pt-BR")}</p>}
-                  {row.error && <p className="mt-1 text-destructive">{row.error}</p>}
+                  {formatValidity(row.validity?.to) && <p className="mt-1 text-muted-foreground">Validade até {formatValidity(row.validity?.to)}</p>}
+                  {row.result === "resumo" && (
+                    <p className="mt-1 text-muted-foreground">
+                      {row.found ?? 0} encontrado(s) · {row.imported ?? 0} novo(s) · {row.unchanged ?? 0} já conhecido(s) · {row.failed ?? 0} falha(s)
+                    </p>
+                  )}
+                  {row.error && row.error !== "HTTP 200" && <p className="mt-1 text-destructive">{row.error}</p>}
                 </div>
               ))}
             </div>
