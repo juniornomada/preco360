@@ -1970,7 +1970,7 @@ export default function OffersPage() {
 
   return (
     <div className="page-container !pb-24 mx-auto w-full max-w-3xl">
-      <header className="mb-5">
+      <header className="mb-4">
         <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-primary">
           Preço 360
         </p>
@@ -1981,7 +1981,7 @@ export default function OffersPage() {
 
       <ProductSearchBar
         ref={searchInputRef}
-        className="mb-3"
+        className="mb-2"
         value={searchInput}
         placeholder="Busque sabão em pó, água sanitária, café..."
         autoFocus
@@ -2004,7 +2004,7 @@ export default function OffersPage() {
         }}
       />
 
-      <div className="mb-5 grid grid-cols-3 gap-2">
+      <div className="mb-4 grid grid-cols-3 gap-2">
         <button
           type="button"
           onClick={() => searchInputRef.current?.focus()}
@@ -2037,10 +2037,10 @@ export default function OffersPage() {
         !loadingStoreReferences &&
         (latestReceiptReference || latestStoreReference || reference360) && (
           <>
-            <section className="mb-5 rounded-[22px] border border-primary/35 bg-gradient-to-br from-primary/[0.08] via-card to-card p-4 shadow-sm">
-              <div className="mb-4 flex items-start gap-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/15">
-                  <TrendingUp className="h-6 w-6 text-primary" />
+            <section className="mb-4 rounded-[22px] border border-primary/35 bg-gradient-to-br from-primary/[0.08] via-card to-card p-3 sm:p-4 shadow-sm">
+              <div className="mb-3 flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/15">
+                  <TrendingUp className="h-5 w-5 text-primary" />
                 </div>
                 <div className="min-w-0">
                   <h2 className="text-[clamp(1.45rem,6vw,2rem)] font-extrabold leading-tight tracking-tight">
@@ -2055,8 +2055,8 @@ export default function OffersPage() {
               </div>
 
               <div className="grid grid-cols-3 gap-2">
-                <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-3">
-                  <div className="mb-2 flex items-center gap-2">
+                <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-2.5 sm:p-3">
+                  <div className="mb-1.5 flex items-center gap-2">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-sky-400">
                       <ReceiptText className="h-4 w-4" />
                     </span>
@@ -2094,8 +2094,8 @@ export default function OffersPage() {
                   )}
                 </div>
 
-                <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-3">
-                  <div className="mb-2 flex items-center gap-2">
+                <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-2.5 sm:p-3">
+                  <div className="mb-1.5 flex items-center gap-2">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-500/10 text-violet-400">
                       <Store className="h-4 w-4" />
                     </span>
@@ -2132,8 +2132,8 @@ export default function OffersPage() {
                   )}
                 </div>
 
-                <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-3">
-                  <div className="mb-2 flex items-center gap-2">
+                <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-2.5 sm:p-3">
+                  <div className="mb-1.5 flex items-center gap-2">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
                       <BadgeCheck className="h-4 w-4" />
                     </span>
@@ -2179,7 +2179,7 @@ export default function OffersPage() {
               </div>
 
               {decisionReference && (
-                <div className="mt-3 flex items-start gap-3 rounded-2xl border border-primary/35 bg-primary/[0.06] p-3">
+                <div className="mt-2.5 flex items-start gap-2.5 rounded-2xl border border-primary/35 bg-primary/[0.06] p-2.5 sm:p-3">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/15">
                     <TrendingUp className="h-5 w-5 text-primary" />
                   </span>
@@ -2209,9 +2209,9 @@ export default function OffersPage() {
             </section>
 
             {networkReferences.length > 0 && (
-              <section className="mb-5">
-                <h2 className="mb-3 text-[clamp(1.35rem,6vw,1.9rem)] font-extrabold tracking-tight">
-                  Melhores referências por rede
+              <section className="mb-4">
+                <h2 className="mb-2 text-[clamp(1.25rem,5.5vw,1.75rem)] font-extrabold tracking-tight">
+                  Referências históricas por rede
                 </h2>
 
                 <div className="space-y-2">
@@ -2312,7 +2312,7 @@ export default function OffersPage() {
                     : "/search",
                 );
               }}
-              className="mb-5 flex h-14 w-full items-center gap-3 rounded-2xl border border-border bg-card/30 px-4 text-left font-bold transition hover:border-primary/30 hover:bg-muted/40"
+              className="mb-4 flex h-13 min-h-13 w-full items-center gap-3 rounded-2xl border border-border bg-card/30 px-4 py-3 text-left font-bold transition hover:border-primary/30 hover:bg-muted/40"
             >
               <Camera className="h-5 w-5 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1">
@@ -2410,7 +2410,7 @@ export default function OffersPage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                {hasSearch ? "Resultado da busca" : "Melhores oportunidades vigentes"}
+                {hasSearch ? "Ofertas vigentes" : "Melhores oportunidades vigentes"}
               </p>
               <p className="text-sm font-bold">
                 {analyzed.length} oferta(s) encontrada(s)
