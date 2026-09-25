@@ -1284,6 +1284,20 @@ export default function OffersPage() {
     });
   }, [hasSearch, productContext, searchRows]);
 
+  const directSearchProductIds = useMemo(() => {
+    if (!hasSearch || !productContext) return [];
+
+    return productContext.products
+      .filter((product) =>
+        productMatchesSearch(
+          `${product.name} ${product.brand ?? ""} ${product.category ?? ""}`,
+          normalizedSearch,
+        ),
+      )
+      .map((product) => product.id)
+      .sort();
+  }, [hasSearch, normalizedSearch, productContext]);
+
   const relevantProductIds = useMemo(() => {
     if (!productContext || !baseOffers.length) return [];
 
@@ -1301,25 +1315,34 @@ export default function OffersPage() {
     return [...ids].sort();
   }, [baseOffers, productContext]);
 
-  const relevantProductIdsKey = relevantProductIds.join(",");
+  const referenceProductIds = useMemo(
+    () => [...new Set([...relevantProductIds, ...directSearchProductIds])].sort(),
+    [directSearchProductIds, relevantProductIds],
+  );
+
+  const referenceProductIdsKey = referenceProductIds.join(",");
 
   const { data: purchasePrices = [] } = useQuery<PurchasePriceRow[]>({
     queryKey: [
-      "live-market-purchase-history-v1",
+      "live-market-purchase-history-v2",
       user?.id,
-      relevantProductIdsKey,
+      referenceProductIdsKey,
     ],
-    enabled: !!user && relevantProductIds.length > 0,
+    enabled: !!user && referenceProductIds.length > 0,
     staleTime: 15 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
     refetchOnWindowFocus: false,
     retry: 1,
     queryFn: async ({ signal }) => {
       const { data, error } = await db
-        .rpc("get_product_price_history_v1", {
-          p_product_ids: relevantProductIds,
-          p_per_product_limit: 24,
-        })
+        .from("prices")
+        .select(
+          "product_id,price,date,supermarket,source,normalized_price,base_unit,package_quantity,package_unit,receipt_text",
+        )
+        .eq("user_id", user!.id)
+        .in("product_id", referenceProductIds)
+        .order("date", { ascending: false })
+        .limit(800)
         .abortSignal(signal);
 
       if (error) throw error;
