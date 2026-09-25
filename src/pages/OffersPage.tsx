@@ -1482,16 +1482,6 @@ export default function OffersPage() {
     );
   }, [hasSearch, normalizedSearch, storeReferenceRows]);
 
-  const latestStoreReference = useMemo(
-    () =>
-      [...matchingStoreReferences].sort((a, b) =>
-        String(b.observed_date ?? "").localeCompare(
-          String(a.observed_date ?? ""),
-        ),
-      )[0] ?? null,
-    [matchingStoreReferences],
-  );
-
   const bestStoreReference = useMemo(() => {
     if (!matchingStoreReferences.length) return null;
 
