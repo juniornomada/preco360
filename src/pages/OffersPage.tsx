@@ -152,6 +152,114 @@ type StoreReferenceRow = {
     | null;
 };
 
+function normalizeOfferNotes(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((item) => String(item ?? "").trim())
+            .filter(Boolean);
+        }
+      } catch {
+        // Keep the original value as a single note below.
+      }
+    }
+
+    return [trimmed];
+  }
+
+  return [];
+}
+
+function sanitizeSearchOfferRow(value: unknown): SearchOfferItemRow | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+
+  const id = String(row.id ?? "").trim();
+  const flyerId = String(row.flyer_id ?? "").trim();
+  const rawName = String(
+    row.raw_name ?? row.normalized_name ?? "",
+  ).trim();
+  const retailer = String(row.retailer ?? "").trim();
+  const price = Number(row.advertised_price);
+
+  // A malformed row must never take down the whole Offers page.
+  if (
+    !id ||
+    !flyerId ||
+    !rawName ||
+    !retailer ||
+    !Number.isFinite(price) ||
+    price <= 0
+  ) {
+    console.warn("Ignoring malformed offer search row", {
+      id,
+      flyerId,
+      rawName,
+      retailer,
+      advertisedPrice: row.advertised_price,
+    });
+    return null;
+  }
+
+  const baseUnit =
+    row.base_unit === "kg" || row.base_unit === "l" || row.base_unit === "un"
+      ? row.base_unit
+      : null;
+
+  return {
+    id,
+    flyer_id: flyerId,
+    product_id:
+      row.product_id === null || row.product_id === undefined
+        ? null
+        : String(row.product_id),
+    raw_name: rawName,
+    normalized_name:
+      typeof row.normalized_name === "string" ? row.normalized_name : null,
+    brand: typeof row.brand === "string" ? row.brand : null,
+    package_quantity:
+      row.package_quantity === null || row.package_quantity === undefined
+        ? null
+        : Number(row.package_quantity),
+    package_unit:
+      typeof row.package_unit === "string" ? row.package_unit : null,
+    advertised_price: price,
+    normalized_price:
+      row.normalized_price === null || row.normalized_price === undefined
+        ? null
+        : Number(row.normalized_price),
+    base_unit: baseUnit,
+    club_price: row.club_price === true,
+    club_advertised_price:
+      row.club_advertised_price === null ||
+      row.club_advertised_price === undefined
+        ? null
+        : Number(row.club_advertised_price),
+    source_page:
+      row.source_page === null || row.source_page === undefined
+        ? null
+        : Number(row.source_page),
+    image_url: typeof row.image_url === "string" ? row.image_url : null,
+    offer_notes: normalizeOfferNotes(row.offer_notes),
+    retailer,
+    valid_from: typeof row.valid_from === "string" ? row.valid_from : null,
+    valid_to: typeof row.valid_to === "string" ? row.valid_to : null,
+    is_active: row.is_active === true || row.is_active === "true",
+  };
+}
+
 const verdictOrder = {
   exceptional: 0,
   good: 1,
@@ -1264,7 +1372,9 @@ export default function OffersPage() {
       const rowsById = new Map<string, SearchOfferItemRow>();
       for (const { data, error } of responses) {
         if (error) throw error;
-        for (const row of (data ?? []) as SearchOfferItemRow[]) {
+        for (const rawRow of data ?? []) {
+          const row = sanitizeSearchOfferRow(rawRow);
+          if (!row) continue;
           rowsById.set(row.id, row);
         }
       }
@@ -1431,29 +1541,34 @@ export default function OffersPage() {
     );
 
     return baseOffers
-      .map((entry) => {
-        const product = entry.productId
-          ? pricedProductMap.get(entry.productId) ?? entry.product
-          : entry.product;
+      .flatMap((entry) => {
+        try {
+          const product = entry.productId
+            ? pricedProductMap.get(entry.productId) ?? entry.product
+            : entry.product;
 
-        const comparablePurchaseProducts =
-          findComparablePurchaseProducts(
+          const comparablePurchaseProducts =
+            findComparablePurchaseProducts(
+              entry.candidate,
+              productsWithPrices,
+            );
+
+          const verdict = evaluateFlyerOffer(
             entry.candidate,
-            productsWithPrices,
+            product,
+            entry.previousAdvertised,
+            comparablePurchaseProducts,
           );
 
-        const verdict = evaluateFlyerOffer(
-          entry.candidate,
-          product,
-          entry.previousAdvertised,
-          comparablePurchaseProducts,
-        );
-
-        return {
-          ...entry,
-          product,
-          verdict,
-        };
+          return [{
+            ...entry,
+            product,
+            verdict,
+          }];
+        } catch (error) {
+          console.error("Ignoring offer that failed analysis", entry.item?.id, error);
+          return [];
+        }
       })
       .sort((a, b) => {
         const verdictDiff =
