@@ -742,6 +742,8 @@ async function collectConfianca(db:any, report:any[]){
 }
 
 
+const TAUSTE_BROWSER_UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+
 function tausteNormalize(value:unknown){
   return String(value??"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/\s+/g," ").trim();
 }
@@ -765,7 +767,7 @@ async function taustePublications(){
   api.searchParams.set("folderHash","");
   api.searchParams.set("searchAfter","0");
   api.searchParams.set("searchKey","");
-  const r=await fetch(api,{headers:{"user-agent":UA,"accept":"application/json,*/*","referer":profile}});
+  const r=await fetch(api,{headers:{"user-agent":TAUSTE_BROWSER_UA,"accept":"application/json,*/*","referer":profile}});
   if(!r.ok) throw new Error("Flipsnack API HTTP "+r.status);
   const data=await r.json();
   if(!Array.isArray(data)) throw new Error("Resposta inesperada do perfil oficial Tauste");
@@ -783,7 +785,7 @@ async function tausteReaderPages(collectionHash:string,fullView:string){
   authUrl.searchParams.set("domain","www.flipsnack.com");
   const auth=await fetch(authUrl,{
     headers:{
-      "user-agent":UA,
+      "user-agent":TAUSTE_BROWSER_UA,
       "accept":"application/json,*/*",
       "referer":fullView,
       "origin":"https://player.flipsnack.com",
@@ -795,7 +797,7 @@ async function tausteReaderPages(collectionHash:string,fullView:string){
   if(!signature) throw new Error("Flipsnack não forneceu assinatura para a publicação");
 
   const dataUrl="https://d3u72tnj701eui.cloudfront.net/"+accountId+"/collections/"+collectionHash+"/data.json?"+signature;
-  const dataResponse=await fetch(dataUrl,{headers:{"user-agent":UA,"accept":"application/json,*/*","referer":"https://player.flipsnack.com/"}});
+  const dataResponse=await fetch(dataUrl,{headers:{"user-agent":TAUSTE_BROWSER_UA,"accept":"application/json,*/*","referer":"https://player.flipsnack.com/"}});
   if(!dataResponse.ok) throw new Error("Flipsnack data.json HTTP "+dataResponse.status);
   const data=await dataResponse.json();
   const title=String(data?.properties?.title||"").trim();
@@ -895,7 +897,7 @@ async function collectTauste(db:any, report:any[], onlyTitle=""){
     let pageError:any=null;
     for(const page of reader.pages){
       try{
-        const r=await fetch(page.url,{headers:{"user-agent":UA,"accept":"image/*,*/*","referer":"https://player.flipsnack.com/"}});
+        const r=await fetch(page.url,{headers:{"user-agent":TAUSTE_BROWSER_UA,"accept":"image/*,*/*","referer":"https://player.flipsnack.com/"}});
         if(!r.ok) throw new Error("HTTP "+r.status);
         const ct=r.headers.get("content-type")||"image/jpeg";
         if(!/image\//i.test(ct)) throw new Error("content-type inesperado: "+ct);
