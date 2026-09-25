@@ -107,6 +107,31 @@ Deno.serve(async(req:Request)=>{
     const validTo=job.result?.valid_to??job.valid_to??null;
     const sourceTitle=String(job.result?.source_title??"").trim();
     const title=sourceTitle?retailer+" · "+sourceTitle:retailer+" · Ofertas";
+
+    if (job.result?.auto_import === true) {
+      const today = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Sao_Paulo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+      if (!validTo) {
+        await supabase.from("flyer_source_registry").update({
+          status:"date_validation_failed",
+          last_error:"Não foi possível confirmar a data final de validade no encarte.",
+          last_seen_at:new Date().toISOString(),
+        }).eq("user_id",job.user_id).eq("file_hash",job.file_hash);
+        return json(422,{error:"VALIDITY_NOT_CONFIRMED",job_id:jobId});
+      }
+      if (String(validTo) < today) {
+        await supabase.from("flyer_source_registry").update({
+          status:"expired",
+          last_error:null,
+          last_seen_at:new Date().toISOString(),
+        }).eq("user_id",job.user_id).eq("file_hash",job.file_hash);
+        return json(409,{error:"FLYER_EXPIRED",job_id:jobId,valid_to:validTo,today});
+      }
+    }
     const pageCount=Math.max(1,Math.trunc(Number(job.result?.page_count??job.page_count??1)));
 
     const {data:existing,error:existingError}=await supabase.from("flyers")
