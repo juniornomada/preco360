@@ -2078,22 +2078,24 @@ export default function OffersPage() {
                         · {dateBr(bestStoreReference.observed_date)}
                       </p>
                       <p className="mt-2 text-[clamp(1rem,4.5vw,1.5rem)] font-extrabold leading-none">
-                        {brl(Number(bestStoreReference.retail_price))}
+                        {bestStoreReferenceValue
+                          ? formatNormalizedPrice(
+                              bestStoreReferenceValue.value,
+                              bestStoreReferenceValue.baseUnit,
+                            )
+                          : brl(Number(bestStoreReference.retail_price))}
                       </p>
                       <p className="mt-1 text-[10px] text-muted-foreground sm:text-xs">
                         {historicalPackageLabel(
                           bestStoreReference.package_quantity,
                           bestStoreReference.package_unit,
-                        ) ?? "Embalagem"}
+                        )
+                          ? `${historicalPackageLabel(
+                              bestStoreReference.package_quantity,
+                              bestStoreReference.package_unit,
+                            )} · ${brl(Number(bestStoreReference.retail_price))}`
+                          : `Embalagem ${brl(Number(bestStoreReference.retail_price))}`}
                       </p>
-                      {bestStoreReferenceValue && (
-                        <p className="mt-1 text-[11px] font-extrabold text-primary sm:text-xs">
-                          {formatNormalizedPrice(
-                            bestStoreReferenceValue.value,
-                            bestStoreReferenceValue.baseUnit,
-                          )}
-                        </p>
-                      )}
                     </>
                   ) : (
                     <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
@@ -2282,16 +2284,15 @@ export default function OffersPage() {
 
                         <div className="shrink-0 text-right">
                           <p className="font-extrabold">
-                            {brl(reference.price)}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground sm:text-xs">
-                            {reference.packageLabel ?? "Embalagem"}
-                          </p>
-                          <p className="text-[11px] font-extrabold text-primary sm:text-xs">
                             {formatNormalizedPrice(
                               reference.normalized,
                               reference.baseUnit,
                             )}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground sm:text-xs">
+                            {reference.packageLabel
+                              ? `${reference.packageLabel} · ${brl(reference.price)}`
+                              : `Embalagem ${brl(reference.price)}`}
                           </p>
                           <p className="text-[10px] text-muted-foreground sm:text-xs">
                             {reference.source} · {dateBr(reference.date)}
