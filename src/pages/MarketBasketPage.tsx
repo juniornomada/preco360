@@ -1596,19 +1596,26 @@ export default function MarketBasketPage() {
                     </div>
                   )}
 
-                  {market.rows?.some((row: any) => row.generic) && (
+                  {market.rows?.length > 0 && (
                     <div className="mt-3 space-y-1.5 border-t pt-2.5">
-                      {market.rows
-                        .filter((row: any) => row.generic)
-                        .map((row: any) => (
+                      {market.rows.map((row: any) => {
+                        const detail = row.generic
+                          ? compactOfferName(row.label, row.offer.raw_name)
+                          : fallbackKey(row.offer.raw_name) === fallbackKey(row.label)
+                            ? packageLabel(row.offer)
+                            : row.offer.raw_name;
+
+                        return (
                           <div
                             key={market.retailer + "-" + row.key}
                             className="flex items-start justify-between gap-3 text-xs"
                           >
                             <div className="min-w-0">
-                              <span className="font-semibold">{row.label}</span>
+                              <span className="font-semibold">
+                                {row.quantity}× {row.label}
+                              </span>
                               <p className="truncate text-[11px] text-muted-foreground">
-                                {compactOfferName(row.label, row.offer.raw_name)}
+                                {detail}
                               </p>
                             </div>
                             <div className="shrink-0 text-right">
@@ -1622,7 +1629,7 @@ export default function MarketBasketPage() {
                                       ativar desconto APP
                                     </span>
                                   )}
-                                <span>{brl(effectiveAdvertisedPrice(row.offer))}</span>
+                                <span>{brl(row.subtotal)}</span>
                               </p>
                               {normalizedPriceLabel(row.offer) && (
                                 <p className="text-[10px] text-muted-foreground">
@@ -1631,7 +1638,8 @@ export default function MarketBasketPage() {
                               )}
                             </div>
                           </div>
-                        ))}
+                        );
+                      })}
                     </div>
                   )}
                 </CardContent>
