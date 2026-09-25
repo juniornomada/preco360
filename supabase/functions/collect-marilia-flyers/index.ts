@@ -260,7 +260,11 @@ async function collectMaxAtacadista(db:any, report:any[], onlyTitle=""){
       unchanged++;
       continue;
     }
-    if(known?.status==="expired" && sameKnownAsset){
+    const knownValidToYear=/^20\d{2}-/.test(String(known?.valid_to||""))
+      ? Number(String(known.valid_to).slice(0,4))
+      : null;
+    const expiredYearAlreadyAligned=!validityYearHint || knownValidToYear===validityYearHint || knownValidToYear===validityYearHint+1;
+    if(known?.status==="expired" && sameKnownAsset && expiredYearAlreadyAligned){
       await db.from("flyer_source_registry").update({last_seen_at:now,status:"expired"}).eq("id",known.id);
       report.push({
         retailer:"Max Atacadista",endpoint:sourcePage,title,
@@ -324,6 +328,26 @@ async function collectMaxAtacadista(db:any, report:any[], onlyTitle=""){
       const existingJob=jobs[0];
       if(existingJob.status==="completed"){
         try{
+          if(validityYearHint){
+            const corrected=maxAlignValidity(
+              existingJob?.result?.valid_from??existingJob?.valid_from,
+              existingJob?.result?.valid_to??existingJob?.valid_to,
+              validityYearHint,
+            );
+            if(corrected.from&&corrected.to){
+              const correctedResult={
+                ...(existingJob.result||{}),
+                valid_from:corrected.from,
+                valid_to:corrected.to,
+                validity_year_hint:validityYearHint,
+              };
+              await db.from("flyer_import_jobs").update({
+                valid_from:corrected.from,
+                valid_to:corrected.to,
+                result:correctedResult,
+              }).eq("id",existingJob.id);
+            }
+          }
           const fr=await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/finalize-flyer-job`,{
             method:"POST",
             headers:{authorization:`Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,"content-type":"application/json"},
