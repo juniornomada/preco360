@@ -204,7 +204,13 @@ Deno.serve(async(req:Request)=>{
 
     const now=new Date().toISOString();
     await supabase.from("flyer_source_registry").update({
-      status:"processed",last_processed_at:now,last_seen_at:now,last_error:null,
+      status:"processed",
+      source_title:sourceTitle||title,
+      valid_from:validFrom,
+      valid_to:validTo,
+      last_processed_at:now,
+      last_seen_at:now,
+      last_error:null,
     }).eq("user_id",job.user_id).eq("file_hash",job.file_hash);
 
     const url=Deno.env.get("SUPABASE_URL");
