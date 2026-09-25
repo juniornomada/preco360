@@ -1133,18 +1133,21 @@ async function processPage(jobId: string, requestedPage: number) {
       job.valid_to ??
       null;
     let model = job.result?.model ?? null;
+    const validityLocked = job.result?.validity_locked === true;
 
     for (const success of successes) {
       model = success.model || model;
       retailer = canonicalRetailerName(success.parsed.retailer ?? retailer);
-      validFrom = alignDateYearToSource(
-        success.parsed.valid_from ?? validFrom,
-        job.source_file_name,
-      );
-      validTo = alignDateYearToSource(
-        success.parsed.valid_to ?? validTo,
-        job.source_file_name,
-      );
+      if (!validityLocked) {
+        validFrom = alignDateYearToSource(
+          success.parsed.valid_from ?? validFrom,
+          job.source_file_name,
+        );
+        validTo = alignDateYearToSource(
+          success.parsed.valid_to ?? validTo,
+          job.source_file_name,
+        );
+      }
     }
 
     const retryCounts =
