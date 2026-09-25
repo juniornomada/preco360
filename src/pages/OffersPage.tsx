@@ -46,18 +46,19 @@ import {
 } from "@/lib/offerPriceDisplay";
 import {
   BadgeCheck,
+  Camera,
   ChevronRight,
+  CircleDollarSign,
   Clock3,
   History,
-  Radar,
+  ReceiptText,
   Search,
-  ShoppingBasket,
   Sparkles,
-  Upload,
   Store,
   Tags,
   TrendingDown,
   TrendingUp,
+  Trophy,
 } from "lucide-react";
 import {
   evaluateFlyerOffer,
@@ -204,6 +205,54 @@ function medianValue(values: number[]) {
   return sorted.length % 2
     ? sorted[middle]
     : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function percentileValue(values: number[], percentile: number) {
+  const sorted = values
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  if (sorted.length === 1) return sorted[0];
+
+  const position = Math.max(
+    0,
+    Math.min(sorted.length - 1, (sorted.length - 1) * percentile),
+  );
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return sorted[lower];
+
+  const weight = position - lower;
+  return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+}
+
+function purchasePackageBaseQuantity(
+  row: PurchasePriceRow,
+  product?: ProductForMatch | null,
+) {
+  const pkg =
+    Number(row.package_quantity) > 0 && row.package_unit
+      ? inferPackage(`${row.package_quantity}${row.package_unit}`)
+      : product && Number(product.package_size) > 0 && product.unit
+        ? inferPackage(`${product.package_size}${product.unit}`)
+        : product?.name
+          ? inferPackage(product.name)
+          : null;
+
+  return pkg
+    ? { baseQuantity: pkg.baseQuantity, baseUnit: pkg.baseUnit }
+    : null;
+}
+
+function storePackageBaseQuantity(row: StoreReferenceRow) {
+  const pkg =
+    Number(row.package_quantity) > 0 && row.package_unit
+      ? inferPackage(`${row.package_quantity}${row.package_unit}`)
+      : inferPackage(row.raw_name);
+
+  return pkg
+    ? { baseQuantity: pkg.baseQuantity, baseUnit: pkg.baseUnit }
+    : null;
 }
 
 function purchaseReferenceValue(
@@ -1420,24 +1469,35 @@ export default function OffersPage() {
     );
   }, [hasSearch, normalizedSearch, storeReferenceRows]);
 
+  const latestStoreReference = useMemo(
+    () =>
+      [...matchingStoreReferences].sort((a, b) =>
+        String(b.observed_date ?? "").localeCompare(
+          String(a.observed_date ?? ""),
+        ),
+      )[0] ?? null,
+    [matchingStoreReferences],
+  );
+
+  const latestStoreReferenceValue = useMemo(
+    () => (latestStoreReference ? storeReferenceValue(latestStoreReference) : null),
+    [latestStoreReference],
+  );
+
   const bestStoreReference = useMemo(() => {
     if (!matchingStoreReferences.length) return null;
 
     return [...matchingStoreReferences].sort((a, b) => {
-      const aNormalized = Number(a.normalized_retail_price);
-      const bNormalized = Number(b.normalized_retail_price);
-      const aHasNormalized =
-        Number.isFinite(aNormalized) && aNormalized > 0 && !!a.base_unit;
-      const bHasNormalized =
-        Number.isFinite(bNormalized) && bNormalized > 0 && !!b.base_unit;
+      const aReference = storeReferenceValue(a);
+      const bReference = storeReferenceValue(b);
 
       if (
-        aHasNormalized &&
-        bHasNormalized &&
-        a.base_unit === b.base_unit &&
-        Math.abs(aNormalized - bNormalized) > 0.0001
+        aReference &&
+        bReference &&
+        aReference.baseUnit === bReference.baseUnit &&
+        Math.abs(aReference.value - bReference.value) > 0.0001
       ) {
-        return aNormalized - bNormalized;
+        return aReference.value - bReference.value;
       }
 
       const packageDiff = Number(a.retail_price) - Number(b.retail_price);
@@ -1544,6 +1604,7 @@ export default function OffersPage() {
       count: comparable.length,
       receiptCount: comparable.filter((item) => item.source === "receipt").length,
       shelfCount: comparable.filter((item) => item.source === "shelf").length,
+      values: comparable.map((item) => item.value),
     };
   }, [matchingReceiptReferences, matchingStoreReferences, productById]);
 
@@ -1700,6 +1761,158 @@ export default function OffersPage() {
     };
   }, [bestCurrentOffer, bestStoreReference]);
 
+  const referencePackage = useMemo(() => {
+    if (!reference360) return null;
+
+    const fromOffer = bestCurrentOffer?.candidate.packageInfo;
+    if (
+      fromOffer &&
+      fromOffer.baseUnit === reference360.baseUnit &&
+      fromOffer.baseQuantity > 0
+    ) {
+      return {
+        baseQuantity: fromOffer.baseQuantity,
+        baseUnit: fromOffer.baseUnit,
+      };
+    }
+
+    if (latestStoreReference) {
+      const pkg = storePackageBaseQuantity(latestStoreReference);
+      if (pkg?.baseUnit === reference360.baseUnit && pkg.baseQuantity > 0) {
+        return pkg;
+      }
+    }
+
+    if (latestReceiptReference) {
+      const pkg = purchasePackageBaseQuantity(
+        latestReceiptReference,
+        productById.get(latestReceiptReference.product_id),
+      );
+      if (pkg?.baseUnit === reference360.baseUnit && pkg.baseQuantity > 0) {
+        return pkg;
+      }
+    }
+
+    return reference360.baseUnit === "un"
+      ? { baseQuantity: 1, baseUnit: "un" as const }
+      : null;
+  }, [
+    bestCurrentOffer,
+    latestReceiptReference,
+    latestStoreReference,
+    productById,
+    reference360,
+  ]);
+
+  const decisionReference = useMemo(() => {
+    if (!reference360) return null;
+
+    const factor = referencePackage?.baseQuantity ?? 1;
+    const packageMode = !!referencePackage;
+    const central = reference360.value * factor;
+    const historical = reference360.values.map((value) => value * factor);
+
+    let low =
+      historical.length >= 4
+        ? percentileValue(historical, 0.25)
+        : central * 0.95;
+    let high =
+      historical.length >= 4
+        ? percentileValue(historical, 0.75)
+        : central * 1.05;
+
+    if (!Number.isFinite(low) || low <= 0) low = central * 0.95;
+    if (!Number.isFinite(high) || high <= 0) high = central * 1.05;
+
+    const waitAbove = Math.max(high, central * 1.08);
+
+    return {
+      central,
+      low,
+      high,
+      waitAbove,
+      packageMode,
+      baseUnit: reference360.baseUnit,
+    };
+  }, [reference360, referencePackage]);
+
+  const networkReferences = useMemo(() => {
+    type NetworkReference = {
+      retailer: string;
+      price: number;
+      normalized: number;
+      baseUnit: "kg" | "l" | "un";
+      source: "cupom" | "gôndola";
+      date: string;
+      productId: string | null;
+    };
+
+    const candidates: NetworkReference[] = [];
+
+    for (const row of matchingReceiptReferences) {
+      const reference = purchaseReferenceValue(
+        row,
+        productById.get(row.product_id),
+      );
+      if (!reference || !row.supermarket) continue;
+      if (reference360 && reference.baseUnit !== reference360.baseUnit) continue;
+
+      candidates.push({
+        retailer: canonicalRetailerName(row.supermarket) || row.supermarket,
+        price: Number(row.price),
+        normalized: reference.value,
+        baseUnit: reference.baseUnit,
+        source: "cupom",
+        date: String(row.date ?? ""),
+        productId: row.product_id,
+      });
+    }
+
+    for (const row of matchingStoreReferences) {
+      const reference = storeReferenceValue(row);
+      if (!reference || !row.supermarket) continue;
+      if (reference360 && reference.baseUnit !== reference360.baseUnit) continue;
+
+      candidates.push({
+        retailer: canonicalRetailerName(row.supermarket) || row.supermarket,
+        price: Number(row.retail_price),
+        normalized: reference.value,
+        baseUnit: reference.baseUnit,
+        source: "gôndola",
+        date: String(row.observed_date ?? ""),
+        productId: row.product_id,
+      });
+    }
+
+    const bestByRetailer = new Map<string, NetworkReference>();
+    for (const candidate of candidates) {
+      const key = normalizeSearchText(candidate.retailer);
+      const current = bestByRetailer.get(key);
+
+      if (
+        !current ||
+        candidate.normalized < current.normalized - 0.0001 ||
+        (Math.abs(candidate.normalized - current.normalized) <= 0.0001 &&
+          candidate.date > current.date)
+      ) {
+        bestByRetailer.set(key, candidate);
+      }
+    }
+
+    return [...bestByRetailer.values()]
+      .sort((a, b) => {
+        const priceDiff = a.normalized - b.normalized;
+        if (Math.abs(priceDiff) > 0.0001) return priceDiff;
+        return b.date.localeCompare(a.date);
+      })
+      .slice(0, 6);
+  }, [
+    matchingReceiptReferences,
+    matchingStoreReferences,
+    productById,
+    reference360,
+  ]);
+
   const explicitSearchFamily = useMemo(
     () => queryOfferFamily(normalizedSearch),
     [normalizedSearch],
@@ -1757,23 +1970,20 @@ export default function OffersPage() {
 
   return (
     <div className="page-container !pb-24 mx-auto w-full max-w-3xl">
-      <header className="mb-4">
-        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary">
-          Preço 360 · Ofertas
+      <header className="mb-5">
+        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-primary">
+          Preço 360
         </p>
-        <h1 className="mt-1 text-[clamp(1.55rem,6vw,2.05rem)] font-extrabold leading-tight tracking-tight">
-          Onde vale a pena comprar agora?
+        <h1 className="mt-1 text-[clamp(2rem,9vw,3rem)] font-extrabold leading-none tracking-tight">
+          Ofertas
         </h1>
-        <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground sm:text-sm">
-          Consulte ofertas vigentes e compare com o que você já pagou e com tabloides anteriores.
-        </p>
       </header>
 
       <ProductSearchBar
         ref={searchInputRef}
-        className="mb-2"
+        className="mb-3"
         value={searchInput}
-        placeholder="Busque Nescau, café, leite, carne..."
+        placeholder="Busque sabão em pó, água sanitária, café..."
         autoFocus
         onChange={(value, source) => {
           setSearchInput(value);
@@ -1794,296 +2004,323 @@ export default function OffersPage() {
         }}
       />
 
-      <div className="mb-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Button
+      <div className="mb-5 grid grid-cols-3 gap-2">
+        <button
           type="button"
-          variant="outline"
-          className="h-9 gap-1.5 rounded-xl text-xs font-bold"
-          onClick={() => {
-            searchInputRef.current?.focus();
-          }}
+          onClick={() => searchInputRef.current?.focus()}
+          className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-primary bg-primary/10 px-2 text-sm font-extrabold text-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.12)]"
         >
-          <Radar className="h-3.5 w-3.5 text-primary" />
-          Radar
-        </Button>
-        <Button
+          <Tags className="h-5 w-5 text-primary" />
+          <span>Ofertas</span>
+        </button>
+        <button
           type="button"
-          variant="outline"
-          className="h-9 gap-1.5 rounded-xl text-xs font-bold"
           onClick={() => navigate("/offers/store-prices")}
+          className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-border bg-card/40 px-2 text-sm font-bold text-foreground/90 transition hover:border-primary/30 hover:bg-muted/50"
         >
-          <Store className="h-3.5 w-3.5 text-primary" />
-          Gôndola
-        </Button>
-        <Button
+          <Store className="h-5 w-5 text-muted-foreground" />
+          <span>Gôndola</span>
+        </button>
+        <button
           type="button"
-          variant="outline"
-          className="h-9 gap-1.5 rounded-xl text-xs font-bold"
-          onClick={() => navigate("/radar?view=import")}
+          onClick={() => navigate("/search")}
+          className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-border bg-card/40 px-2 text-sm font-bold text-foreground/90 transition hover:border-primary/30 hover:bg-muted/50"
         >
-          <Upload className="h-3.5 w-3.5 text-primary" />
-          Importar
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className="h-9 gap-1.5 rounded-xl text-xs font-bold"
-          onClick={() => navigate("/offers/basket")}
-        >
-          <ShoppingBasket className="h-3.5 w-3.5 text-primary" />
-          Cesta
-        </Button>
-      </div>
-
-      <div className="mb-4 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-        <span className="rounded-full border bg-card px-2.5 py-1">
-          {activeFlyerCount} tabloide(s) vigente(s)
-        </span>
-        <span className="rounded-full border bg-card px-2.5 py-1">
-          {allActiveOfferCount} ofertas disponíveis hoje
-        </span>
+          <CircleDollarSign className="h-5 w-5 text-muted-foreground" />
+          <span>Cotar</span>
+        </button>
       </div>
 
       {hasSearch &&
         !isLoading &&
         !error &&
         !loadingStoreReferences &&
-        (bestCurrentOffer || bestStoreReference || latestReceiptReference || reference360) && (
-          <Card className="mb-4 border-primary/20">
-            <CardContent className="p-4">
-              <div className="mb-3">
-                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-primary">
-                  Resumo para decidir
-                </p>
-                <p className="mt-0.5 text-sm font-bold">
-                  {bestCurrentOffer
-                    ? "Oferta vigente + seu histórico"
-                    : "Sem oferta vigente — usando seu histórico de preços"}
-                </p>
-                {!bestCurrentOffer &&
-                  (bestStoreReference || latestReceiptReference || reference360) && (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Nenhuma rede pesquisada tem oferta vigente para este produto agora. Use as referências abaixo para decidir se vale comprar ou esperar.
-                    </p>
-                  )}
+        (latestReceiptReference || latestStoreReference || reference360) && (
+          <>
+            <section className="mb-5 rounded-[22px] border border-primary/35 bg-gradient-to-br from-primary/[0.08] via-card to-card p-4 shadow-sm">
+              <div className="mb-4 flex items-start gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/15">
+                  <TrendingUp className="h-6 w-6 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-[clamp(1.45rem,6vw,2rem)] font-extrabold leading-tight tracking-tight">
+                    Resumo para decidir
+                  </h2>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    {bestCurrentOffer
+                      ? "Oferta vigente + seu histórico"
+                      : "Sem oferta vigente — usando histórico e gôndola"}
+                  </p>
+                </div>
               </div>
 
-              <div className="grid gap-2 sm:grid-cols-3">
-                {bestCurrentOffer && (
-                  <div
-                    className={`rounded-xl border p-3 ${
-                      currentVsStore?.currentIsBetter
-                        ? "border-primary/55 bg-primary/5"
-                        : "border-border bg-muted/30"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                        Oferta vigente
-                      </p>
-                      {currentVsStore?.currentIsBetter && (
-                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold text-primary">
-                          Melhor agora
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-1 line-clamp-2 text-xs font-bold">
-                      {compactOfferName(bestCurrentOffer.item)}
-                      {packageLabel(bestCurrentOffer.item)
-                        ? ` ${packageLabel(bestCurrentOffer.item)}`
-                        : ""}
-                    </p>
-                    <RetailerLogo
-                      retailer={bestCurrentOffer.flyer.retailer}
-                      className="mt-1"
-                      showName
-                    />
-                    <p className="mt-2 text-lg font-extrabold">
-                      {brl(bestCurrentOffer.candidate.price)}
-                    </p>
-                    <p className="text-[10px] font-semibold text-primary">
-                      {formatNormalizedPrice(
-                        bestCurrentOffer.candidate.normalizedPrice,
-                        bestCurrentOffer.candidate.baseUnit,
-                      )}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-sky-400">
+                      <ReceiptText className="h-4 w-4" />
+                    </span>
+                    <p className="text-[11px] font-extrabold leading-tight sm:text-sm">
+                      Cupom fiscal
                     </p>
                   </div>
-                )}
-
-                {bestStoreReference && (
-                  <div
-                    className={`rounded-xl border p-3 ${
-                      currentVsStore?.storeIsBetter || !bestCurrentOffer
-                        ? "border-primary/55 bg-primary/5"
-                        : "border-border bg-muted/30"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                        Gôndola
+                  {latestReceiptReference ? (
+                    <>
+                      <p className="text-[10px] text-muted-foreground sm:text-xs">
+                        Último pago
                       </p>
-                      {(currentVsStore?.storeIsBetter || !bestCurrentOffer) && (
-                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold text-primary">
-                          {bestCurrentOffer ? "Melhor referência" : "Referência"}
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-1 line-clamp-2 text-xs font-bold">
-                      {bestStoreReference.products?.name ||
-                        bestStoreReference.raw_name}
-                    </p>
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <RetailerLogo retailer={bestStoreReference.supermarket} showName />
-                      <span className="text-[10px] text-muted-foreground">
-                        · {dateBr(bestStoreReference.observed_date)}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-lg font-extrabold">
-                      {brl(Number(bestStoreReference.retail_price))}
-                    </p>
-                    {Number(bestStoreReference.normalized_retail_price) > 0 &&
-                      bestStoreReference.base_unit && (
-                        <p className="text-[10px] font-semibold text-primary">
+                      <p className="mt-0.5 truncate text-[10px] text-muted-foreground sm:text-xs">
+                        {canonicalRetailerName(latestReceiptReference.supermarket) ||
+                          latestReceiptReference.supermarket ||
+                          "Supermercado"}{" "}
+                        · {dateBr(latestReceiptReference.date)}
+                      </p>
+                      <p className="mt-2 text-[clamp(1rem,4.5vw,1.5rem)] font-extrabold leading-none">
+                        {brl(Number(latestReceiptReference.price))}
+                      </p>
+                      {latestReceiptReferenceValue && (
+                        <p className="mt-1 text-[10px] text-muted-foreground sm:text-xs">
                           {formatNormalizedPrice(
-                            Number(bestStoreReference.normalized_retail_price),
-                            bestStoreReference.base_unit,
+                            latestReceiptReferenceValue.value,
+                            latestReceiptReferenceValue.baseUnit,
                           )}
                         </p>
                       )}
-                  </div>
-                )}
-
-                {latestReceiptReference && (
-                  <div className="rounded-xl border border-border bg-muted/30 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                        Cupom fiscal
-                      </p>
-                      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-bold text-muted-foreground">
-                        Pago antes
-                      </span>
-                    </div>
-                    <p className="mt-1 line-clamp-2 text-xs font-bold">
-                      {productById.get(latestReceiptReference.product_id)?.name ??
-                        "Preço já pago"}
-                    </p>
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <RetailerLogo
-                        retailer={latestReceiptReference.supermarket}
-                        showName
-                      />
-                      <span className="text-[10px] text-muted-foreground">
-                        · {dateBr(latestReceiptReference.date)}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-lg font-extrabold">
-                      {brl(Number(latestReceiptReference.price))}
-                    </p>
-                    {latestReceiptReferenceValue && (
-                      <p className="text-[10px] font-semibold text-primary">
-                        {formatNormalizedPrice(
-                          latestReceiptReferenceValue.value,
-                          latestReceiptReferenceValue.baseUnit,
-                        )}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {reference360 && (
-                <div className="mt-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">
-                        Referência 360
-                      </p>
-                      <p className="mt-0.5 text-xl font-extrabold text-primary">
-                        {formatNormalizedPrice(
-                          reference360.value,
-                          reference360.baseUnit,
-                        )}
-                      </p>
-                    </div>
-                    <span className="rounded-full border border-primary/20 bg-background px-2 py-1 text-[10px] font-bold text-muted-foreground">
-                      {reference360.count} registro(s)
-                    </span>
-                  </div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                    Calculada pela mediana dos registros comparáveis mais
-                    recentes: <strong>{reference360.receiptCount}</strong> de
-                    cupom fiscal e <strong>{reference360.shelfCount}</strong>{" "}
-                    de gôndola.
-                  </p>
-                  {currentVsReference &&
-                    Math.abs(currentVsReference.diffPct) >= 0.5 && (
-                      <p className="mt-1 text-[11px] font-medium text-foreground/80">
-                        A melhor oferta vigente está{" "}
-                        <strong className="text-primary">
-                          {Math.abs(currentVsReference.diffPct).toLocaleString(
-                            "pt-BR",
-                            {
-                              minimumFractionDigits: 1,
-                              maximumFractionDigits: 1,
-                            },
-                          )}
-                          %
-                        </strong>{" "}
-                        {currentVsReference.diffPct < 0 ? "abaixo" : "acima"} da
-                        sua referência 360 por unidade-base.
-                      </p>
-                    )}
-                </div>
-              )}
-
-              {currentVsStore && Math.abs(currentVsStore.diffPct) >= 0.5 && (
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  {currentVsStore.currentIsBetter ? (
-                    <>
-                      A oferta vigente está{" "}
-                      <strong className="text-primary">
-                        {Math.abs(currentVsStore.diffPct).toLocaleString("pt-BR", {
-                          minimumFractionDigits: 1,
-                          maximumFractionDigits: 1,
-                        })}
-                        %
-                      </strong>{" "}
-                      abaixo da sua referência de gôndola por unidade-base.
                     </>
                   ) : (
-                    <>
-                      Sua referência de gôndola está{" "}
-                      <strong className="text-primary">
-                        {Math.abs(currentVsStore.diffPct).toLocaleString("pt-BR", {
-                          minimumFractionDigits: 1,
-                          maximumFractionDigits: 1,
-                        })}
-                        %
-                      </strong>{" "}
-                      abaixo da melhor oferta vigente por unidade-base.
-                    </>
+                    <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+                      Sem compra anterior registrada.
+                    </p>
                   )}
-                </p>
-              )}
+                </div>
 
-              {bestStoreReference?.product_id && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    navigate(
-                      `/search?product=${encodeURIComponent(
-                        bestStoreReference.product_id!,
-                      )}`,
-                    )
-                  }
-                  className="mt-3 flex h-9 w-full items-center justify-between rounded-xl border border-border/80 px-3 text-xs font-semibold text-foreground/80 transition hover:border-primary/30 hover:bg-muted/50"
-                >
-                  <span>Comparar com o preço que encontrei agora</span>
-                  <ChevronRight className="h-4 w-4" />
-                </button>
+                <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-500/10 text-violet-400">
+                      <Store className="h-4 w-4" />
+                    </span>
+                    <p className="text-[11px] font-extrabold leading-tight sm:text-sm">
+                      Gôndola
+                    </p>
+                  </div>
+                  {latestStoreReference ? (
+                    <>
+                      <p className="text-[10px] text-muted-foreground sm:text-xs">
+                        Última gôndola
+                      </p>
+                      <p className="mt-0.5 truncate text-[10px] text-muted-foreground sm:text-xs">
+                        {canonicalRetailerName(latestStoreReference.supermarket) ||
+                          latestStoreReference.supermarket}{" "}
+                        · {dateBr(latestStoreReference.observed_date)}
+                      </p>
+                      <p className="mt-2 text-[clamp(1rem,4.5vw,1.5rem)] font-extrabold leading-none">
+                        {brl(Number(latestStoreReference.retail_price))}
+                      </p>
+                      {latestStoreReferenceValue && (
+                        <p className="mt-1 text-[10px] text-muted-foreground sm:text-xs">
+                          {formatNormalizedPrice(
+                            latestStoreReferenceValue.value,
+                            latestStoreReferenceValue.baseUnit,
+                          )}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+                      Sem preço de gôndola registrado.
+                    </p>
+                  )}
+                </div>
+
+                <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                      <BadgeCheck className="h-4 w-4" />
+                    </span>
+                    <p className="text-[11px] font-extrabold leading-tight sm:text-sm">
+                      Referência
+                    </p>
+                  </div>
+                  {reference360 && decisionReference ? (
+                    <>
+                      <p className="text-[10px] text-muted-foreground sm:text-xs">
+                        Preço adequado
+                      </p>
+                      <p className="mt-2 text-[clamp(1rem,4.5vw,1.5rem)] font-extrabold leading-none">
+                        {decisionReference.packageMode
+                          ? brl(decisionReference.central)
+                          : formatNormalizedPrice(
+                              decisionReference.central,
+                              decisionReference.baseUnit,
+                            )}
+                      </p>
+                      <p className="mt-2 text-[10px] leading-snug text-muted-foreground sm:text-xs">
+                        Faixa normal:
+                        <br />
+                        {decisionReference.packageMode
+                          ? `${brl(decisionReference.low)} a ${brl(
+                              decisionReference.high,
+                            )}`
+                          : `${formatNormalizedPrice(
+                              decisionReference.low,
+                              decisionReference.baseUnit,
+                            )} a ${formatNormalizedPrice(
+                              decisionReference.high,
+                              decisionReference.baseUnit,
+                            )}`}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+                      Ainda sem dados suficientes.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {decisionReference && (
+                <div className="mt-3 flex items-start gap-3 rounded-2xl border border-primary/35 bg-primary/[0.06] p-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/15">
+                    <TrendingUp className="h-5 w-5 text-primary" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-extrabold text-primary">
+                      Bom preço se encontrar até{" "}
+                      {decisionReference.packageMode
+                        ? brl(decisionReference.central)
+                        : formatNormalizedPrice(
+                            decisionReference.central,
+                            decisionReference.baseUnit,
+                          )}
+                    </p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                      Abaixo disso, vale comprar. Acima de{" "}
+                      {decisionReference.packageMode
+                        ? brl(decisionReference.waitAbove)
+                        : formatNormalizedPrice(
+                            decisionReference.waitAbove,
+                            decisionReference.baseUnit,
+                          )}
+                      , vale esperar oferta se a compra não for urgente.
+                    </p>
+                  </div>
+                </div>
               )}
-            </CardContent>
-          </Card>
+            </section>
+
+            {networkReferences.length > 0 && (
+              <section className="mb-5">
+                <h2 className="mb-3 text-[clamp(1.35rem,6vw,1.9rem)] font-extrabold tracking-tight">
+                  Melhores referências por rede
+                </h2>
+
+                <div className="space-y-2">
+                  {networkReferences.map((reference, index) => {
+                    const withinNormal =
+                      !!reference360 &&
+                      reference.baseUnit === reference360.baseUnit &&
+                      reference.normalized <= reference360.value * 1.05;
+                    const status =
+                      index === 0
+                        ? {
+                            label: "melhor referência",
+                            className:
+                              "border-primary/35 bg-primary/10 text-primary",
+                            Icon: Trophy,
+                          }
+                        : withinNormal
+                          ? {
+                              label: "faixa normal",
+                              className:
+                                "border-slate-500/30 bg-slate-500/10 text-muted-foreground",
+                              Icon: TrendingUp,
+                            }
+                          : {
+                              label: "mais caro",
+                              className:
+                                "border-red-500/35 bg-red-500/10 text-red-400",
+                              Icon: TrendingUp,
+                            };
+                    const StatusIcon = status.Icon;
+
+                    return (
+                      <button
+                        key={`${reference.retailer}-${reference.source}-${reference.date}`}
+                        type="button"
+                        onClick={() =>
+                          reference.productId
+                            ? navigate(
+                                `/search?product=${encodeURIComponent(
+                                  reference.productId,
+                                )}`,
+                              )
+                            : navigate("/search")
+                        }
+                        className="flex w-full items-center gap-3 rounded-2xl border border-border bg-card/45 p-3 text-left transition hover:border-primary/30 hover:bg-muted/40"
+                      >
+                        <RetailerLogo
+                          retailer={reference.retailer}
+                          className="shrink-0"
+                          imageClassName="h-12 w-20"
+                        />
+
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-extrabold">
+                            {reference.retailer}
+                          </p>
+                          <span
+                            className={`mt-1 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${status.className}`}
+                          >
+                            <StatusIcon className="h-3 w-3" />
+                            {status.label}
+                          </span>
+                        </div>
+
+                        <div className="shrink-0 text-right">
+                          <p className="font-extrabold">{brl(reference.price)}</p>
+                          <p className="text-[10px] text-muted-foreground sm:text-xs">
+                            {reference.source} · {dateBr(reference.date)}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground sm:text-xs">
+                            {formatNormalizedPrice(
+                              reference.normalized,
+                              reference.baseUnit,
+                            )}
+                          </p>
+                        </div>
+
+                        <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                const productId =
+                  bestStoreReference?.product_id ??
+                  latestReceiptReference?.product_id ??
+                  networkReferences[0]?.productId ??
+                  null;
+
+                navigate(
+                  productId
+                    ? `/search?product=${encodeURIComponent(productId)}`
+                    : "/search",
+                );
+              }}
+              className="mb-5 flex h-14 w-full items-center gap-3 rounded-2xl border border-border bg-card/30 px-4 text-left font-bold transition hover:border-primary/30 hover:bg-muted/40"
+            >
+              <Camera className="h-5 w-5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1">
+                Comparar com o preço que encontrei agora
+              </span>
+              <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+            </button>
+          </>
         )}
 
       {hasSearch && storeReferencesError && (
