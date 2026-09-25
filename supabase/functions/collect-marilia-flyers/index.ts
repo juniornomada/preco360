@@ -757,22 +757,22 @@ function tausteCollectionHash(publication:any){
   return coverMatch?.[1]||"";
 }
 
-async function tausteSourceFlyers(){
+async function tausteResolvePublication(collectionHash:string,fullView:string){
   const url=Deno.env.get("SUPABASE_URL");
   const service=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if(!url||!service) throw new Error("Configuração Supabase indisponível");
-  const r=await fetch(url+"/functions/v1/probe-tauste",{
+  const r=await fetch(url+"/functions/v1/tauste-flyer-source",{
     method:"POST",
     headers:{
       "authorization":"Bearer "+service,
       "content-type":"application/json",
     },
-    body:"{}",
+    body:JSON.stringify({collection_hash:collectionHash,source_url:fullView}),
   });
   const body=await r.json().catch(()=>({}));
   if(!r.ok) throw new Error("Fonte Tauste HTTP "+r.status+(body?.error?": "+body.error:""));
-  if(!Array.isArray(body?.flyers)) throw new Error("Fonte Tauste retornou formato inesperado");
-  return body.flyers;
+  if(!Array.isArray(body?.pages)||!body.pages.length) throw new Error("Fonte Tauste não retornou páginas");
+  return body;
 }
 
 async function taustePublications(){
@@ -844,7 +844,7 @@ async function collectTauste(db:any, report:any[], onlyTitle=""){
   const sourcePage="https://www.flipsnack.com/taustesupermercado/";
   let publications:any[]=[];
   try{
-    publications=await tausteSourceFlyers();
+    publications=await taustePublications();
   }catch(e){
     report.push({retailer:"Tauste",endpoint:sourcePage,result:"erro",error:String(e),files:0,offers:0});
     report.push({retailer:"Tauste",endpoint:sourcePage,result:"resumo",found:0,imported:0,unchanged:0,failed:1});
@@ -854,18 +854,21 @@ async function collectTauste(db:any, report:any[], onlyTitle=""){
   if(onlyTitle){
     const wanted=tausteNormalize(onlyTitle);
     publications=publications.filter((p:any)=>{
-      const name=tausteNormalize(p?.title);
-      return name===wanted || tausteNormalize(String(p?.title||"").replace(/^ofertas\s+tauste\s+/i,""))===wanted;
+      const name=tausteNormalize(p?.name);
+      return name===wanted || tausteNormalize(String(p?.name||"").replace(/^ofertas\s+tauste\s+/i,""))===wanted;
     });
   }
 
   let imported=0,unchanged=0,failed=0;
   for(const publication of publications){
-    const collectionHash=String(publication?.collection_hash||"").trim();
-    const sourceTitle=String(publication?.title||"Ofertas Tauste Marília").trim();
+    const collectionHash=tausteCollectionHash(publication);
+    const sourceTitle=String(publication?.name||"Ofertas Tauste Marília").trim();
     const title=sourceTitle.replace(/^Ofertas\s+Tauste\s+/i,"Ofertas ");
-    const publishedAt=String(publication?.published_at||"").trim()||null;
-    const fullView=String(publication?.source_url||sourcePage).trim()||sourcePage;
+    const publishedAt=String(publication?.datePublished||"").trim()||null;
+    const directLink=String(publication?.directLink||"").trim();
+    const fullView=directLink
+      ? "https://www.flipsnack.com/taustesupermercado/"+directLink.replace(/\.html(?:$|[?#])/i,"/full-view.html")
+      : sourcePage;
     const sourceKey="tauste:flipsnack:"+collectionHash;
     const now=new Date().toISOString();
 
@@ -900,15 +903,13 @@ async function collectTauste(db:any, report:any[], onlyTitle=""){
 
     let reader:any;
     try{
-      const pages=Array.isArray(publication?.pages)
-        ? publication.pages.map((page:any,index:number)=>({
-            ...page,
-            index:Number(page?.position)||index+1,
-          })).filter((page:any)=>page?.url)
-        : [];
       if(!collectionHash) throw new Error("Publicação Tauste sem identificador estável");
-      if(!pages.length) throw new Error("Publicação Tauste sem páginas oficiais");
-      reader={pages,title:sourceTitle,updated_at:publication?.updated_at||null};
+      const resolved=await tausteResolvePublication(collectionHash,fullView);
+      const pages=resolved.pages.map((page:any,index:number)=>({
+        ...page,
+        index:Number(page?.position)||index+1,
+      })).filter((page:any)=>page?.url);
+      reader={pages,title:String(resolved?.title||sourceTitle),updated_at:resolved?.updated_at||null};
     }catch(e){
       failed++;
       await writeRegistry(db,known,{
