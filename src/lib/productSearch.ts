@@ -58,9 +58,12 @@ export function productMatchesSearch(text: string, query: string) {
 
   return queryTokens.every((queryToken) =>
     textTokens.some((textToken) => {
+      // Exact matches and fuller product tokens are safe. Do not allow the
+      // reverse substring check for tiny tokens such as the unit "l":
+      // otherwise "5 L" incorrectly matches searches like "leite".
       if (
-        textToken.includes(queryToken) ||
-        queryToken.includes(textToken)
+        textToken === queryToken ||
+        textToken.includes(queryToken)
       ) {
         return true;
       }
