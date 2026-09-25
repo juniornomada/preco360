@@ -389,9 +389,18 @@ export function normalizedUnitPrice(price: number, pkg: PackageInfo | null) {
   return { normalizedPrice: price / pkg.baseQuantity, baseUnit: pkg.baseUnit };
 }
 
-export function formatNormalizedPrice(price: number, unit: BaseUnit) {
-  const label = unit === "l" ? "L" : unit;
-  return `${price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/${label}`;
+export function formatNormalizedPrice(
+  price: number | null | undefined,
+  unit: BaseUnit | null | undefined,
+) {
+  const numericPrice = Number(price);
+  if (!Number.isFinite(numericPrice)) return "—";
+
+  const label = unit === "l" ? "L" : unit === "kg" ? "kg" : "un";
+  return `${numericPrice.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  })}/${label}`;
 }
 
 function plausibleName(value: string) {
