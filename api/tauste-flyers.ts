@@ -78,37 +78,71 @@ async function resolveInBrowser(browser: any, publication: any) {
     });
 
     const token = Buffer.from(ACCOUNT_ID + "+" + hash).toString("base64");
-    const playerUrl =
-      "https://player.flipsnack.com/?hash=" +
-      encodeURIComponent(token) +
-      "&forceWidget=1";
-
-    const dataResponsePromise = page.waitForResponse(
-      (response: any) => {
-        const url = response.url();
-        return (
-          response.status() === 200 &&
-          url.includes(
-            "/" + ACCOUNT_ID + "/collections/" + hash + "/data.json?",
-          )
-        );
-      },
-      { timeout: 45_000 },
+    const playerUrl = "https://player.flipsnack.com/?forceWidget=1";
+    const authorization = new URL(
+      "https://content-private.flipsnack.com/authorization",
     );
+    authorization.searchParams.set("hash", token);
+    authorization.searchParams.set("domain", "www.flipsnack.com");
 
     const navigation = await page.goto(playerUrl, {
       waitUntil: "domcontentloaded",
-      timeout: 45_000,
+      timeout: 20_000,
       referer: sourceUrl,
     });
     if (navigation && navigation.status() >= 400) {
       throw new Error("PLAYER_HTTP_" + navigation.status());
     }
 
-    const dataResponse = await dataResponsePromise;
-    const dataUrl = new URL(dataResponse.url());
-    const signature = dataUrl.search.slice(1);
-    if (!signature) throw new Error("SIGNED_DATA_URL_MISSING");
+    const authorizationResult = await page.evaluate(
+      async (authorizationUrl: string) => {
+        const response = await fetch(authorizationUrl, {
+          method: "GET",
+          credentials: "omit",
+          headers: { accept: "application/json,*/*" },
+        });
+        return {
+          status: response.status,
+          text: await response.text(),
+        };
+      },
+      authorization.toString(),
+    );
+
+    if (authorizationResult.status !== 200) {
+      throw new Error("AUTH_HTTP_" + authorizationResult.status);
+    }
+
+    let authorizationData: any;
+    try {
+      authorizationData = JSON.parse(authorizationResult.text);
+    } catch {
+      throw new Error("AUTH_RESPONSE_INVALID");
+    }
+
+    const signature = String(
+      authorizationData?.signature?.[hash] ?? "",
+    );
+    if (!signature) throw new Error("AUTH_SIGNATURE_MISSING");
+
+    const dataUrl =
+      "https://d3u72tnj701eui.cloudfront.net/" +
+      ACCOUNT_ID +
+      "/collections/" +
+      hash +
+      "/data.json?" +
+      signature;
+
+    const dataResponse = await fetch(dataUrl, {
+      headers: {
+        "user-agent": BROWSER_UA,
+        accept: "application/json,*/*",
+        referer: "https://player.flipsnack.com/",
+      },
+    });
+    if (!dataResponse.ok) {
+      throw new Error("DATA_HTTP_" + dataResponse.status);
+    }
 
     const data = await dataResponse.json();
     const title = String(data?.properties?.title ?? "").trim();
