@@ -200,7 +200,7 @@ async function collectMaxAtacadista(db:any, report:any[], onlyTitle=""){
       await db.from("flyer_source_registry").update({last_seen_at:now,status:known.status}).eq("id",known.id);
       report.push({
         retailer:"Max Atacadista",endpoint:sourcePage,title,
-        validity:{from:known.valid_from||null,to:known.valid_to||null},
+        validity:{from:known.valid_from||sourceValidity.from||null,to:known.valid_to||sourceValidity.to||null},
         result:known.status==="expired"?"expirado já conhecido":"já conhecido antes do download",
         files:0,offers:0,units:unitNames,
       });
@@ -544,13 +544,24 @@ async function collectKawakami(db:any, report:any[]){
 }
 
 
-function confiancaPdfLinks(html:string,base:string){
-  const links:string[]=[];
-  for(const match of html.matchAll(/href\s*=\s*["']([^"']+\.pdf(?:\?[^"']*)?)["']/gi)){
+function confiancaPublications(html:string,base:string){
+  const rows:{url:string,valid_from:string|null,valid_to:string|null}[]=[];
+  const seen=new Set<string>();
+  const re=/(?:href|src)\s*=\s*["']([^"']+\.pdf(?:\?[^"']*)?)["']/gi;
+  for(const match of html.matchAll(re)){
     const url=abs(match[1].replace(/&amp;/g,"&"),base);
-    if(url && /clienteconfianca\.com\.br/i.test(url) && !links.includes(url)) links.push(url);
+    if(!url || !/clienteconfianca\.com\.br/i.test(url) || seen.has(clean(url))) continue;
+    seen.add(clean(url));
+    const start=Math.max(0,(match.index||0)-300);
+    const nearby=html.slice(start,Math.min(html.length,(match.index||0)+3500));
+    const dm=nearby.match(/hideWidgetByDate\('[^']+'\s*,\s*'True'\s*==\s*'True'\s*,\s*(\d{4})\s*,\s*(\d{1,2})\s*,\s*(\d{1,2})\s*,\s*'True'\s*==\s*'True'\s*,\s*(\d{4})\s*,\s*(\d{1,2})\s*,\s*(\d{1,2})/i);
+    rows.push({
+      url,
+      valid_from:dm?isoDate(Number(dm[1]),Number(dm[2]),Number(dm[3])):null,
+      valid_to:dm?isoDate(Number(dm[4]),Number(dm[5]),Number(dm[6])):null,
+    });
   }
-  return links;
+  return rows;
 }
 
 async function collectConfianca(db:any, report:any[]){
@@ -572,15 +583,18 @@ async function collectConfianca(db:any, report:any[]){
     return;
   }
 
-  const pdfs=confiancaPdfLinks(html,used);
-  if(!pdfs.length){
+  const today=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+  const publications=confiancaPublications(html,used).filter((p)=>p.valid_to && p.valid_to>=today);
+  if(!publications.length){
     report.push({retailer:"Confiança",endpoint:used,result:"sem asset oficial obtível com segurança",files:0,offers:0});
     report.push({retailer:"Confiança",endpoint:used,result:"resumo",found:0,imported:0,unchanged:0,failed:0});
     return;
   }
 
   let imported=0,unchanged=0,failed=0;
-  for(const pdfUrl of pdfs){
+  for(const publication of publications){
+    const pdfUrl=publication.url;
+    const sourceValidity={from:publication.valid_from,to:publication.valid_to};
     const canonical=clean(pdfUrl);
     const filename=decodeURIComponent(new URL(pdfUrl).pathname.split("/").pop()||"tabloide.pdf");
     const sourceKey="confianca:marilia:"+canonical;
@@ -638,10 +652,10 @@ async function collectConfianca(db:any, report:any[]){
       const {count}=await db.from("flyer_items").select("id",{count:"exact",head:true}).eq("flyer_id",flyer.id);
       await writeRegistry(db,known,{
         user_id:USER_ID,retailer:"Confiança",city:"Marília",source_key:sourceKey,source_url:canonical,source_title:title,
-        valid_from:flyer.valid_from||null,valid_to:flyer.valid_to||null,file_hash:hash,last_seen_at:now,last_downloaded_at:now,
+        valid_from:flyer.valid_from||sourceValidity.from||null,valid_to:flyer.valid_to||sourceValidity.to||null,file_hash:hash,last_seen_at:now,last_downloaded_at:now,
         last_processed_at:now,status:"processed",last_error:null,
       });
-      report.push({retailer:"Confiança",endpoint:used,title,validity:{from:flyer.valid_from||null,to:flyer.valid_to||null},result:"duplicado pelo hash após download",files:1,offers:count||0});
+      report.push({retailer:"Confiança",endpoint:used,title,validity:{from:flyer.valid_from||sourceValidity.from||null,to:flyer.valid_to||sourceValidity.to||null},result:"duplicado pelo hash após download",files:1,offers:count||0});
       unchanged++;
       continue;
     }
@@ -658,7 +672,7 @@ async function collectConfianca(db:any, report:any[]){
         if(fr.ok){
           await writeRegistry(db,known,{
             user_id:USER_ID,retailer:"Confiança",city:"Marília",source_key:sourceKey,source_url:canonical,source_title:title,
-            valid_from:body?.valid_from||existing.valid_from||null,valid_to:body?.valid_to||existing.valid_to||null,
+            valid_from:body?.valid_from||existing.valid_from||sourceValidity.from||null,valid_to:body?.valid_to||existing.valid_to||sourceValidity.to||null,
             file_hash:hash,last_seen_at:now,last_downloaded_at:now,last_processed_at:now,status:"processed",last_error:null,
           });
           report.push({retailer:"Confiança",endpoint:used,title,validity:{from:body?.valid_from||null,to:body?.valid_to||null},result:"processado recuperado",files:1,offers:body?.offers_saved||0,job_id:existing.id});
@@ -668,7 +682,7 @@ async function collectConfianca(db:any, report:any[]){
         if(body?.error==="FLYER_EXPIRED"){
           await writeRegistry(db,known,{
             user_id:USER_ID,retailer:"Confiança",city:"Marília",source_key:sourceKey,source_url:canonical,source_title:title,
-            valid_from:existing.valid_from||null,valid_to:body?.valid_to||existing.valid_to||null,file_hash:hash,
+            valid_from:existing.valid_from||sourceValidity.from||null,valid_to:body?.valid_to||existing.valid_to||sourceValidity.to||null,file_hash:hash,
             last_seen_at:now,last_downloaded_at:now,status:"expired",last_error:null,
           });
           report.push({retailer:"Confiança",endpoint:used,title,result:"expirado",files:1,offers:0,job_id:existing.id});
@@ -690,11 +704,11 @@ async function collectConfianca(db:any, report:any[]){
       continue;
     }
 
-    const initialResult={auto_import:true,source_title:title,source_url:canonical,source_key:sourceKey,city:"Marília"};
+    const initialResult={auto_import:true,source_title:title,source_url:canonical,source_key:sourceKey,city:"Marília",valid_from:sourceValidity.from,valid_to:sourceValidity.to};
     const {data:job,error:jobErr}=await db.from("flyer_import_jobs").insert({
       user_id:USER_ID,source_file_path:path,source_file_name:`Confiança - Marília - ${filename}`,mime_type:"application/pdf",
       file_hash:hash,page_count:pages,status:"queued",progress_current:0,progress_total:pages,
-      progress_label:"Arquivo recebido. Aguardando processamento…",retailer:"Confiança",valid_from:null,valid_to:null,result:initialResult,
+      progress_label:"Arquivo recebido. Aguardando processamento…",retailer:"Confiança",valid_from:sourceValidity.from,valid_to:sourceValidity.to,result:initialResult,
     }).select("id").single();
 
     if(jobErr){
@@ -705,8 +719,8 @@ async function collectConfianca(db:any, report:any[]){
 
     await writeRegistry(db,known,{
       user_id:USER_ID,retailer:"Confiança",city:"Marília",source_key:sourceKey,source_url:canonical,source_title:title,
-      file_hash:hash,last_seen_at:now,last_downloaded_at:now,status:"downloaded",last_error:null,
-      metadata_fingerprint:canonical,
+      valid_from:sourceValidity.from,valid_to:sourceValidity.to,file_hash:hash,last_seen_at:now,last_downloaded_at:now,status:"downloaded",last_error:null,
+      metadata_fingerprint:[canonical,sourceValidity.from,sourceValidity.to].join("|"),
     });
 
     const pr=await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/process-flyer-job`,{
@@ -724,7 +738,7 @@ async function collectConfianca(db:any, report:any[]){
     report.push({retailer:"Confiança",endpoint:used,title,result:"novo enviado para processamento",files:1,pages,offers:0,job_id:job.id});
   }
 
-  report.push({retailer:"Confiança",endpoint:used,result:"resumo",found:pdfs.length,imported,unchanged,failed});
+  report.push({retailer:"Confiança",endpoint:used,result:"resumo",found:publications.length,imported,unchanged,failed});
 }
 
 Deno.serve(async(req)=>{
