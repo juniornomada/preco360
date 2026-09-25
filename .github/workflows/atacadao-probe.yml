@@ -24,8 +24,8 @@ jobs:
 
       - name: Probe official Atacadão Marília flyer source
         run: |
-          cat > /tmp/atacadao-probe.mjs <<'EOF'
-          import { chromium } from 'playwright';
+          cat > atacadao-probe.mjs <<'EOF'
+          import { chromium } from '@playwright/test';
           import fs from 'node:fs';
 
           const target = 'https://www.atacadao.com.br/loja/marilia';
@@ -135,7 +135,7 @@ jobs:
           console.log(JSON.stringify(result, null, 2));
           await browser.close();
           EOF
-          node /tmp/atacadao-probe.mjs
+          node atacadao-probe.mjs
 
       - uses: actions/upload-artifact@v4
         if: always()
