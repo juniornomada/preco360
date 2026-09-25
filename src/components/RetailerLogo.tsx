@@ -28,7 +28,7 @@ export default function RetailerLogo({
     <span className={cn("inline-flex min-w-0 items-center gap-2", className)}>
       <span
         className={cn(
-          "flex h-7 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-white px-1.5 py-1",
+          "flex h-7 w-12 shrink-0 items-center justify-center overflow-visible bg-transparent px-1 py-0.5",
           imageClassName,
         )}
         aria-hidden="true"
