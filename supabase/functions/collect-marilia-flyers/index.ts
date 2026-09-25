@@ -741,6 +741,297 @@ async function collectConfianca(db:any, report:any[]){
   report.push({retailer:"Confiança",endpoint:used,result:"resumo",found:publications.length,imported,unchanged,failed});
 }
 
+
+function tausteNormalize(value:unknown){
+  return String(value??"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/\s+/g," ").trim();
+}
+
+function tausteCollectionHash(publication:any){
+  const direct=String(publication?.directLink||"");
+  const directMatch=direct.match(/-([a-z0-9_-]{8,})\.html(?:$|[?#])/i);
+  if(directMatch?.[1]) return directMatch[1];
+  const cover=String(publication?.coverImgSrc||"");
+  const coverMatch=cover.match(/\/collections\/([^/]+)\//i);
+  return coverMatch?.[1]||"";
+}
+
+async function taustePublications(){
+  const profile="https://www.flipsnack.com/taustesupermercado/";
+  const api=new URL("https://api.flipsnack.com/v2/publications/related");
+  api.searchParams.set("p","1");
+  api.searchParams.set("accountId","9D99E5AF8D6");
+  api.searchParams.set("excludeId","0");
+  api.searchParams.set("userUrl",profile);
+  api.searchParams.set("folderHash","");
+  api.searchParams.set("searchAfter","0");
+  api.searchParams.set("searchKey","");
+  const r=await fetch(api,{headers:{"user-agent":UA,"accept":"application/json,*/*","referer":profile}});
+  if(!r.ok) throw new Error("Flipsnack API HTTP "+r.status);
+  const data=await r.json();
+  if(!Array.isArray(data)) throw new Error("Resposta inesperada do perfil oficial Tauste");
+  return data.filter((p:any)=>{
+    const name=tausteNormalize(p?.name);
+    return name.includes("ofertas tauste") && name.includes("marilia") && tausteCollectionHash(p);
+  });
+}
+
+async function tausteReaderPages(collectionHash:string){
+  const accountId="9D99E5AF8D6";
+  const token=btoa(accountId+"+"+collectionHash);
+  const authUrl=new URL("https://content-private.flipsnack.com/authorization");
+  authUrl.searchParams.set("hash",token);
+  authUrl.searchParams.set("domain","www.flipsnack.com");
+  const auth=await fetch(authUrl,{
+    headers:{
+      "user-agent":UA,
+      "accept":"application/json,*/*",
+      "referer":"https://www.flipsnack.com/taustesupermercado/",
+    },
+  });
+  if(!auth.ok) throw new Error("Flipsnack authorization HTTP "+auth.status);
+  const authData=await auth.json();
+  const signature=String(authData?.signature?.[collectionHash]||"");
+  if(!signature) throw new Error("Flipsnack não forneceu assinatura para a publicação");
+
+  const dataUrl="https://d3u72tnj701eui.cloudfront.net/"+accountId+"/collections/"+collectionHash+"/data.json?"+signature;
+  const dataResponse=await fetch(dataUrl,{headers:{"user-agent":UA,"accept":"application/json,*/*","referer":"https://player.flipsnack.com/"}});
+  if(!dataResponse.ok) throw new Error("Flipsnack data.json HTTP "+dataResponse.status);
+  const data=await dataResponse.json();
+  const title=String(data?.properties?.title||"").trim();
+  if(!tausteNormalize(title).includes("marilia")) throw new Error("A publicação do Flipsnack não confirmou Marília");
+
+  const rawOrder=Array.isArray(data?.pages?.order)?data.pages.order:[];
+  const ids=rawOrder.flat().map((id:any)=>String(id||"").trim()).filter(Boolean);
+  if(!ids.length) throw new Error("A publicação Tauste não possui páginas");
+
+  const pages=ids.map((id:string,index:number)=>{
+    const page=data?.pages?.data?.[id]||{};
+    const coverVersion=Number(page?.coverVersion)||1;
+    return {
+      id,
+      index:index+1,
+      url:"https://d3u72tnj701eui.cloudfront.net/"+accountId+"/collections/"+collectionHash+"/covers/"+encodeURIComponent(id)+"/original?"+signature+"&v="+coverVersion,
+      type:String(page?.type||"jpg"),
+      width:Number(page?.width)||null,
+      height:Number(page?.height)||null,
+    };
+  });
+  return {pages,title:title||"Ofertas Tauste Marília",updated_at:data?.properties?.dateLastUpdate||null};
+}
+
+async function collectTauste(db:any, report:any[], onlyTitle=""){
+  const sourcePage="https://www.flipsnack.com/taustesupermercado/";
+  let publications:any[]=[];
+  try{
+    publications=await taustePublications();
+  }catch(e){
+    report.push({retailer:"Tauste",endpoint:sourcePage,result:"erro",error:String(e),files:0,offers:0});
+    report.push({retailer:"Tauste",endpoint:sourcePage,result:"resumo",found:0,imported:0,unchanged:0,failed:1});
+    return;
+  }
+
+  if(onlyTitle){
+    const wanted=tausteNormalize(onlyTitle);
+    publications=publications.filter((p:any)=>tausteNormalize(p?.name)===wanted || tausteNormalize(String(p?.name||"").replace(/^ofertas\s+tauste\s+/i,""))===wanted);
+  }
+
+  let imported=0,unchanged=0,failed=0;
+  for(const publication of publications){
+    const collectionHash=tausteCollectionHash(publication);
+    const sourceTitle=String(publication?.name||"Ofertas Tauste Marília").trim();
+    const title=sourceTitle.replace(/^Ofertas\s+Tauste\s+/i,"Ofertas ");
+    const publishedAt=String(publication?.datePublished||"").trim()||null;
+    const directLink=String(publication?.directLink||"").trim();
+    const fullView=directLink
+      ? "https://www.flipsnack.com/taustesupermercado/"+directLink.replace(/\.html(?:$|[?#])/i,"/full-view.html")
+      : sourcePage;
+    const sourceKey="tauste:flipsnack:"+collectionHash;
+    const now=new Date().toISOString();
+
+    const {data:known}=await db.from("flyer_source_registry").select("*")
+      .eq("user_id",USER_ID).eq("retailer","Tauste").eq("city","Marília").eq("source_key",sourceKey).maybeSingle();
+
+    if(known && ["processed","unchanged","expired"].includes(String(known.status||"")) && known.file_hash){
+      await db.from("flyer_source_registry").update({
+        last_seen_at:now,
+        status:known.status==="unchanged"?"processed":known.status,
+        source_url:fullView,
+        source_title:title,
+        metadata_fingerprint:[collectionHash,publishedAt||""].join("|"),
+      }).eq("id",known.id);
+      let offers=0;
+      if(known.status!=="expired"){
+        const {data:fly}=await db.from("flyers").select("id").eq("user_id",USER_ID).eq("file_hash",known.file_hash).maybeSingle();
+        if(fly?.id){
+          const {count}=await db.from("flyer_items").select("id",{count:"exact",head:true}).eq("flyer_id",fly.id);
+          offers=count||0;
+        }
+      }
+      report.push({
+        retailer:"Tauste",endpoint:sourcePage,title,
+        validity:{from:known.valid_from||null,to:known.valid_to||null},
+        result:known.status==="expired"?"expirado já conhecido":"já conhecido antes do download",
+        files:0,offers,published_at:publishedAt,
+      });
+      unchanged++;
+      continue;
+    }
+
+    let reader:any;
+    try{
+      reader=await tausteReaderPages(collectionHash);
+    }catch(e){
+      failed++;
+      await writeRegistry(db,known,{
+        user_id:USER_ID,retailer:"Tauste",city:"Marília",source_key:sourceKey,source_url:fullView,source_title:title,
+        metadata_fingerprint:[collectionHash,publishedAt||""].join("|"),last_seen_at:now,status:"failed",last_error:String(e),
+      });
+      report.push({retailer:"Tauste",endpoint:sourcePage,title,result:"erro",error:String(e),files:0,offers:0,published_at:publishedAt});
+      continue;
+    }
+
+    const downloaded:any[]=[];
+    let pageError:any=null;
+    for(const page of reader.pages){
+      try{
+        const r=await fetch(page.url,{headers:{"user-agent":UA,"accept":"image/*,*/*","referer":"https://player.flipsnack.com/"}});
+        if(!r.ok) throw new Error("HTTP "+r.status);
+        const ct=r.headers.get("content-type")||"image/jpeg";
+        if(!/image\//i.test(ct)) throw new Error("content-type inesperado: "+ct);
+        const bytes=new Uint8Array(await r.arrayBuffer());
+        if(!bytes.length) throw new Error("imagem vazia");
+        downloaded.push({...page,bytes,ct,hash:await sha(bytes)});
+      }catch(e){
+        pageError=new Error("Página "+page.index+": "+String(e));
+        break;
+      }
+    }
+
+    if(pageError||!downloaded.length){
+      failed++;
+      await writeRegistry(db,known,{
+        user_id:USER_ID,retailer:"Tauste",city:"Marília",source_key:sourceKey,source_url:fullView,source_title:title,
+        metadata_fingerprint:[collectionHash,publishedAt||"",reader?.pages?.length||0].join("|"),
+        last_seen_at:now,status:"failed",last_error:String(pageError||"Nenhuma página baixada"),
+      });
+      report.push({retailer:"Tauste",endpoint:sourcePage,title,result:"erro",error:String(pageError||"Nenhuma página baixada"),files:downloaded.length,offers:0,published_at:publishedAt});
+      continue;
+    }
+
+    const combinedHash=await sha(new TextEncoder().encode(downloaded.map(p=>p.hash).join("|")));
+    const [{data:saved},{data:jobs}]=await Promise.all([
+      db.from("flyers").select("id,valid_from,valid_to").eq("user_id",USER_ID).eq("file_hash",combinedHash).limit(1),
+      db.from("flyer_import_jobs").select("id,status,result,valid_from,valid_to").eq("user_id",USER_ID).eq("file_hash",combinedHash)
+        .in("status",["queued","processing","refining","completed"]).order("created_at",{ascending:false}).limit(1),
+    ]);
+
+    if(saved?.length){
+      const flyer=saved[0];
+      const {count}=await db.from("flyer_items").select("id",{count:"exact",head:true}).eq("flyer_id",flyer.id);
+      await writeRegistry(db,known,{
+        user_id:USER_ID,retailer:"Tauste",city:"Marília",source_key:sourceKey,source_url:fullView,source_title:title,
+        valid_from:flyer.valid_from||null,valid_to:flyer.valid_to||null,file_hash:combinedHash,
+        metadata_fingerprint:[collectionHash,publishedAt||"",downloaded.length].join("|"),
+        last_seen_at:now,last_downloaded_at:now,last_processed_at:now,status:"processed",last_error:null,
+      });
+      report.push({retailer:"Tauste",endpoint:sourcePage,title,validity:{from:flyer.valid_from||null,to:flyer.valid_to||null},result:"duplicado pelo hash após download",files:downloaded.length,offers:count||0,published_at:publishedAt});
+      unchanged++;
+      continue;
+    }
+
+    if(jobs?.length){
+      const existing=jobs[0];
+      if(existing.status==="completed"){
+        const fr=await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/finalize-flyer-job`,{
+          method:"POST",
+          headers:{authorization:`Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,"content-type":"application/json"},
+          body:JSON.stringify({job_id:existing.id}),
+        });
+        const fin=await fr.json().catch(()=>({}));
+        if(fr.ok){
+          await writeRegistry(db,known,{
+            user_id:USER_ID,retailer:"Tauste",city:"Marília",source_key:sourceKey,source_url:fullView,source_title:title,
+            valid_from:fin?.valid_from||existing.valid_from||null,valid_to:fin?.valid_to||existing.valid_to||null,
+            file_hash:combinedHash,metadata_fingerprint:[collectionHash,publishedAt||"",downloaded.length].join("|"),
+            last_seen_at:now,last_downloaded_at:now,last_processed_at:now,status:"processed",last_error:null,
+          });
+          report.push({retailer:"Tauste",endpoint:sourcePage,title,validity:{from:fin?.valid_from||null,to:fin?.valid_to||null},result:"processado recuperado",files:downloaded.length,offers:fin?.offers_saved||0,job_id:existing.id,published_at:publishedAt});
+          imported++;
+          continue;
+        }
+        if(fin?.error==="FLYER_EXPIRED"){
+          await writeRegistry(db,known,{
+            user_id:USER_ID,retailer:"Tauste",city:"Marília",source_key:sourceKey,source_url:fullView,source_title:title,
+            valid_from:existing.valid_from||null,valid_to:fin?.valid_to||existing.valid_to||null,file_hash:combinedHash,
+            metadata_fingerprint:[collectionHash,publishedAt||"",downloaded.length].join("|"),
+            last_seen_at:now,last_downloaded_at:now,status:"expired",last_error:null,
+          });
+          report.push({retailer:"Tauste",endpoint:sourcePage,title,validity:{from:existing.valid_from||null,to:fin?.valid_to||existing.valid_to||null},result:"expirado",files:downloaded.length,offers:0,job_id:existing.id,published_at:publishedAt});
+          unchanged++;
+          continue;
+        }
+      }
+      report.push({retailer:"Tauste",endpoint:sourcePage,title,result:"já em processamento",files:0,offers:0,job_id:existing.id,status:existing.status,published_at:publishedAt});
+      unchanged++;
+      continue;
+    }
+
+    const jobId=crypto.randomUUID();
+    const sourceFiles:any[]=[];
+    let uploadError:any=null;
+    for(const page of downloaded){
+      const path=`${USER_ID}/imports/${jobId}/page-${String(page.index).padStart(3,"0")}.jpg`;
+      const {error}=await db.storage.from("flyers").upload(path,page.bytes,{contentType:page.ct||"image/jpeg",upsert:false});
+      if(error){uploadError=error;break}
+      sourceFiles.push({path,name:`Tauste Marília - página ${page.index}.jpg`,mime_type:page.ct||"image/jpeg",size:page.bytes.length});
+    }
+    if(uploadError){
+      failed++;
+      report.push({retailer:"Tauste",endpoint:sourcePage,title,result:"erro",error:"Upload: "+uploadError.message,files:sourceFiles.length,offers:0,published_at:publishedAt});
+      continue;
+    }
+
+    const initialResult={
+      auto_import:true,source_title:title,source_url:fullView,source_key:sourceKey,city:"Marília",
+      flipsnack_hash:collectionHash,published_at:publishedAt,validity_locked:false,
+    };
+    const {data:job,error:jobErr}=await db.from("flyer_import_jobs").insert({
+      id:jobId,user_id:USER_ID,source_file_path:sourceFiles[0].path,
+      source_file_name:`Tauste · Marília · Flipsnack ${collectionHash} · ${sourceFiles.length} imagem(ns)`,
+      source_files:sourceFiles,mime_type:sourceFiles[0].mime_type,file_hash:combinedHash,page_count:sourceFiles.length,status:"queued",
+      progress_current:0,progress_total:sourceFiles.length,progress_label:"Arquivo recebido. Aguardando processamento…",
+      retailer:"Tauste",valid_from:null,valid_to:null,result:initialResult,
+    }).select("id").single();
+
+    if(jobErr){
+      failed++;
+      report.push({retailer:"Tauste",endpoint:sourcePage,title,result:"erro",error:jobErr.message,files:sourceFiles.length,offers:0,published_at:publishedAt});
+      continue;
+    }
+
+    await writeRegistry(db,known,{
+      user_id:USER_ID,retailer:"Tauste",city:"Marília",source_key:sourceKey,source_url:fullView,source_title:title,
+      file_hash:combinedHash,metadata_fingerprint:[collectionHash,publishedAt||"",downloaded.length].join("|"),
+      last_seen_at:now,last_downloaded_at:now,status:"downloaded",last_error:null,
+    });
+
+    const pr=await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/process-flyer-job`,{
+      method:"POST",
+      headers:{authorization:`Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,"content-type":"application/json"},
+      body:JSON.stringify({job_id:job.id,mode:"start"}),
+    });
+    if(!pr.ok){
+      failed++;
+      report.push({retailer:"Tauste",endpoint:sourcePage,title,result:"erro ao iniciar processamento",files:sourceFiles.length,offers:0,job_id:job.id,error:"worker HTTP "+pr.status,published_at:publishedAt});
+      continue;
+    }
+    imported++;
+    report.push({retailer:"Tauste",endpoint:sourcePage,title,result:"novo enviado para processamento",files:sourceFiles.length,pages:sourceFiles.length,offers:0,job_id:job.id,published_at:publishedAt});
+  }
+
+  report.push({retailer:"Tauste",endpoint:sourcePage,result:"resumo",found:publications.length,imported,unchanged,failed});
+}
+
 Deno.serve(async(req)=>{
  if(req.method==="OPTIONS") return new Response("ok",{headers:corsHeaders});
  if(req.method!=="POST")return new Response("POST only",{status:405,headers:corsHeaders});
@@ -758,6 +1049,10 @@ Deno.serve(async(req)=>{
   }
   if(src.retailer==="Max Atacadista"){
     await collectMaxAtacadista(db,report,requestedTitle);
+    continue;
+  }
+  if(src.retailer==="Tauste"){
+    await collectTauste(db,report,requestedTitle);
     continue;
   }
   if(src.retailer==="Kawakami"){
