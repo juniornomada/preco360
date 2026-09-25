@@ -1791,64 +1791,6 @@ export default function OffersPage() {
     };
   }, [reference360]);
 
-  const decisionDisplayPackage = useMemo(() => {
-    if (!reference360) return null;
-
-    if (bestStoreReference) {
-      const pkg = storePackageBaseQuantity(bestStoreReference);
-      if (pkg?.baseUnit === reference360.baseUnit && pkg.baseQuantity > 0) {
-        return {
-          baseQuantity: pkg.baseQuantity,
-          baseUnit: pkg.baseUnit,
-          label:
-            historicalPackageLabel(
-              bestStoreReference.package_quantity,
-              bestStoreReference.package_unit,
-            ) ?? "embalagem",
-        };
-      }
-    }
-
-    const currentPackage = bestCurrentOffer?.candidate.packageInfo;
-    if (
-      currentPackage &&
-      currentPackage.baseUnit === reference360.baseUnit &&
-      currentPackage.baseQuantity > 0
-    ) {
-      return {
-        baseQuantity: currentPackage.baseQuantity,
-        baseUnit: currentPackage.baseUnit,
-        label: packageLabel(bestCurrentOffer.item) ?? "embalagem",
-      };
-    }
-
-    if (latestReceiptReference) {
-      const pkg = purchasePackageBaseQuantity(
-        latestReceiptReference,
-        productById.get(latestReceiptReference.product_id),
-      );
-      if (pkg?.baseUnit === reference360.baseUnit && pkg.baseQuantity > 0) {
-        return {
-          baseQuantity: pkg.baseQuantity,
-          baseUnit: pkg.baseUnit,
-          label:
-            historicalPackageLabel(
-              latestReceiptReference.package_quantity,
-              latestReceiptReference.package_unit,
-            ) ?? "embalagem",
-        };
-      }
-    }
-
-    return null;
-  }, [
-    bestCurrentOffer,
-    bestStoreReference,
-    latestReceiptReference,
-    productById,
-    reference360,
-  ]);
-
   const networkReferences = useMemo(() => {
     type NetworkReference = {
       retailer: string;
@@ -2180,15 +2122,6 @@ export default function OffersPage() {
                           decisionReference.baseUnit,
                         )}
                       </p>
-                      {decisionDisplayPackage && (
-                        <p className="mt-1 text-[10px] font-semibold text-primary/90 sm:text-xs">
-                          ≈ {brl(
-                            decisionReference.central *
-                              decisionDisplayPackage.baseQuantity,
-                          )}{" "}
-                          em {decisionDisplayPackage.label}
-                        </p>
-                      )}
                       <p className="mt-2 text-[10px] leading-snug text-muted-foreground sm:text-xs">
                         Faixa normal:
                         <br />
@@ -2266,27 +2199,12 @@ export default function OffersPage() {
                         decisionReference.baseUnit,
                       )}
                     </p>
-                    {decisionDisplayPackage && (
-                      <p className="mt-0.5 text-[11px] font-semibold text-primary/90">
-                        ≈ {brl(
-                          decisionReference.central *
-                            decisionDisplayPackage.baseQuantity,
-                        )}{" "}
-                        em {decisionDisplayPackage.label}
-                      </p>
-                    )}
                     <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
                       Acima de{" "}
                       {formatNormalizedPrice(
                         decisionReference.waitAbove,
                         decisionReference.baseUnit,
                       )}
-                      {decisionDisplayPackage
-                        ? ` (≈ ${brl(
-                            decisionReference.waitAbove *
-                              decisionDisplayPackage.baseQuantity,
-                          )} em ${decisionDisplayPackage.label})`
-                        : ""}
                       , vale esperar outra oferta se a compra puder aguardar.
                     </p>
                   </div>
