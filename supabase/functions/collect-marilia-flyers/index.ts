@@ -750,12 +750,16 @@ function tausteNormalize(value:unknown){
 }
 
 function tausteCollectionHash(publication:any){
-  const direct=String(publication?.directLink||"");
-  const directMatch=direct.match(/-([a-z0-9_-]{8,})\.html(?:$|[?#])/i);
-  if(directMatch?.[1]) return directMatch[1];
+  // Flipsnack exposes the stable collection hash explicitly in the cover URL.
+  // Prefer it over parsing the human-readable slug, whose hyphens previously
+  // caused the whole slug suffix to be mistaken for the hash.
   const cover=String(publication?.coverImgSrc||"");
   const coverMatch=cover.match(/\/collections\/([^/]+)\//i);
-  return coverMatch?.[1]||"";
+  if(coverMatch?.[1]) return coverMatch[1];
+
+  const direct=String(publication?.directLink||"");
+  const directMatch=direct.match(/-([a-z0-9]{10})\.html(?:$|[?#])/i);
+  return directMatch?.[1]||"";
 }
 
 async function tausteResolvePublication(collectionHash:string,fullView:string){
