@@ -231,6 +231,32 @@ function alignDateYearToSource(value: unknown, sourceFileName: string) {
   return date;
 }
 
+function alignValidityToYearHint(
+  validFrom: unknown,
+  validTo: unknown,
+  yearHint: unknown,
+) {
+  const from = typeof validFrom === "string" ? validFrom.trim() : "";
+  const to = typeof validTo === "string" ? validTo.trim() : "";
+  const year = Math.trunc(Number(yearHint));
+  if (
+    !/^20\d{2}$/.test(String(year)) ||
+    !/^20\d{2}-\d{2}-\d{2}$/.test(from) ||
+    !/^20\d{2}-\d{2}-\d{2}$/.test(to)
+  ) {
+    return { validFrom: validFrom ?? null, validTo: validTo ?? null };
+  }
+
+  const fromMonthDay = from.slice(5);
+  const toMonthDay = to.slice(5);
+  const endYear = toMonthDay < fromMonthDay ? year + 1 : year;
+
+  return {
+    validFrom: String(year) + "-" + fromMonthDay,
+    validTo: String(endYear) + "-" + toMonthDay,
+  };
+}
+
 function sanitizeOfferPricing(offer: any) {
   const price = Number(offer?.price);
   const club = Number(offer?.club_price);
@@ -1150,6 +1176,16 @@ async function processPage(jobId: string, requestedPage: number) {
       }
     }
 
+    if (!validityLocked && job.result?.validity_year_hint) {
+      const alignedValidity = alignValidityToYearHint(
+        validFrom,
+        validTo,
+        job.result.validity_year_hint,
+      );
+      validFrom = alignedValidity.validFrom;
+      validTo = alignedValidity.validTo;
+    }
+
     const retryCounts =
       job.result?.page_retry_counts &&
       typeof job.result.page_retry_counts === "object"
@@ -1376,13 +1412,18 @@ async function processInitial(jobId: string) {
       ? Array.from({ length: pageCount }, (_, i) => i + 1).filter((p) => !covered.has(p))
       : [];
 
+    const initialValidity = alignValidityToYearHint(
+      parsed.valid_from ?? job.valid_from ?? null,
+      parsed.valid_to ?? job.valid_to ?? null,
+      job.result?.validity_year_hint,
+    );
     const result = {
       ok: true,
       engine: "gemini-vision",
       model,
       retailer: canonicalRetailerName(parsed.retailer ?? job.retailer ?? null),
-      valid_from: parsed.valid_from ?? job.valid_from ?? null,
-      valid_to: parsed.valid_to ?? job.valid_to ?? null,
+      valid_from: initialValidity.validFrom,
+      valid_to: initialValidity.validTo,
       page_count: pageCount,
       deduplicated_count: deduplicatedCount,
       offers,
