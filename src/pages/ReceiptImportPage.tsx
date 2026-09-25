@@ -12,6 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertCircle, Camera, CheckCircle2, ExternalLink, Key, Loader2, QrCode, ReceiptText, RefreshCw, Save, Trash2 } from "lucide-react";
 
+const db = supabase as any;
+
 type ParsedItem = {
   name: string;
   price: string;
@@ -276,6 +278,7 @@ export default function ReceiptImportPage() {
         if (!name || !price) continue;
 
         const metadata = packageMetadata(item);
+        const normalized = normalizedReceiptPrice(item);
         const { data: found, error: findError } = await supabase
           .from("products")
           .select("id,package_size,unit")
@@ -322,12 +325,18 @@ export default function ReceiptImportPage() {
           total ? `total do item ${total.toFixed(2)}` : null,
         ].filter(Boolean).join(" | ");
 
-        const { error: priceError } = await supabase.from("prices").insert({
+        const { error: priceError } = await db.from("prices").insert({
           product_id: productId,
           supermarket: supermarket.trim() || "Não informado",
           price,
           date,
           user_id: user.id,
+          source: "receipt",
+          package_quantity: metadata?.package_size ?? null,
+          package_unit: metadata?.unit ?? null,
+          normalized_price: normalized?.value ?? null,
+          base_unit:
+            normalized?.unit === "L" ? "l" : normalized?.unit ?? null,
           receipt_text: details,
         });
         if (priceError) throw priceError;
