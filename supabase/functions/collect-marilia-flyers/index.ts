@@ -140,7 +140,7 @@ async function collectAtacadao(db:any, report:any[], onlyTitle=""){
       continue;
     }
 
-    const initialResult={auto_import:true,source_title:flyer.title,source_url:flyer.url,source_key:sourceKey,city:"Marília"};
+    const initialResult={auto_import:true,source_title:flyer.title,source_url:flyer.url,source_key:sourceKey,city:"Marília",valid_from:flyer.valid_from,valid_to:flyer.valid_to,validity_locked:true};
     const {data:job,error:jobErr}=await db.from("flyer_import_jobs").insert({
       user_id:USER_ID,source_file_path:path,source_file_name:`Atacadão - ${flyer.title}.pdf`,mime_type:"application/pdf",file_hash:hash,page_count:pages,status:"queued",
       progress_current:0,progress_total:pages,progress_label:"Arquivo recebido. Aguardando processamento…",
@@ -510,7 +510,7 @@ async function collectKawakami(db:any, report:any[]){
     sourceFiles.push({path,name:`Kawakami Marília - página ${page.index}.${ext}`,mime_type:page.ct,size:page.bytes.length});
   }
 
-  const initialResult={auto_import:true,source_title:title,source_url:used,source_key:sourceKey,city:"Marília",valid_from:val.from,valid_to:val.to};
+  const initialResult={auto_import:true,source_title:title,source_url:used,source_key:sourceKey,city:"Marília",valid_from:val.from,valid_to:val.to,validity_locked:true};
   const {data:job,error:jobErr}=await db.from("flyer_import_jobs").insert({
     id:jobId,user_id:USER_ID,source_file_path:sourceFiles[0].path,source_file_name:`Kawakami · Ofertas ${val.from} a ${val.to} · ${sourceFiles.length} imagem(ns)`,
     source_files:sourceFiles,mime_type:sourceFiles[0].mime_type,file_hash:combinedHash,page_count:sourceFiles.length,status:"queued",
@@ -704,7 +704,7 @@ async function collectConfianca(db:any, report:any[]){
       continue;
     }
 
-    const initialResult={auto_import:true,source_title:title,source_url:canonical,source_key:sourceKey,city:"Marília",valid_from:sourceValidity.from,valid_to:sourceValidity.to};
+    const initialResult={auto_import:true,source_title:title,source_url:canonical,source_key:sourceKey,city:"Marília",valid_from:sourceValidity.from,valid_to:sourceValidity.to,validity_locked:Boolean(sourceValidity.from&&sourceValidity.to)};
     const {data:job,error:jobErr}=await db.from("flyer_import_jobs").insert({
       user_id:USER_ID,source_file_path:path,source_file_name:`Confiança - Marília - ${filename}`,mime_type:"application/pdf",
       file_hash:hash,page_count:pages,status:"queued",progress_current:0,progress_total:pages,
