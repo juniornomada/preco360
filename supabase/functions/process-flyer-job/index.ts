@@ -898,6 +898,26 @@ function isTransientAiFailure(error: unknown) {
   return /timed out|timeout|429|resource exhausted|overloaded|temporar|502|503|504|json inválido|conteúdo estruturado/i.test(message);
 }
 
+async function triggerAutoFinalize(jobId: string) {
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) return;
+
+  const response = await fetch(url + "/functions/v1/finalize-flyer-job", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + key,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ job_id: jobId }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => "");
+    console.error("auto-finalize flyer failed", jobId, response.status, message.slice(0, 600));
+  }
+}
+
 async function triggerPage(jobId: string, pageNo: number) {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -1245,6 +1265,9 @@ async function processPage(jobId: string, requestedPage: number) {
         warning_message: null,
         completed_at: new Date().toISOString(),
       });
+      if (result?.auto_import === true) {
+        EdgeRuntime.waitUntil(triggerAutoFinalize(jobId));
+      }
       return;
     }
 
