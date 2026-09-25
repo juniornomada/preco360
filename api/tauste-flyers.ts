@@ -77,12 +77,6 @@ async function resolveInBrowser(browser: any, publication: any) {
       "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
     });
 
-    const token = Buffer.from(ACCOUNT_ID + "+" + hash).toString("base64");
-    const playerUrl =
-      "https://player.flipsnack.com/?hash=" +
-      encodeURIComponent(token) +
-      "&forceWidget=1";
-
     const dataPromise = new Promise<{ data: any; url: string }>(
       (resolve, reject) => {
         const onResponse = async (response: any) => {
@@ -110,19 +104,27 @@ async function resolveInBrowser(browser: any, publication: any) {
       },
     );
 
-    const navigation = await page.goto(playerUrl, {
+    const navigation = await page.goto(sourceUrl, {
       waitUntil: "domcontentloaded",
       timeout: 20_000,
-      referer: sourceUrl,
     });
     if (navigation && navigation.status() >= 400) {
-      throw new Error("PLAYER_HTTP_" + navigation.status());
+      throw new Error("SOURCE_HTTP_" + navigation.status());
     }
+
+    await page.evaluate(() => {
+      const iframe = document.querySelector(
+        "#player-iframe, iframe[data-src]",
+      ) as HTMLIFrameElement | null;
+      if (iframe && iframe.dataset?.src && !iframe.getAttribute("src")) {
+        iframe.setAttribute("src", iframe.dataset.src);
+      }
+    });
 
     const captured = await Promise.race([
       dataPromise,
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("DATA_CAPTURE_TIMEOUT")), 15_000),
+        setTimeout(() => reject(new Error("DATA_CAPTURE_TIMEOUT")), 20_000),
       ),
     ]);
 
