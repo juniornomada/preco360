@@ -24,56 +24,21 @@ function currentDateInSaoPaulo() {
   }).format(new Date());
 }
 
-function extractStoreInfo(html: string) {
-  const marker = '\\"storeInfo\\":';
-  const markerIndex = html.indexOf(marker);
-  if (markerIndex < 0) return null;
+function extractFlyers(html: string): Flyer[] {
+  const rows: Flyer[] = [];
+  const re = /"id":"([^"]+)"[\s\S]{0,1200}?"validity":\{"initial":"([^"]+)","final":"([^"]+)"\}[\s\S]{0,1200}?"urlFinalDocument":"([^"]+)"[\s\S]{0,900}?"urlFinalDocumentThumbnail":"([^"]+)"[\s\S]{0,900}?"name":"([^"]+)"/g;
 
-  const start = markerIndex + marker.length;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  let end = -1;
-
-  for (let i = start; i < html.length; i += 1) {
-    const ch = html[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      continue;
-    }
-    if (ch === "{") depth += 1;
-    if (ch === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        end = i + 1;
-        break;
-      }
-    }
+  for (const match of html.matchAll(re)) {
+    rows.push({
+      id: match[1],
+      validity: { initial: match[2], final: match[3] },
+      urlFinalDocument: match[4],
+      urlFinalDocumentThumbnail: match[5],
+      name: match[6],
+      exclude: false,
+    });
   }
-
-  if (end < 0) return null;
-  const escapedJson = html.slice(start, end);
-  try {
-    return JSON.parse(escapedJson.replace(/\\\"/g, '"').replace(/\\\\/g, "\\"));
-  } catch {
-    return null;
-  }
-}
-
-function fallbackFlyers(html: string): Flyer[] {
-  const blockMatch = html.match(/\\\"flyers\\":(\[[\s\S]*?\])\s*,\\\"dataInauguracao\\\"/);
-  if (!blockMatch) return [];
-  try {
-    return JSON.parse(blockMatch[1].replace(/\\\"/g, '"').replace(/\\\\/g, "\\"));
-  } catch {
-    return [];
-  }
+  return rows;
 }
 
 export default {
@@ -97,10 +62,7 @@ export default {
     }
 
     const html = await response.text();
-    const storeInfo = extractStoreInfo(html);
-    const rawFlyers: Flyer[] = Array.isArray(storeInfo?.flyers)
-      ? storeInfo.flyers
-      : fallbackFlyers(html);
+    const rawFlyers = extractFlyers(html);
 
     const today = currentDateInSaoPaulo();
     const flyers = rawFlyers
@@ -131,8 +93,8 @@ export default {
         retailer: "Atacadão",
         city: "Marília",
         source_url: SOURCE_URL,
-        store_id: Number(storeInfo?.storeId ?? 630),
-        store_name: String(storeInfo?.loja ?? "Marília"),
+        store_id: 630,
+        store_name: "Marília",
         checked_on: today,
         flyers,
       },
