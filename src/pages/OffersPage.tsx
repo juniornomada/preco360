@@ -926,6 +926,46 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   return result;
 }
 
+function productReferenceFamily(product: ProductForMatch): OfferFamily {
+  return inferOfferFamily(
+    {
+      id: `product-${product.id}`,
+      flyer_id: "",
+      product_id: product.id,
+      raw_name: product.name,
+      brand: product.brand ?? null,
+      package_quantity: product.package_size ?? null,
+      package_unit: product.unit ?? null,
+      advertised_price: 1,
+      normalized_price: null,
+      base_unit: null,
+    },
+    product,
+  );
+}
+
+function storeReferenceFamily(row: StoreReferenceRow): OfferFamily {
+  return inferOfferFamily(
+    {
+      id: row.id,
+      flyer_id: "",
+      product_id: row.product_id,
+      raw_name: row.raw_name,
+      package_quantity: row.package_quantity,
+      package_unit: row.package_unit,
+      advertised_price: Number(row.retail_price) || 1,
+      normalized_price: row.normalized_retail_price,
+      base_unit: row.base_unit,
+    },
+    row.products
+      ? {
+          id: row.products.id,
+          name: row.products.name,
+        }
+      : null,
+  );
+}
+
 function familyMatchesIntent(family: OfferFamily, intent: SearchFamilyIntent | null) {
   if (!intent) return true;
   if (intent === "milk") {
@@ -1595,12 +1635,20 @@ export default function OffersPage() {
   const matchingStoreReferences = useMemo(() => {
     if (!hasSearch) return [];
 
-    return storeReferenceRows.filter((row) =>
-      productMatchesSearch(
-        `${row.raw_name} ${row.products?.name ?? ""}`,
-        normalizedSearch,
-      ),
-    );
+    const queryFamily = queryOfferFamily(normalizedSearch);
+
+    return storeReferenceRows.filter((row) => {
+      if (
+        !productMatchesSearch(
+          `${row.raw_name} ${row.products?.name ?? ""}`,
+          normalizedSearch,
+        )
+      ) {
+        return false;
+      }
+
+      return familyMatchesIntent(storeReferenceFamily(row), queryFamily);
+    });
   }, [hasSearch, normalizedSearch, storeReferenceRows]);
 
   const bestStoreReference = useMemo(() => {
@@ -1642,15 +1690,28 @@ export default function OffersPage() {
   const matchingReceiptReferences = useMemo(() => {
     if (!directSearchProductIds.length) return [];
     const wanted = new Set(directSearchProductIds);
+    const queryFamily = queryOfferFamily(normalizedSearch);
 
     return purchasePrices
-      .filter(
-        (row) => row.source === "receipt" && wanted.has(row.product_id),
-      )
+      .filter((row) => {
+        if (row.source !== "receipt" || !wanted.has(row.product_id)) {
+          return false;
+        }
+
+        const product = productById.get(row.product_id);
+        if (!product) return false;
+
+        return familyMatchesIntent(productReferenceFamily(product), queryFamily);
+      })
       .sort((a, b) =>
         String(b.date ?? "").localeCompare(String(a.date ?? "")),
       );
-  }, [directSearchProductIds, purchasePrices]);
+  }, [
+    directSearchProductIds,
+    normalizedSearch,
+    productById,
+    purchasePrices,
+  ]);
 
   const latestReceiptReference = matchingReceiptReferences[0] ?? null;
 
@@ -2161,16 +2222,22 @@ export default function OffersPage() {
                         · {dateBr(latestReceiptReference.date)}
                       </p>
                       <p className="mt-2 text-[clamp(1rem,4.5vw,1.5rem)] font-extrabold leading-none">
-                        {brl(Number(latestReceiptReference.price))}
+                        {latestReceiptReferenceValue &&
+                        latestReceiptReferenceValue.baseUnit !== "un"
+                          ? formatNormalizedPrice(
+                              latestReceiptReferenceValue.value,
+                              latestReceiptReferenceValue.baseUnit,
+                            )
+                          : brl(Number(latestReceiptReference.price))}
                       </p>
-                      {latestReceiptReferenceValue && (
-                        <p className="mt-1 text-[10px] text-muted-foreground sm:text-xs">
-                          {formatNormalizedPrice(
-                            latestReceiptReferenceValue.value,
-                            latestReceiptReferenceValue.baseUnit,
-                          )}
-                        </p>
-                      )}
+                      {latestReceiptReferenceValue &&
+                        latestReceiptReferenceValue.baseUnit !== "un" && (
+                          <p className="mt-1 text-[10px] text-muted-foreground sm:text-xs">
+                            Pago na embalagem: {brl(
+                              Number(latestReceiptReference.price),
+                            )}
+                          </p>
+                        )}
                     </>
                   ) : (
                     <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
@@ -2392,11 +2459,8 @@ export default function OffersPage() {
                         />
 
                         <div className="min-w-0 flex-1">
-                          <p className="truncate font-extrabold">
-                            {reference.retailer}
-                          </p>
                           <span
-                            className={`mt-1 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${status.className}`}
+                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${status.className}`}
                           >
                             <StatusIcon className="h-3 w-3" />
                             {status.label}
