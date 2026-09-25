@@ -178,7 +178,7 @@ export default {
 
       browser = await puppeteer.launch({
         args: chromium.args,
-        defaultViewport: chromium.defaultViewport,
+        defaultViewport: { width: 1280, height: 960 },
         executablePath: await chromium.executablePath(),
         headless: true,
       });
