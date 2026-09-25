@@ -296,8 +296,14 @@ const verdictUi = {
   },
 } as const;
 
-const brl = (value: number) =>
-  value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const brl = (value: number | null | undefined) => {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return "—";
+  return numericValue.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+};
 
 type HistoricalReferenceValue = {
   value: number;
