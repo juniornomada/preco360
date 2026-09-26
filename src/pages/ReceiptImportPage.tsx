@@ -119,6 +119,30 @@ function packageMetadata(item: ParsedItem) {
   return pkg ? { package_size: pkg.quantity, unit: pkg.unit } : null;
 }
 
+function normalizedPriceFromPackage(
+  price: number,
+  metadata:
+    | { package_size: number | string; unit: string }
+    | null
+    | undefined,
+) {
+  if (!Number.isFinite(price) || price <= 0 || !metadata) return null;
+
+  const size = Number(metadata.package_size);
+  const unit = String(metadata.unit ?? "").toLowerCase();
+  if (!Number.isFinite(size) || size <= 0) return null;
+
+  if (unit === "g") return { value: price / (size / 1000), unit: "kg" as const };
+  if (unit === "kg") return { value: price / size, unit: "kg" as const };
+  if (unit === "ml") return { value: price / (size / 1000), unit: "L" as const };
+  if (unit === "l") return { value: price / size, unit: "L" as const };
+  if (["un", "und", "unid"].includes(unit)) {
+    return { value: price / size, unit: "un" as const };
+  }
+
+  return null;
+}
+
 function receiptItemSummary(item: ParsedItem) {
   const quantity = decimalValue(item.quantity);
   const unitPrice = decimalValue(item.unitPrice ?? item.price);
@@ -278,7 +302,7 @@ export default function ReceiptImportPage() {
         if (!name || !price) continue;
 
         const metadata = packageMetadata(item);
-        const normalized = normalizedReceiptPrice(item);
+        const normalizedFromItem = normalizedReceiptPrice(item);
         const { data: found, error: findError } = await supabase
           .from("products")
           .select("id,package_size,unit")
@@ -313,6 +337,18 @@ export default function ReceiptImportPage() {
           if (metadataError) throw metadataError;
         }
 
+        const existingMetadata =
+          found?.[0]?.package_size && found?.[0]?.unit
+            ? {
+                package_size: found[0].package_size,
+                unit: found[0].unit,
+              }
+            : null;
+        const effectiveMetadata = metadata ?? existingMetadata;
+        const normalized =
+          normalizedFromItem ??
+          normalizedPriceFromPackage(price, effectiveMetadata);
+
         const quantity = decimalValue(item.quantity);
         const total = decimalValue(item.totalPrice);
         const unit = String(item.unit ?? "").toUpperCase();
@@ -332,8 +368,8 @@ export default function ReceiptImportPage() {
           date,
           user_id: user.id,
           source: "receipt",
-          package_quantity: metadata?.package_size ?? null,
-          package_unit: metadata?.unit ?? null,
+          package_quantity: effectiveMetadata?.package_size ?? null,
+          package_unit: effectiveMetadata?.unit ?? null,
           normalized_price: normalized?.value ?? null,
           base_unit:
             normalized?.unit === "L" ? "l" : normalized?.unit ?? null,
