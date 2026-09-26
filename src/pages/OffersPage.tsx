@@ -760,7 +760,7 @@ function inferOfferFamily(
     return "milkLiquid";
   }
 
-  if (/^molho (?:de )?tomate\b/.test(raw)) return "tomatoSauce";
+  if (/^molho\b/.test(raw) && /\btomate\b/.test(raw)) return "tomatoSauce";
   if (/^extrato (?:de )?tomate\b/.test(raw)) return "tomatoExtract";
   if (/^passata\b/.test(raw) && /\btomate\b/.test(raw)) {
     return "tomatoPassata";
@@ -2141,6 +2141,13 @@ export default function OffersPage() {
     [analyzed, packageFilter],
   );
 
+  const listedAnalyzed = useMemo(() => {
+    if (!bestCurrentOffer || resultFamilyCount !== 1) return visibleAnalyzed;
+    return visibleAnalyzed.filter(
+      (entry) => entry.item.id !== bestCurrentOffer.item.id,
+    );
+  }, [bestCurrentOffer, resultFamilyCount, visibleAnalyzed]);
+
   const activeFlyerCount = activeFlyers.length;
   const allActiveOfferCount = activeOfferCount;
 
@@ -2412,12 +2419,20 @@ export default function OffersPage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                {hasSearch ? "Ofertas vigentes" : "Melhores oportunidades vigentes"}
+                {hasSearch
+                  ? resultFamilyCount === 1 && bestCurrentOffer
+                    ? "Outras ofertas vigentes"
+                    : "Ofertas vigentes"
+                  : "Melhores oportunidades vigentes"}
               </p>
               <p className="text-sm font-bold">
-                {packageFilter === "all"
-                  ? `${analyzed.length} oferta(s) encontrada(s)`
-                  : `${visibleAnalyzed.length} de ${analyzed.length} oferta(s)`}
+                {resultFamilyCount === 1 && bestCurrentOffer
+                  ? packageFilter === "all"
+                    ? `${listedAnalyzed.length} outra(s) oferta(s)`
+                    : `${listedAnalyzed.length} outra(s) de ${visibleAnalyzed.length} nesta embalagem`
+                  : packageFilter === "all"
+                    ? `${analyzed.length} oferta(s) encontrada(s)`
+                    : `${visibleAnalyzed.length} de ${analyzed.length} oferta(s)`}
               </p>
             </div>
             {hasSearch &&
@@ -2431,7 +2446,7 @@ export default function OffersPage() {
               )}
           </div>
 
-          {visibleAnalyzed.slice(0, hasSearch ? 30 : 12).map((entry, index) => {
+          {listedAnalyzed.slice(0, hasSearch ? 30 : 12).map((entry, index) => {
             const { item, flyer, candidate, verdict, productId } = entry;
             const ui = verdictUi[verdict.key];
             const VerdictIcon = ui.Icon;
@@ -2489,7 +2504,7 @@ export default function OffersPage() {
               bestOfferByFamily.get(entry.family) === item.id;
             const isTopResult = isBroadFamilySearch
               ? hasSearch && isFamilyBest
-              : hasSearch && index === 0;
+              : hasSearch && resultFamilyCount !== 1 && index === 0;
             const bestLabel = isBroadFamilySearch
               ? `Melhor compra agora · ${familyLabel(entry.family)}`
               : "Melhor compra agora";
