@@ -1,10 +1,11 @@
-import { Home, BadgeDollarSign, ScanLine, Tags, User } from "lucide-react";
+import { Home, BadgeDollarSign, ScanLine, ShoppingBasket, Tags, User } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 
 const navItems = [
   { icon: Home, label: "Início", path: "/" },
   { icon: BadgeDollarSign, label: "Cotar", path: "/search" },
   { icon: Tags, label: "Ofertas", path: "/offers" },
+  { icon: ShoppingBasket, label: "Cesta", path: "/offers/basket" },
   { icon: ScanLine, label: "Cupom", path: "/upload" },
   { icon: User, label: "Perfil", path: "/profile" },
 ];
@@ -16,10 +17,15 @@ export default function BottomNav() {
   return (
     <nav className="bottom-nav">
       {navItems.map((item) => {
-        const isActive = item.path === "/offers"
-          ? location.pathname.startsWith("/offers") ||
-            location.pathname.startsWith("/radar")
-          : location.pathname === item.path;
+        const isActive =
+          item.path === "/offers"
+            ? location.pathname === "/offers" ||
+              location.pathname === "/offers/images" ||
+              location.pathname === "/offers/store-prices" ||
+              location.pathname.startsWith("/radar")
+            : item.path === "/offers/basket"
+              ? location.pathname === "/offers/basket"
+              : location.pathname === item.path;
         return (
           <button
             key={item.path}
