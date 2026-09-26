@@ -626,6 +626,9 @@ export function genericBasketFamily(value: string): GenericBasketFamily | null {
 
   // Dairy: keep derivatives separate, but ignore brand and package size.
   if (startsComparison(t, "creme", "leite")) {
+    if (hasComparisonToken(t, "nata", "fresco", "fresca")) {
+      return { key: "leite:creme-nata", label: "Creme de leite nata" };
+    }
     return { key: "leite:creme", label: "Creme de leite" };
   }
   if (startsComparison(t, "doce", "leite")) {
@@ -1024,7 +1027,11 @@ function purchaseComparisonKey(value: string) {
     return `leite:liquido:${milkVariant(t)}`;
   }
 
-  if (startsComparison(t, "creme", "leite")) return "leite:creme";
+  if (startsComparison(t, "creme", "leite")) {
+    return hasComparisonToken(t, "nata", "fresco", "fresca")
+      ? "leite:creme-nata"
+      : "leite:creme";
+  }
   if (startsComparison(t, "doce", "leite")) return "leite:doce";
 
   if (startsComparison(t, "milho")) {
