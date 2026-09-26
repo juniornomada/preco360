@@ -292,6 +292,10 @@ function sanitizeOfferPricing(offer: any) {
     }
   }
 
+  if (keepClub && notes.some((note: string) => /elo/i.test(note))) {
+    keepClub = false;
+  }
+
   return {
     ...offer,
     club_price: keepClub ? club : null,
