@@ -1199,6 +1199,7 @@ export default function OffersPage() {
   const navigate = useNavigate();
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [packageFilter, setPackageFilter] = useState("all");
   const searchTimerRef = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const normalizedSearch = normalizeProductSearchText(search.trim());
@@ -1238,6 +1239,10 @@ export default function OffersPage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    setPackageFilter("all");
+  }, [normalizedSearch]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -2110,6 +2115,32 @@ export default function OffersPage() {
     [analyzed],
   );
 
+  const packageFilterOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    for (const entry of analyzed) {
+      const label = packageLabel(entry.item);
+      if (!label) continue;
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+
+    return [...counts.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return a.label.localeCompare(b.label, "pt-BR");
+      })
+      .slice(0, 5);
+  }, [analyzed]);
+
+  const visibleAnalyzed = useMemo(
+    () =>
+      packageFilter === "all"
+        ? analyzed
+        : analyzed.filter((entry) => packageLabel(entry.item) === packageFilter),
+    [analyzed, packageFilter],
+  );
+
   const activeFlyerCount = activeFlyers.length;
   const allActiveOfferCount = activeOfferCount;
 
@@ -2217,6 +2248,12 @@ export default function OffersPage() {
                       </span>
                     )}
                   </div>
+
+                  {currentVsStore?.currentIsBetter && (
+                    <p className="mt-1.5 text-[10px] font-bold text-primary">
+                      {Math.abs(currentVsStore.diffPct).toFixed(0)}% mais barato que o preço de gôndola registrado
+                    </p>
+                  )}
                 </div>
 
                 <div className="shrink-0 text-right">
@@ -2253,6 +2290,40 @@ export default function OffersPage() {
         )}
 
 
+
+      {hasSearch &&
+        !isLoading &&
+        !error &&
+        analyzed.length > 1 &&
+        packageFilterOptions.length > 1 && (
+          <div className="mb-4 -mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <button
+              type="button"
+              onClick={() => setPackageFilter("all")}
+              className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                packageFilter === "all"
+                  ? "border-primary bg-primary/15 text-primary"
+                  : "border-border bg-card/40 text-muted-foreground"
+              }`}
+            >
+              Todos ({analyzed.length})
+            </button>
+            {packageFilterOptions.map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                onClick={() => setPackageFilter(option.label)}
+                className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                  packageFilter === option.label
+                    ? "border-primary bg-primary/15 text-primary"
+                    : "border-border bg-card/40 text-muted-foreground"
+                }`}
+              >
+                {option.label} ({option.count})
+              </button>
+            ))}
+          </div>
+        )}
 
       {hasSearch && storeReferencesError && (
         <p className="mb-3 text-[10px] text-muted-foreground">
@@ -2344,7 +2415,9 @@ export default function OffersPage() {
                 {hasSearch ? "Ofertas vigentes" : "Melhores oportunidades vigentes"}
               </p>
               <p className="text-sm font-bold">
-                {analyzed.length} oferta(s) encontrada(s)
+                {packageFilter === "all"
+                  ? `${analyzed.length} oferta(s) encontrada(s)`
+                  : `${visibleAnalyzed.length} de ${analyzed.length} oferta(s)`}
               </p>
             </div>
             {hasSearch &&
@@ -2353,12 +2426,12 @@ export default function OffersPage() {
                 <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold text-primary">
                   {isBroadFamilySearch
                     ? "Melhor por tipo"
-                    : "Melhor primeiro"}
+                    : "Melhor preço"}
                 </span>
               )}
           </div>
 
-          {analyzed.slice(0, hasSearch ? 30 : 12).map((entry, index) => {
+          {visibleAnalyzed.slice(0, hasSearch ? 30 : 12).map((entry, index) => {
             const { item, flyer, candidate, verdict, productId } = entry;
             const ui = verdictUi[verdict.key];
             const VerdictIcon = ui.Icon;
@@ -2646,39 +2719,61 @@ export default function OffersPage() {
                   <TrendingUp className="h-5 w-5 text-primary" />
                 </div>
                 <div className="min-w-0">
-                  <h2 className="text-[clamp(1.45rem,6vw,2rem)] font-extrabold leading-tight tracking-tight">
+                  <h2 className="text-[clamp(1.35rem,5.5vw,1.85rem)] font-extrabold leading-tight tracking-tight">
                     Resumo para decidir
                   </h2>
                   <p className="mt-0.5 text-sm text-muted-foreground">
-                    {bestCurrentOffer
-                      ? "Oferta vigente + seu histórico"
-                      : "Sem oferta vigente — usando histórico e gôndola"}
+                    Oferta vigente + gôndola + seu histórico
                   </p>
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-2">
                 <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-2.5 sm:p-3">
-                  <div className="mb-1.5 flex items-center gap-2">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-sky-400">
-                      <ReceiptText className="h-4 w-4" />
-                    </span>
-                    <p className="text-[11px] font-extrabold leading-tight sm:text-sm">
-                      Cupom fiscal
+                  <div className="mb-1.5 flex items-center gap-1.5">
+                    <Store className="h-4 w-4 shrink-0 text-violet-400" />
+                    <p className="text-[10px] font-extrabold leading-tight sm:text-xs">
+                      Gôndola
                     </p>
                   </div>
+                  <p className="text-[9px] text-muted-foreground sm:text-[10px]">
+                    preço normal
+                  </p>
+                  {bestStoreReference ? (
+                    <>
+                      <p className="mt-2 text-[clamp(.95rem,4vw,1.35rem)] font-black leading-none">
+                        {bestStoreReferenceValue
+                          ? formatNormalizedPrice(
+                              bestStoreReferenceValue.value,
+                              bestStoreReferenceValue.baseUnit,
+                            )
+                          : brl(Number(bestStoreReference.retail_price))}
+                      </p>
+                      <p className="mt-1 truncate text-[9px] text-muted-foreground sm:text-[10px]">
+                        {canonicalRetailerName(bestStoreReference.supermarket) ||
+                          bestStoreReference.supermarket}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="mt-2 text-[10px] leading-snug text-muted-foreground">
+                      Sem registro
+                    </p>
+                  )}
+                </div>
+
+                <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-2.5 sm:p-3">
+                  <div className="mb-1.5 flex items-center gap-1.5">
+                    <ReceiptText className="h-4 w-4 shrink-0 text-sky-400" />
+                    <p className="text-[10px] font-extrabold leading-tight sm:text-xs">
+                      Histórico
+                    </p>
+                  </div>
+                  <p className="text-[9px] text-muted-foreground sm:text-[10px]">
+                    último pago
+                  </p>
                   {latestReceiptReference ? (
                     <>
-                      <p className="text-[10px] text-muted-foreground sm:text-xs">
-                        Último pago
-                      </p>
-                      <p className="mt-0.5 truncate text-[10px] text-muted-foreground sm:text-xs">
-                        {canonicalRetailerName(latestReceiptReference.supermarket) ||
-                          latestReceiptReference.supermarket ||
-                          "Supermercado"}{" "}
-                        · {dateBr(latestReceiptReference.date)}
-                      </p>
-                      <p className="mt-2 text-[clamp(1rem,4.5vw,1.5rem)] font-extrabold leading-none">
+                      <p className="mt-2 text-[clamp(.95rem,4vw,1.35rem)] font-black leading-none">
                         {latestReceiptReferenceValue &&
                         latestReceiptReferenceValue.baseUnit !== "un"
                           ? formatNormalizedPrice(
@@ -2687,154 +2782,55 @@ export default function OffersPage() {
                             )
                           : brl(Number(latestReceiptReference.price))}
                       </p>
-                      {latestReceiptReferenceValue &&
-                        latestReceiptReferenceValue.baseUnit !== "un" && (
-                          <p className="mt-1 text-[10px] text-muted-foreground sm:text-xs">
-                            Pago na embalagem: {brl(
-                              Number(latestReceiptReference.price),
-                            )}
-                          </p>
-                        )}
+                      <p className="mt-1 truncate text-[9px] text-muted-foreground sm:text-[10px]">
+                        {canonicalRetailerName(latestReceiptReference.supermarket) ||
+                          latestReceiptReference.supermarket ||
+                          "Supermercado"}
+                      </p>
                     </>
                   ) : (
-                    <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                      Sem compra anterior registrada.
+                    <p className="mt-2 text-[10px] leading-snug text-muted-foreground">
+                      Sem registro
                     </p>
                   )}
                 </div>
 
-                <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-2.5 sm:p-3">
-                  <div className="mb-1.5 flex items-center gap-2">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-500/10 text-violet-400">
-                      <Store className="h-4 w-4" />
-                    </span>
-                    <p className="text-[11px] font-extrabold leading-tight sm:text-sm">
-                      Gôndola
+                <div className="min-w-0 rounded-2xl border border-primary/45 bg-primary/[0.12] p-2.5 sm:p-3">
+                  <div className="mb-1.5 flex items-center gap-1.5">
+                    <Trophy className="h-4 w-4 shrink-0 text-primary" />
+                    <p className="text-[10px] font-extrabold leading-tight text-primary sm:text-xs">
+                      Melhor agora
                     </p>
                   </div>
-                  {bestStoreReference ? (
+                  <p className="text-[9px] text-muted-foreground sm:text-[10px]">
+                    oferta vigente
+                  </p>
+                  {bestCurrentOffer ? (
                     <>
-                      <p className="text-[10px] text-muted-foreground sm:text-xs">
-                        Melhor gôndola
-                      </p>
-                      <p className="mt-0.5 truncate text-[10px] text-muted-foreground sm:text-xs">
-                        {canonicalRetailerName(bestStoreReference.supermarket) ||
-                          bestStoreReference.supermarket}{" "}
-                        · {dateBr(bestStoreReference.observed_date)}
-                      </p>
-                      <p className="mt-2 text-[clamp(1rem,4.5vw,1.5rem)] font-extrabold leading-none">
-                        {bestStoreReferenceValue
+                      <p className="mt-2 text-[clamp(.95rem,4vw,1.35rem)] font-black leading-none text-primary">
+                        {bestCurrentOffer.candidate.baseUnit !== "un"
                           ? formatNormalizedPrice(
-                              bestStoreReferenceValue.value,
-                              bestStoreReferenceValue.baseUnit,
+                              bestCurrentOffer.candidate.normalizedPrice,
+                              bestCurrentOffer.candidate.baseUnit,
                             )
-                          : brl(Number(bestStoreReference.retail_price))}
+                          : brl(bestCurrentOffer.candidate.price)}
                       </p>
-                      <p className="mt-1 text-[10px] text-muted-foreground sm:text-xs">
-                        {historicalPackageLabel(
-                          bestStoreReference.package_quantity,
-                          bestStoreReference.package_unit,
-                        )
-                          ? `${historicalPackageLabel(
-                              bestStoreReference.package_quantity,
-                              bestStoreReference.package_unit,
-                            )} · ${brl(Number(bestStoreReference.retail_price))}`
-                          : `Embalagem ${brl(Number(bestStoreReference.retail_price))}`}
+                      <p className="mt-1 truncate text-[9px] font-bold text-primary/90 sm:text-[10px]">
+                        {canonicalRetailerName(bestCurrentOffer.flyer?.retailer) ||
+                          bestCurrentOffer.flyer?.retailer ||
+                          "Supermercado"}
                       </p>
                     </>
                   ) : (
-                    <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                      Sem preço de gôndola registrado.
-                    </p>
-                  )}
-                </div>
-
-                <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-2.5 sm:p-3">
-                  <div className="mb-1.5 flex items-center gap-2">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                      <BadgeCheck className="h-4 w-4" />
-                    </span>
-                    <p className="text-[11px] font-extrabold leading-tight sm:text-sm">
-                      Referência
-                    </p>
-                  </div>
-                  {reference360 && decisionReference ? (
-                    <>
-                      <p className="text-[10px] text-muted-foreground sm:text-xs">
-                        Preço adequado
-                      </p>
-                      <p className="mt-2 text-[clamp(1rem,4.5vw,1.5rem)] font-extrabold leading-none">
-                        {formatNormalizedPrice(
-                          decisionReference.central,
-                          decisionReference.baseUnit,
-                        )}
-                      </p>
-                      <p className="mt-2 text-[10px] leading-snug text-muted-foreground sm:text-xs">
-                        Faixa normal:
-                        <br />
-                        {formatNormalizedPrice(
-                          decisionReference.low,
-                          decisionReference.baseUnit,
-                        )}{" "}
-                        a{" "}
-                        {formatNormalizedPrice(
-                          decisionReference.high,
-                          decisionReference.baseUnit,
-                        )}
-                      </p>
-                    </>
-                  ) : (
-                    <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                      Ainda sem dados suficientes.
+                    <p className="mt-2 text-[10px] leading-snug text-muted-foreground">
+                      Sem oferta
                     </p>
                   )}
                 </div>
               </div>
 
-              {bestCurrentOffer && (
-                <div className="mt-2.5 rounded-2xl border-2 border-primary/55 bg-primary/[0.12] p-3 shadow-[0_0_24px_hsl(var(--primary)/0.08)]">
-                  <div className="flex items-start gap-3">
-                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/20">
-                      <TrendingUp className="h-5 w-5 text-primary" />
-                    </span>
-
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">
-                        Melhor compra agora
-                      </p>
-                      <div className="mt-0.5 flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-base font-extrabold sm:text-lg">
-                            {canonicalRetailerName(bestCurrentOffer.flyer?.retailer) ||
-                              bestCurrentOffer.flyer?.retailer ||
-                              "Supermercado"}
-                          </p>
-                          <p className="mt-0.5 text-[11px] text-muted-foreground">
-                            Se precisa comprar agora, esta é a opção mais barata entre as ofertas vigentes.
-                          </p>
-                        </div>
-
-                        <div className="shrink-0 text-right">
-                          <p className="text-xl font-black leading-none text-primary">
-                            {brl(bestCurrentOffer.candidate.price)}
-                          </p>
-                          {bestCurrentOffer.candidate.baseUnit !== "un" && (
-                            <p className="mt-1 text-[11px] font-bold text-primary/85">
-                              {formatNormalizedPrice(
-                                bestCurrentOffer.candidate.normalizedPrice,
-                                bestCurrentOffer.candidate.baseUnit,
-                              )}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {decisionReference && (
-                <div className="mt-2 flex items-start gap-2.5 rounded-2xl border border-border/80 bg-background/30 p-2.5 sm:p-3">
+                <div className="mt-2.5 flex items-start gap-2.5 rounded-2xl border border-border/80 bg-background/30 p-2.5 sm:p-3">
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
                     <TrendingUp className="h-4 w-4 text-primary" />
                   </span>
@@ -2862,7 +2858,7 @@ export default function OffersPage() {
             {networkReferences.length > 0 && (
               <section className="mb-4">
                 <h2 className="mb-2 text-[clamp(1.25rem,5.5vw,1.75rem)] font-extrabold tracking-tight">
-                  Referências históricas por rede
+                  Referências por supermercado
                 </h2>
 
                 <div className="space-y-2">
