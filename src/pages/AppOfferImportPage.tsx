@@ -181,6 +181,7 @@ export default function AppOfferImportPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [saving, setSaving] = useState(false);
   const appliedJobRef = useRef<string | null>(null);
+  const queuedStartRef = useRef<string | null>(null);
 
   const { data: products = [] } = useQuery<ProductForMatch[]>({
     queryKey: ["app-offer-products", user?.id],
@@ -285,7 +286,18 @@ export default function AppOfferImportPage() {
   useEffect(() => {
     if (!activeJob || !user) return;
 
-    if (activeJob.status === "queued" || activeJob.status === "processing") {
+    if (activeJob.status === "queued") {
+      setAnalyzing(true);
+      if (queuedStartRef.current !== activeJob.id) {
+        queuedStartRef.current = activeJob.id;
+        void invokeWorker(activeJob.id).catch(() => {
+          queuedStartRef.current = null;
+        });
+      }
+      return;
+    }
+
+    if (activeJob.status === "processing") {
       setAnalyzing(true);
       return;
     }
@@ -402,6 +414,7 @@ export default function AppOfferImportPage() {
     setRows([]);
     setActiveJobId(null);
     appliedJobRef.current = null;
+    queuedStartRef.current = null;
     localStorage.removeItem(JOB_KEY);
   };
 
@@ -606,6 +619,7 @@ export default function AppOfferImportPage() {
       ]);
 
       localStorage.removeItem(JOB_KEY);
+      queuedStartRef.current = null;
       setFiles([]);
       setRows([]);
       setActiveJobId(null);
