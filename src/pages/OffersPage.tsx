@@ -1860,6 +1860,10 @@ export default function OffersPage() {
     [latestReceiptReference, productById],
   );
 
+  const latestReceiptProduct = latestReceiptReference
+    ? productById.get(latestReceiptReference.product_id) ?? null
+    : null;
+
   const reference360 = useMemo(() => {
     const candidates: Array<{
       source: "receipt" | "shelf";
@@ -2856,6 +2860,152 @@ export default function OffersPage() {
         !isLoading &&
         !error &&
         !loadingStoreReferences &&
+        !bestCurrentOffer &&
+        (latestReceiptReference || bestStoreReference || reference360) && (
+          <>
+            <section className="mt-4 mb-4 rounded-[22px] border border-border bg-card/45 p-3 sm:p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-500/10">
+                  <Clock3 className="h-5 w-5 text-amber-400" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-[clamp(1.2rem,5vw,1.6rem)] font-extrabold leading-tight tracking-tight">
+                    Sem oferta vigente
+                  </h2>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    Não encontrei “{normalizedSearch}” nos tabloides válidos de hoje.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {latestReceiptReference && (
+                  <div className="rounded-2xl border border-border/80 bg-background/35 p-3">
+                    <div className="flex items-center gap-2">
+                      <ReceiptText className="h-4 w-4 text-sky-400" />
+                      <p className="text-xs font-extrabold">Último pago</p>
+                    </div>
+                    <p className="mt-2 text-xl font-black">
+                      {brl(Number(latestReceiptReference.price))}
+                    </p>
+                    <p className="mt-1 text-[11px] font-semibold text-muted-foreground">
+                      {canonicalRetailerName(latestReceiptReference.supermarket) ||
+                        latestReceiptReference.supermarket ||
+                        "Supermercado"}
+                      {latestReceiptReference.date
+                        ? ` · ${dateBr(latestReceiptReference.date)}`
+                        : ""}
+                    </p>
+                    {latestReceiptProduct?.name && (
+                      <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
+                        {latestReceiptProduct.name}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {bestStoreReference && (
+                  <div className="rounded-2xl border border-border/80 bg-background/35 p-3">
+                    <div className="flex items-center gap-2">
+                      <Store className="h-4 w-4 text-violet-400" />
+                      <p className="text-xs font-extrabold">Preço de gôndola</p>
+                    </div>
+                    <p className="mt-2 text-xl font-black">
+                      {bestStoreReferenceValue
+                        ? formatNormalizedPrice(
+                            bestStoreReferenceValue.value,
+                            bestStoreReferenceValue.baseUnit,
+                          )
+                        : brl(Number(bestStoreReference.retail_price))}
+                    </p>
+                    <p className="mt-1 text-[11px] font-semibold text-muted-foreground">
+                      {canonicalRetailerName(bestStoreReference.supermarket) ||
+                        bestStoreReference.supermarket}
+                      {bestStoreReference.observed_date
+                        ? ` · ${dateBr(bestStoreReference.observed_date)}`
+                        : ""}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const productId =
+                    bestStoreReference?.product_id ??
+                    latestReceiptReference?.product_id ??
+                    networkReferences[0]?.productId ??
+                    null;
+
+                  navigate(
+                    productId
+                      ? `/search?product=${encodeURIComponent(productId)}`
+                      : "/search",
+                  );
+                }}
+                className="mt-3 flex min-h-12 w-full items-center gap-3 rounded-2xl border border-primary/25 bg-primary/[0.06] px-4 py-3 text-left font-bold transition hover:border-primary/40 hover:bg-primary/[0.10]"
+              >
+                <Camera className="h-5 w-5 shrink-0 text-primary" />
+                <span className="min-w-0 flex-1">
+                  Comparar com o preço que encontrei agora
+                </span>
+                <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+              </button>
+            </section>
+
+            {networkReferences.length > 1 && (
+              <section className="mb-4">
+                <h2 className="mb-2 text-lg font-extrabold tracking-tight">
+                  Outros preços anteriores
+                </h2>
+                <div className="space-y-2">
+                  {networkReferences.map((reference) => (
+                    <div
+                      key={`${reference.retailer}-${reference.source}-${reference.date}`}
+                      className="flex items-center gap-3 rounded-2xl border border-border bg-card/35 p-3"
+                    >
+                      <RetailerLogo
+                        retailer={reference.retailer}
+                        className="shrink-0"
+                        imageClassName="h-10 w-16"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-bold">
+                          {reference.retailer}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {reference.source} · {dateBr(reference.date)}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="font-extrabold">
+                          {reference.baseUnit === "un"
+                            ? brl(reference.price)
+                            : formatNormalizedPrice(
+                                reference.normalized,
+                                reference.baseUnit,
+                              )}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {reference.packageLabel
+                            ? `${reference.packageLabel} · ${brl(reference.price)}`
+                            : `Embalagem ${brl(reference.price)}`}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
+        )}
+
+      {hasSearch &&
+        !isLoading &&
+        !error &&
+        !loadingStoreReferences &&
+        !!bestCurrentOffer &&
         (latestReceiptReference || bestStoreReference || reference360) && (
           <>
             <section className="mt-4 mb-4 rounded-[22px] border border-primary/35 bg-gradient-to-br from-primary/[0.08] via-card to-card p-3 sm:p-4 shadow-sm">
