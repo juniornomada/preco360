@@ -614,7 +614,9 @@ export default function AppOfferImportPage() {
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["live-market-flyers"] }),
-        queryClient.invalidateQueries({ queryKey: ["basket-active-data"] }),
+        queryClient.invalidateQueries({ queryKey: ["live-market-offer-count"] }),
+        queryClient.invalidateQueries({ queryKey: ["live-market-offer-search-v1"] }),
+        queryClient.invalidateQueries({ queryKey: ["basket-active-data-v1"] }),
         queryClient.invalidateQueries({ queryKey: ["flyers"] }),
       ]);
 
