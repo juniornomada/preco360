@@ -316,34 +316,35 @@ function packageLabel(offer: OfferWithMarket) {
   return offer.base_unit === "un" ? "1 un" : "1 embalagem";
 }
 
-function representativeBaseQuantity(group: Group) {
-  const packageSizes = group.offers
-    .map(packageBaseQuantity)
-    .filter((value) => Number.isFinite(value) && value > 0)
-    .sort((a, b) => a - b);
-
-  if (!packageSizes.length) return 1;
-  return packageSizes[Math.floor((packageSizes.length - 1) / 2)] || 1;
-}
-
 function basketComparableOffers(
   group: Group,
   offers: OfferWithMarket[] = group.offers,
 ) {
-  if (!group.generic || (group.baseUnit !== "kg" && group.baseUnit !== "l")) {
-    return offers;
-  }
-
-  const typicalSize = representativeBaseQuantity(group);
-  if (!Number.isFinite(typicalSize) || typicalSize <= 0) return offers;
+  if (!group.generic) return offers;
 
   return offers.filter((offer) => {
-    const size = packageBaseQuantity(offer);
-    if (!Number.isFinite(size) || size <= 0) return false;
+    const normalizedName = fallbackKey(offer.raw_name);
 
-    // Institutional/extreme packs remain valid offers elsewhere in the app,
-    // but they must not win a household basket by R$/kg or R$/L.
-    return size >= typicalSize / 4 && size <= typicalSize * 4;
+    // Clearly institutional/professional products remain searchable as offers,
+    // but are not silent substitutes for a household basket item.
+    if (
+      /\b(?:profissional|industrial|food service|foodservice)\b/.test(
+        normalizedName,
+      )
+    ) {
+      return false;
+    }
+
+    // A 25 kg bakery sack is valid flour, but not a reasonable implicit
+    // substitute for "1x farinha de trigo" in a household basket.
+    if (
+      group.key.startsWith("g:farinha:trigo|") &&
+      packageBaseQuantity(offer) > 5
+    ) {
+      return false;
+    }
+
+    return true;
   });
 }
 
