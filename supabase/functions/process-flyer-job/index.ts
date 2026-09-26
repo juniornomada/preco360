@@ -32,6 +32,7 @@ REGRAS OBRIGATÓRIAS
 5. Preço Clube/Vantagens deve ficar em club_price. O preço normal fica em price. Não substitua o preço normal pelo Clube.
 5A. NUNCA coloque em club_price valores meramente equivalentes de quantidade, como "nesta embalagem 350g saem por R$ 7,67", "1 unidade sai por R$ 1,25", "cada 100g sai por..." ou divisão de pack/fardo. Esses valores vão apenas em notes; club_price deve ser null se não houver selo/texto explícito de Clube/Vantagens/CPF/app associado ao preço.
 5B. Mecânicas de quantidade como "a partir de 2 unidades", "20% na segunda unidade", "leve X pague Y" também NÃO são club_price, salvo se o encarte identificar explicitamente aquele valor como Clube/Vantagens.
+5C. No Kawakami, promoção identificada como Cartão Elo não é preço-clube. Mantenha o preço cheio em price, use club_price=null e preserve o valor alternativo apenas em notes.
 6. Preserve a base original do anúncio em price_basis_quantity e price_basis_unit. Exemplos:
    - R$ 1,85/kg => 1 + kg
    - R$ 2,75 a cada 100g => 100 + g
