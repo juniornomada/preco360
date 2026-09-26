@@ -859,8 +859,151 @@ function familyLabel(family: OfferFamily) {
 }
 
 
+
 function escapeRegex(value: string) {
-  return value.replace(/[.*+?^$\\{}()|[\]\\\\]/g, "\\\\function familySemanticTokens(intent: SearchFamilyIntent | null) {");
+  return value.replace(new RegExp("[.*+?^$\\\\{}()|[\\]\\\\\\\\]", "g"), "\\$&");
+}
+
+function cleanDisplayNamePart(value: string) {
+  return value
+    .replace(/\s*[/|-]\s*$/g, "")
+    .replace(/^[,;:/|-]+\s*/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function productHeadRule(
+  family: OfferFamily,
+  value: string,
+): { label: string; pattern: RegExp } | null {
+  if (family === "tomatoSauce") {
+    return { label: "Molho de Tomate", pattern: /^molho(?:\s+de)?\s+tomate\b/i };
+  }
+  if (family === "tomatoExtract") {
+    return { label: "Extrato de Tomate", pattern: /^extrato(?:\s+de)?\s+tomate\b/i };
+  }
+  if (family === "tomatoPassata") {
+    return { label: "Passata de Tomate", pattern: /^passata(?:\s+de)?\s+tomate\b/i };
+  }
+  if (family === "tomatoPeeled") {
+    return { label: "Tomate Pelado", pattern: /^tomate(?:s)?\s+pelad[oa]s?\b/i };
+  }
+  if (family === "milkLiquid") return { label: "Leite", pattern: /^leite\b/i };
+  if (family === "milkPowder") {
+    return { label: "Leite em Pó", pattern: /^leite(?:\s+em)?\s+p[oó]\b/i };
+  }
+  if (family === "milkCream") {
+    return { label: "Creme de Leite", pattern: /^(?:mistura\s+de\s+)?creme\s+de\s+leite\b/i };
+  }
+  if (family === "milkCondensed") {
+    return { label: "Leite Condensado", pattern: /^leite\s+condensado\b/i };
+  }
+  if (family === "milkFermented") {
+    return { label: "Leite Fermentado", pattern: /^leite\s+fermentado\b/i };
+  }
+  if (family === "milkCoconut") {
+    return { label: "Leite de Coco", pattern: /^leite\s+de\s+coco\b/i };
+  }
+  if (family === "milkSweet") {
+    return { label: "Doce de Leite", pattern: /^doce\s+de\s+leite\b/i };
+  }
+  if (family === "coffeeGround") return { label: "Café", pattern: /^caf[eé]\b/i };
+  if (family === "coffeeBeans") {
+    return { label: "Café em Grãos", pattern: /^caf[eé](?:\s+em)?\s+gr[aã]os?\b/i };
+  }
+  if (family === "coffeeSoluble") {
+    return { label: "Café Solúvel", pattern: /^caf[eé]\s+sol[uú]vel\b/i };
+  }
+  if (family === "coffeeCapsule") {
+    return {
+      label: "Café em Cápsula",
+      pattern: /^(?:caf[eé]\s+em\s+c[aá]psulas?|c[aá]psulas?\s+de\s+caf[eé])\b/i,
+    };
+  }
+  if (family === "powder" && /^achocolatad/i.test(value)) {
+    return {
+      label: "Achocolatado em Pó",
+      pattern: /^achocolatad[oa]s?(?:\s+em\s+p[oó])?\b/i,
+    };
+  }
+  if (family === "powderedDrink") {
+    return {
+      label: "Refresco em Pó",
+      pattern: /^(?:refresco|suco)(?:\s+em)?\s+p[oó]\b/i,
+    };
+  }
+  if (family === "refrigerante") {
+    return { label: "Refrigerante", pattern: /^refrigerante\b/i };
+  }
+  if (family === "juice" && /^suco\b/i.test(value)) {
+    return { label: "Suco", pattern: /^suco\b/i };
+  }
+
+  const genericRules: Array<{ label: string; pattern: RegExp }> = [
+    { label: "Água Sanitária", pattern: /^[aá]gua\s+sanit[aá]ria\b/i },
+    { label: "Água de Coco", pattern: /^[aá]gua\s+de\s+coco\b/i },
+    { label: "Amaciante de Roupas", pattern: /^amaciante(?:\s+de|\s+para)?\s+roupas?\b/i },
+    { label: "Sabão em Pó", pattern: /^sab[aã]o(?:\s+em)?\s+p[oó]\b/i },
+    { label: "Detergente Líquido", pattern: /^detergente\s+l[ií]quido\b/i },
+    { label: "Desinfetante", pattern: /^desinfetante\b/i },
+    { label: "Creme Dental", pattern: /^creme\s+dental\b/i },
+    { label: "Desodorante", pattern: /^desodorante\b/i },
+    { label: "Absorvente", pattern: /^absorvente\b/i },
+    { label: "Azeite de Oliva", pattern: /^azeite\s+de\s+oliva\b/i },
+    { label: "Alimento para Cães", pattern: /^alimento\s+para\s+c[aã]es\b/i },
+    { label: "Alimento para Gatos", pattern: /^alimento\s+para\s+gatos\b/i },
+    { label: "Bebida Láctea", pattern: /^bebida\s+l[aá]ctea\b/i },
+    { label: "Biscoito Recheado", pattern: /^biscoito\s+recheado\b/i },
+    { label: "Biscoito Wafer", pattern: /^biscoito\s+wafer\b/i },
+    { label: "Biscoito", pattern: /^biscoito\b/i },
+    { label: "Cerveja", pattern: /^cerveja\b/i },
+    { label: "Arroz", pattern: /^arroz\b/i },
+    { label: "Feijão", pattern: /^feij[aã]o\b/i },
+    { label: "Óleo de Soja", pattern: /^[oó]leo\s+de\s+soja\b/i },
+    { label: "Farinha de Trigo", pattern: /^farinha\s+de\s+trigo\b/i },
+    { label: "Papel Higiênico", pattern: /^papel\s+higi[eê]nico\b/i },
+    { label: "Sabonete", pattern: /^sabonete\b/i },
+    { label: "Shampoo", pattern: /^shampoo\b/i },
+    { label: "Condicionador", pattern: /^condicionador\b/i },
+    { label: "Açaí", pattern: /^a[cç]a[ií]\b/i },
+    { label: "Atum", pattern: /^atum\b/i },
+    { label: "Sardinha", pattern: /^sardinha\b/i },
+    { label: "Carne Bovina", pattern: /^carne\s+bovina\b/i },
+    { label: "Carne Suína", pattern: /^carne\s+su[ií]na\b/i },
+  ];
+
+  return genericRules.find((rule) => rule.pattern.test(value)) ?? null;
+}
+
+function standardizedOfferName(item: FlyerItemRow, family: OfferFamily) {
+  const compact = compactOfferName(item);
+  const brand = String(item.brand ?? "").trim();
+  if (!compact || !brand) return compact;
+
+  const brandPattern = new RegExp(
+    "\\b" + escapeRegex(brand).replace(/\\ /g, "\\s+") + "\\b",
+    "i",
+  );
+  const withoutBrand = cleanDisplayNamePart(compact.replace(brandPattern, " "));
+
+  const headRule = productHeadRule(family, withoutBrand);
+  if (!headRule) return compact;
+
+  let remainder = cleanDisplayNamePart(withoutBrand.replace(headRule.pattern, " "));
+
+  if (family === "tomatoSauce" && /^molho\s+tomate\b/i.test(withoutBrand)) {
+    remainder = cleanDisplayNamePart(
+      withoutBrand.replace(/^molho\s+tomate\b/i, " "),
+    );
+  }
+
+  return [headRule.label, brand, remainder]
+    .map(cleanDisplayNamePart)
+    .filter(Boolean)
+    .join(" ");
+}
+
+function familySemanticTokens(intent: SearchFamilyIntent | null) {");
 }
 
 function cleanDisplayNamePart(value: string) {
