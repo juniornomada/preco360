@@ -676,6 +676,18 @@ export function genericBasketFamily(value: string): GenericBasketFamily | null {
   }
 
   if (startsComparison(t, "papel", "toalha")) {
+    if (
+      hasComparisonToken(
+        t,
+        "interfolhado",
+        "interfolhada",
+        "bobina",
+        "industrial",
+        "profissional",
+      )
+    ) {
+      return null;
+    }
     return { key: "limpeza:papel-toalha", label: "Papel toalha" };
   }
 
@@ -717,8 +729,8 @@ export function genericBasketFamily(value: string): GenericBasketFamily | null {
   }
 
   if (
-    startsComparison(t, "sabao") &&
-    hasComparisonToken(t, "po")
+    (startsComparison(t, "sabao") && hasComparisonToken(t, "po")) ||
+    (startsComparison(t, "lava", "roupas") && hasComparisonToken(t, "po"))
   ) {
     return { key: "limpeza:sabao-po", label: "Sabão em pó" };
   }
@@ -785,48 +797,24 @@ export function genericBasketFamily(value: string): GenericBasketFamily | null {
   }
 
   if (startsComparison(t, "macarrao")) {
-    return { key: "mercearia:macarrao", label: "Macarrão" };
-  }
-
-  if (startsComparison(t, "massa")) {
-    // "Massa" alone is too broad: pastry dough, pizza discs and other fresh
-    // dough products are not interchangeable with pasta in the basket.
     if (
       hasComparisonToken(
         t,
-        "pastel",
-        "pizza",
-        "disco",
-        "discos",
-        "folhada",
-        "folhado",
+        "instantaneo",
+        "lamen",
+        "ramen",
+        "mac",
+        "cheese",
       )
     ) {
       return null;
     }
-
-    if (
-      hasComparisonToken(
-        t,
-        "lasanha",
-        "semola",
-        "espaguete",
-        "spaghetti",
-        "penne",
-        "parafuso",
-        "fusilli",
-        "talharim",
-        "ninho",
-        "rigatoni",
-        "gravata",
-        "seca",
-      )
-    ) {
-      return { key: "mercearia:macarrao", label: "Macarrão" };
-    }
-
-    return null;
+    return { key: "mercearia:macarrao", label: "Macarrão" };
   }
+
+  // A basket request for "Macarrão" must not silently accept another dough
+  // product merely because its commercial name starts with "Massa".
+  if (startsComparison(t, "massa")) return null;
 
   if (startsComparison(t, "refrigerante")) {
     return { key: "bebida:refrigerante", label: "Refrigerante" };
@@ -963,6 +951,22 @@ export function genericBasketFamilies(value: string): GenericBasketFamily[] {
 
   const families: GenericBasketFamily[] = [primary];
   const t = comparisonTokens(value);
+
+  // A generic basket need should still see valid subtypes. The subtype remains
+  // available as its own family, while the broad need can compare it too.
+  if (
+    primary.key === "graos:feijao-preto" ||
+    primary.key === "graos:feijao-carioca"
+  ) {
+    families.push({ key: "graos:feijao", label: "Feijão" });
+  }
+
+  if (
+    primary.key === "mercearia:acucar-mascavo" ||
+    primary.key === "mercearia:acucar-demerara"
+  ) {
+    families.push({ key: "mercearia:acucar", label: "Açúcar" });
+  }
 
   // Brand-level need: "Nescau" means the powder product regardless of pack size,
   // while "Achocolatado em pó" remains brand-agnostic and includes Nescau too.
