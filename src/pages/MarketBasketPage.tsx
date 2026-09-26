@@ -323,27 +323,28 @@ function representativeBaseQuantity(group: Group) {
     .sort((a, b) => a - b);
 
   if (!packageSizes.length) return 1;
-
-  const reference = [...group.offers].sort(compareOfferValue)[0];
-  const referenceSize = reference ? packageBaseQuantity(reference) : 1;
-
-  // Generic basket groups can contain institutional/outlier packs
-  // (for example flour 25kg beside several household 1kg packs).
-  // The cheapest R$/kg pack must not silently redefine "1x" as 25kg.
-  // Keep the cheapest package size when it is reasonably close to the
-  // market's typical size; otherwise fall back to the lower median size.
-  const medianIndex = Math.floor((packageSizes.length - 1) / 2);
-  const medianSize = packageSizes[medianIndex] || 1;
-
-  const isExtremeOutlier =
-    referenceSize >= medianSize * 4 ||
-    referenceSize <= medianSize / 4;
-
-  return isExtremeOutlier ? medianSize : referenceSize;
+  return packageSizes[Math.floor((packageSizes.length - 1) / 2)] || 1;
 }
 
-function desiredBaseQuantity(group: Group, packageCount: number) {
-  return representativeBaseQuantity(group) * packageCount;
+function basketComparableOffers(
+  group: Group,
+  offers: OfferWithMarket[] = group.offers,
+) {
+  if (!group.generic || (group.baseUnit !== "kg" && group.baseUnit !== "l")) {
+    return offers;
+  }
+
+  const typicalSize = representativeBaseQuantity(group);
+  if (!Number.isFinite(typicalSize) || typicalSize <= 0) return offers;
+
+  return offers.filter((offer) => {
+    const size = packageBaseQuantity(offer);
+    if (!Number.isFinite(size) || size <= 0) return false;
+
+    // Institutional/extreme packs remain valid offers elsewhere in the app,
+    // but they must not win a household basket by R$/kg or R$/L.
+    return size >= typicalSize / 4 && size <= typicalSize * 4;
+  });
 }
 
 function equivalentGroupCost(
@@ -784,7 +785,7 @@ export default function MarketBasketPage() {
     const bestOfferByGroup = new Map<string, OfferWithMarket>();
 
     for (const group of selectedGroups) {
-      const best = [...group.offers].sort(compareOfferValue)[0];
+      const best = [...basketComparableOffers(group)].sort(compareOfferValue)[0];
       if (best) bestOfferByGroup.set(group.key, best);
     }
 
@@ -804,9 +805,10 @@ export default function MarketBasketPage() {
       }> = [];
 
       for (const group of selectedGroups) {
-        const candidates = group.offers
-          .filter((offer) => offer.retailer === retailer)
-          .sort(compareOfferValue);
+        const candidates = basketComparableOffers(
+          group,
+          group.offers.filter((offer) => offer.retailer === retailer),
+        ).sort(compareOfferValue);
         const offer = candidates[0] ?? null;
         const best = bestOfferByGroup.get(group.key) ?? null;
 
