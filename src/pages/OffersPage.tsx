@@ -2498,6 +2498,10 @@ export default function OffersPage() {
                       <Store className="h-3.5 w-3.5 text-primary" />
                       {quickRetailer}
                     </span>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-background/25 px-2 py-0.5 text-muted-foreground">
+                      <Clock3 className="h-3.5 w-3.5" />
+                      {expiryLabel(bestCurrentOffer.flyer?.valid_to, today)}
+                    </span>
                     {quickUnit && (
                       <span className="font-semibold text-muted-foreground">
                         menor preço por {quickCandidate.baseUnit === "l" ? "litro" : quickCandidate.baseUnit === "kg" ? "kg" : "unidade"}
