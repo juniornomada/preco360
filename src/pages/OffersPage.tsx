@@ -2250,21 +2250,48 @@ export default function OffersPage() {
   );
 
   const packageFilterOptions = useMemo(() => {
-    const counts = new Map<string, number>();
+    const options = new Map<
+      string,
+      {
+        label: string;
+        count: number;
+        baseUnit: "kg" | "l" | "un";
+        baseQuantity: number;
+      }
+    >();
 
     for (const entry of analyzed) {
       const label = packageLabel(entry.item);
       if (!label) continue;
-      counts.set(label, (counts.get(label) ?? 0) + 1);
+
+      const packageInfo = entry.candidate.packageInfo;
+      const baseUnit = entry.candidate.baseUnit;
+      const baseQuantity =
+        packageInfo &&
+        Number.isFinite(packageInfo.baseQuantity) &&
+        packageInfo.baseQuantity > 0
+          ? packageInfo.baseQuantity
+          : Number.POSITIVE_INFINITY;
+
+      const current = options.get(label);
+      options.set(label, {
+        label,
+        count: (current?.count ?? 0) + 1,
+        baseUnit,
+        baseQuantity: current?.baseQuantity ?? baseQuantity,
+      });
     }
 
-    return [...counts.entries()]
-      .map(([label, count]) => ({ label, count }))
-      .sort((a, b) => {
-        if (b.count !== a.count) return b.count - a.count;
-        return a.label.localeCompare(b.label, "pt-BR");
-      })
-      .slice(0, 5);
+    return [...options.values()].sort((a, b) => {
+      const unitOrder = { l: 0, kg: 1, un: 2 } as const;
+      const unitDiff = unitOrder[a.baseUnit] - unitOrder[b.baseUnit];
+      if (unitDiff !== 0) return unitDiff;
+
+      const quantityDiff = a.baseQuantity - b.baseQuantity;
+      if (Math.abs(quantityDiff) > 0.0001) return quantityDiff;
+
+      return a.label.localeCompare(b.label, "pt-BR");
+    });
   }, [analyzed]);
 
   const visibleAnalyzed = useMemo(
