@@ -269,28 +269,28 @@ const verdictOrder = {
 
 const verdictUi = {
   exceptional: {
-    label: "Preço raro",
-    className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-500",
-    Icon: Sparkles,
+    label: "Bem abaixo do histórico",
+    className: "border-emerald-500/20 bg-emerald-500/[0.05] text-emerald-400/90",
+    Icon: TrendingDown,
   },
   good: {
-    label: "Vale a pena",
-    className: "border-green-500/35 bg-green-500/10 text-green-500",
+    label: "Abaixo do histórico",
+    className: "border-green-500/20 bg-green-500/[0.05] text-green-400/90",
     Icon: TrendingDown,
   },
   normal: {
-    label: "Na faixa",
-    className: "border-amber-500/35 bg-amber-500/10 text-amber-500",
+    label: "Na faixa histórica",
+    className: "border-border/80 bg-muted/35 text-muted-foreground",
     Icon: BadgeCheck,
   },
   high: {
-    label: "Já esteve melhor",
-    className: "border-red-500/35 bg-red-500/10 text-red-500",
+    label: "Acima do histórico",
+    className: "border-red-500/30 bg-red-500/[0.07] text-red-400",
     Icon: TrendingUp,
   },
   unknown: {
-    label: "Sem referência",
-    className: "border-border bg-muted/60 text-muted-foreground",
+    label: "Sem histórico",
+    className: "border-border bg-muted/40 text-muted-foreground",
     Icon: History,
   },
 } as const;
