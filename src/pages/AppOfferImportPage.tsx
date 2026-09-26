@@ -128,6 +128,68 @@ function displayNumber(value: number | null) {
     : String(value).replace(".", ",");
 }
 
+function packageNameLabel(
+  quantity: number | null | undefined,
+  unit: string | null | undefined,
+) {
+  const value = Number(quantity);
+  const rawUnit = String(unit ?? "").trim().toLowerCase();
+  if (!Number.isFinite(value) || value <= 0 || !rawUnit) return "";
+
+  const displayUnit =
+    rawUnit === "l" || rawUnit === "lt" || rawUnit === "litro" || rawUnit === "litros"
+      ? "L"
+      : rawUnit === "kg" || rawUnit === "quilo" || rawUnit === "quilos"
+        ? "kg"
+        : rawUnit === "g" || rawUnit === "grama" || rawUnit === "gramas"
+          ? "g"
+          : rawUnit === "ml"
+            ? "ml"
+            : ["un", "und", "unid", "unidade", "unidades"].includes(rawUnit)
+              ? "un"
+              : String(unit).trim();
+
+  const displayQuantity = new Intl.NumberFormat("pt-BR", {
+    maximumFractionDigits: 3,
+  }).format(value);
+
+  return `${displayQuantity}${displayUnit}`;
+}
+
+function offerNameWithPackage(
+  name: string,
+  quantity: number | null | undefined,
+  unit: string | null | undefined,
+) {
+  const cleanName = String(name ?? "").replace(/\s+/g, " ").trim();
+  const label = packageNameLabel(quantity, unit);
+  if (!cleanName || !label) return cleanName;
+
+  const expected = inferPackage(label);
+  const current = inferPackage(cleanName);
+
+  if (
+    expected &&
+    current &&
+    expected.baseUnit === current.baseUnit &&
+    Math.abs(expected.baseQuantity - current.baseQuantity) < 0.0001
+  ) {
+    return cleanName;
+  }
+
+  // If a previous package was present and the reviewer changes quantity/unit,
+  // replace that package instead of accumulating two sizes in the name.
+  if (current) {
+    const packagePattern =
+      /\b\d+(?:[.,]\d+)?\s*(?:kg|quilo|quilos|g|grama|gramas|ml|l|lt|litro|litros|un|und|unid|unidade|unidades)\b/i;
+    if (packagePattern.test(cleanName)) {
+      return cleanName.replace(packagePattern, label).replace(/\s+/g, " ").trim();
+    }
+  }
+
+  return `${cleanName} ${label}`;
+}
+
 function candidateFromOffer(offer: ExtractedAppOffer): FlyerCandidate {
   const packageText =
     offer.package_quantity && offer.package_unit
@@ -138,7 +200,11 @@ function candidateFromOffer(offer: ExtractedAppOffer): FlyerCandidate {
   );
   const normalized = normalizedUnitPrice(offer.promotional_price, packageInfo);
   return {
-    rawName: offer.product_name,
+    rawName: offerNameWithPackage(
+      offer.product_name,
+      offer.package_quantity,
+      offer.package_unit,
+    ),
     brand: offer.brand,
     price: offer.promotional_price,
     packageInfo,
@@ -327,11 +393,16 @@ export default function AppOfferImportPage() {
 
     for (const offer of extracted) {
       const name = String(offer.product_name || "").trim();
+      const displayName = offerNameWithPackage(
+        name,
+        offer.package_quantity,
+        offer.package_unit,
+      );
       const price = Number(offer.promotional_price);
       if (!name || !Number.isFinite(price) || price <= 0) continue;
 
       const key = [
-        normalizeSearchText(name),
+        normalizeSearchText(displayName),
         offer.package_quantity ?? "",
         normalizeSearchText(offer.package_unit ?? ""),
         price.toFixed(2),
@@ -365,7 +436,7 @@ export default function AppOfferImportPage() {
 
       mapped.push({
         localId: crypto.randomUUID(),
-        rawName: name,
+        rawName: displayName,
         brand: offer.brand ?? null,
         packageQuantity: offer.package_quantity ?? null,
         packageUnit: offer.package_unit ?? null,
@@ -566,10 +637,15 @@ export default function AppOfferImportPage() {
         if (flyerError) throw flyerError;
 
         const itemRows = groupRows.map((row) => {
+          const finalName = offerNameWithPackage(
+            row.rawName,
+            row.packageQuantity,
+            row.packageUnit,
+          );
           const packageInfo =
             row.packageQuantity && row.packageUnit
               ? inferPackage(`${row.packageQuantity}${row.packageUnit}`)
-              : inferPackage(row.rawName);
+              : inferPackage(finalName);
           const normalized = normalizedUnitPrice(row.price, packageInfo);
           const notes = [
             ...row.notes,
@@ -581,8 +657,8 @@ export default function AppOfferImportPage() {
           return {
             flyer_id: flyer.id,
             user_id: user.id,
-            raw_name: row.rawName.trim(),
-            normalized_name: normalizeSearchText(row.rawName),
+            raw_name: finalName,
+            normalized_name: normalizeSearchText(finalName),
             brand: row.brand,
             package_quantity: row.packageQuantity,
             package_unit: row.packageUnit,
