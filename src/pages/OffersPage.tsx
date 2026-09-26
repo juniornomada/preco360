@@ -1370,6 +1370,11 @@ function comparableOfferIdentity(current: FlyerItemRow, previous: FlyerItemRow) 
 }
 
 function validClubPrice(item: FlyerItemRow) {
+  const conditionalPromo = (item.offer_notes ?? []).some((note) =>
+    /cart[aã]o\s+elo|com\s+elo/i.test(String(note ?? "")),
+  );
+  if (conditionalPromo) return null;
+
   const regular = Number(item.advertised_price);
   const club = Number(item.club_advertised_price);
   return Number.isFinite(club) &&
