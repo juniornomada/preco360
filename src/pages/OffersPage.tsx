@@ -381,19 +381,40 @@ function historicalPackageLabel(
   })} ${normalizedUnit}`;
 }
 
+function receiptHistoricalPackageLabel(
+  row: PurchasePriceRow,
+  product?: ProductForMatch | null,
+) {
+  const productName = String(product?.name ?? "");
+  const multi = productName.match(
+    /\b(\d+)\s*[xX]\s*(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|lt)\b/i,
+  );
+
+  if (multi) {
+    const count = Number(multi[1]);
+    const size = Number(multi[2].replace(",", "."));
+    const rawUnit = multi[3].toLowerCase();
+    const unit = rawUnit === "lt" ? "l" : rawUnit;
+    const total = count * size;
+    const displayUnit = unit === "l" ? "L" : unit;
+
+    return `${count} × ${size.toLocaleString("pt-BR", {
+      maximumFractionDigits: 3,
+    })} ${displayUnit} = ${total.toLocaleString("pt-BR", {
+      maximumFractionDigits: 3,
+    })} ${displayUnit}`;
+  }
+
+  return historicalPackageLabel(
+    row.package_quantity ?? product?.package_size,
+    row.package_unit ?? product?.unit,
+  );
+}
+
 function purchaseReferenceValue(
   row: PurchasePriceRow,
   product?: ProductForMatch | null,
 ): HistoricalReferenceValue | null {
-  const normalized = Number(row.normalized_price);
-  if (
-    Number.isFinite(normalized) &&
-    normalized > 0 &&
-    (row.base_unit === "kg" || row.base_unit === "l" || row.base_unit === "un")
-  ) {
-    return { value: normalized, baseUnit: row.base_unit };
-  }
-
   const price = Number(row.price);
   if (!Number.isFinite(price) || price <= 0) return null;
 
@@ -407,6 +428,24 @@ function purchaseReferenceValue(
       : product?.name
         ? inferPackage(product.name)
         : null;
+
+  const normalized = Number(row.normalized_price);
+  if (
+    Number.isFinite(normalized) &&
+    normalized > 0 &&
+    (row.base_unit === "kg" || row.base_unit === "l" || row.base_unit === "un")
+  ) {
+    if (
+      row.base_unit === "un" &&
+      productPackage &&
+      productPackage.baseUnit !== "un"
+    ) {
+      return normalizedUnitPrice(price, productPackage);
+    }
+
+    return { value: normalized, baseUnit: row.base_unit };
+  }
+
   const pkg = rowPackage ?? productPackage;
   if (!pkg) return null;
 
@@ -2182,9 +2221,9 @@ export default function OffersPage() {
         source: "cupom",
         date: String(row.date ?? ""),
         productId: row.product_id,
-        packageLabel: historicalPackageLabel(
-          row.package_quantity,
-          row.package_unit,
+        packageLabel: receiptHistoricalPackageLabel(
+          row,
+          productById.get(row.product_id),
         ),
       });
     }
@@ -2202,9 +2241,9 @@ export default function OffersPage() {
         source: "gôndola",
         date: String(row.observed_date ?? ""),
         productId: row.product_id,
-        packageLabel: historicalPackageLabel(
-          row.package_quantity,
-          row.package_unit,
+        packageLabel: receiptHistoricalPackageLabel(
+          row,
+          productById.get(row.product_id),
         ),
       });
     }
