@@ -938,8 +938,19 @@ function productHeadRule(
 }
 
 function standardizedOfferName(item: FlyerItemRow, family: OfferFamily) {
-  const compact = compactOfferName(item);
-  const brand = String(item.brand ?? "").trim();
+  let compact = compactOfferName(item);
+  let brand = String(item.brand ?? "").trim();
+
+  // Known OCR/catalog corrections that should stay stable across future imports.
+  if (/\btomadoro\b/i.test(compact)) {
+    compact = compact.replace(/\btomadoro\b/gi, "Bonari Tomodoro");
+    brand = "Bonari";
+  }
+  if (/\btarantell?o\b/i.test(compact)) {
+    compact = compact.replace(/\btarantell?o\b/gi, "Tarantella");
+    brand = "Tarantella";
+  }
+
   if (!compact || !brand) return compact;
 
   const brandPattern = new RegExp(
