@@ -15,6 +15,18 @@ describe("generic basket families", () => {
     });
   });
 
+  it("separates creme de leite tradicional from nata/fresco", () => {
+    expect(genericBasketFamily("Creme de Leite Piracanjuba 200g")?.key).toBe(
+      "leite:creme",
+    );
+    expect(
+      genericBasketFamily("Creme de Leite Nata Promissão 300g")?.key,
+    ).toBe("leite:creme-nata");
+    expect(
+      genericBasketFamily("Creme de Leite Fresco Fazenda 500g")?.key,
+    ).toBe("leite:creme-nata");
+  });
+
   it("keeps dairy and tomato derivatives separate", () => {
     expect(genericBasketFamily("Creme de Leite Piracanjuba 200g")?.key).toBe(
       "leite:creme",
