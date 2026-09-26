@@ -347,13 +347,13 @@ function desiredBaseQuantity(group: Group, packageCount: number) {
 }
 
 function equivalentGroupCost(
-  group: Group,
+  _group: Group,
   offer: OfferWithMarket,
   packageCount: number,
 ) {
-  if (offer.base_unit === "kg" || offer.base_unit === "l") {
-    return comparablePrice(offer) * desiredBaseQuantity(group, packageCount);
-  }
+  // Basket quantity means real packages. Unit price (R$/kg or R$/L) is used
+  // to choose the best value, but must never inflate a 500 ml / 2 kg package
+  // into another market's package size.
   return effectiveAdvertisedPrice(offer) * packageCount;
 }
 
@@ -1595,7 +1595,7 @@ export default function MarketBasketPage() {
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {market.complete
                           ? selectedGroups.some((group) => group.baseUnit !== "un")
-                            ? "cesta equivalente por kg/L"
+                            ? "preço das embalagens selecionadas"
                             : "cesta promocional completa"
                           : `parcial · ${market.covered}/${selectedGroups.length} itens · ${market.missing} sem preço`}
                       </p>
@@ -1674,7 +1674,7 @@ export default function MarketBasketPage() {
       )}
 
       <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">
-        A Cesta compara ofertas vigentes por R$/kg, R$/L ou embalagem e considera preços-clube válidos.
+        A Cesta compara ofertas vigentes por R$/kg, R$/L ou embalagem e soma o preço real das embalagens escolhidas, considerando preços-clube válidos.
         Itens sem preço podem permanecer na lista e serão associados automaticamente quando surgir uma
         oferta compatível.
       </p>
