@@ -21,7 +21,7 @@ Extraia todas as ofertas promocionais legíveis na captura.
 
 REGRAS
 1. Cada oferta deve representar um produto real visível na tela.
-2. product_name deve conter nome comercial útil, incluindo variante quando visível.
+2. product_name deve conter o nome comercial útil COMPLETO e incluir a marca quando ela estiver visível, mesmo que brand também seja preenchido. Ex.: "Energético Baly Sabores Lata", e não apenas "Energético Sabores Lata".
 3. brand deve ser a marca quando estiver claramente visível; caso contrário null.
 4. package_quantity/package_unit representam o conteúdo da embalagem: 200 g, 1 kg, 350 ml, 5 L etc.
 5. promotional_price é o preço que será cobrado no caixa após a oferta do app estar ativada.
