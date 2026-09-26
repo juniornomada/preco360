@@ -784,11 +784,48 @@ export function genericBasketFamily(value: string): GenericBasketFamily | null {
     return { key: "laticinio:margarina", label: "Margarina" };
   }
 
-  if (
-    startsComparison(t, "macarrao") ||
-    startsComparison(t, "massa")
-  ) {
+  if (startsComparison(t, "macarrao")) {
     return { key: "mercearia:macarrao", label: "Macarrão" };
+  }
+
+  if (startsComparison(t, "massa")) {
+    // "Massa" alone is too broad: pastry dough, pizza discs and other fresh
+    // dough products are not interchangeable with pasta in the basket.
+    if (
+      hasComparisonToken(
+        t,
+        "pastel",
+        "pizza",
+        "disco",
+        "discos",
+        "folhada",
+        "folhado",
+      )
+    ) {
+      return null;
+    }
+
+    if (
+      hasComparisonToken(
+        t,
+        "lasanha",
+        "semola",
+        "espaguete",
+        "spaghetti",
+        "penne",
+        "parafuso",
+        "fusilli",
+        "talharim",
+        "ninho",
+        "rigatoni",
+        "gravata",
+        "seca",
+      )
+    ) {
+      return { key: "mercearia:macarrao", label: "Macarrão" };
+    }
+
+    return null;
   }
 
   if (startsComparison(t, "refrigerante")) {
