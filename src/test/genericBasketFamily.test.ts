@@ -28,6 +28,25 @@ describe("generic basket families", () => {
     expect(genericBasketFamily("Sardinha ao Molho de Tomate 125g")).toBeNull();
   });
 
+  it("keeps pastry and pizza dough out of the Macarrão basket family", () => {
+    expect(
+      genericBasketFamily(
+        "Massa Fresca da Feira para Pastel rolo Massa da Feira 1kg",
+      ),
+    ).toBeNull();
+    expect(
+      genericBasketFamily(
+        "Massa para Mini Pizza Massa da Feira pacote com 15 discos 450g",
+      ),
+    ).toBeNull();
+    expect(
+      genericBasketFamily("Massa para Lasanha Adria Sêmola 500g")?.key,
+    ).toBe("mercearia:macarrao");
+    expect(genericBasketFamily("Macarrão Barilla 500g")?.key).toBe(
+      "mercearia:macarrao",
+    );
+  });
+
   it("supports common pantry needs without depending on brand", () => {
     expect(genericBasketFamily("Farinha de Trigo Tradicional Renata 1kg")).toEqual({
       key: "farinha:trigo",
