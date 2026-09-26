@@ -2909,9 +2909,17 @@ export default function OffersPage() {
                         : ""}
                     </p>
                     {latestReceiptProduct?.name && (
-                      <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
-                        {latestReceiptProduct.name}
-                      </p>
+                      <div className="mt-3 rounded-xl border border-primary/20 bg-primary/[0.06] px-3 py-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <Tags className="h-3.5 w-3.5 shrink-0 text-primary" />
+                          <span className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-primary">
+                            Produto
+                          </span>
+                        </div>
+                        <p className="mt-1 text-sm font-extrabold leading-snug text-foreground">
+                          {latestReceiptProduct.name}
+                        </p>
+                      </div>
                     )}
                   </div>
                 )}
