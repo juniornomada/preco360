@@ -942,12 +942,24 @@ function standardizedOfferName(item: FlyerItemRow, family: OfferFamily) {
   let brand = String(item.brand ?? "").trim();
 
   // Known OCR/catalog corrections that should stay stable across future imports.
-  if (/\btomadoro\b/i.test(compact)) {
-    compact = compact.replace(/\btomadoro\b/gi, "Bonari Tomodoro");
-    brand = "Bonari";
+  if (/\btomadoro\b/i.test(compact) || /\btomodoro\b/i.test(compact)) {
+    compact = compact
+      .replace(/\bbonari\b/gi, "")
+      .replace(/\btomodoro\b/gi, "Tomadoro")
+      .replace(/\btomadoro\b/gi, "Tomadoro")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
+    if (!/\bbonare\b/i.test(compact)) {
+      compact = compact.replace(
+        /^molho(?:\s+de)?\s+tomate\b/i,
+        "Molho de Tomate Bonare",
+      );
+    }
+    brand = "Bonare";
   }
-  if (/\btarantell?o\b/i.test(compact)) {
-    compact = compact.replace(/\btarantell?o\b/gi, "Tarantella");
+  if (/\btarantell?o\b/i.test(compact) || /\btarantella\b/i.test(compact)) {
+    compact = "Molho de Tomate Tarantella Tradicional";
     brand = "Tarantella";
   }
 
