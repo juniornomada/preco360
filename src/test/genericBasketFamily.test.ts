@@ -113,6 +113,18 @@ describe("generic basket families", () => {
     );
   });
 
+  it("separates common disinfectant from alcohol-based disinfectant", () => {
+    expect(genericBasketFamily("Desinfetante Urca 2L")?.key).toBe(
+      "limpeza:desinfetante",
+    );
+    expect(
+      genericBasketFamily("Desinfetante Álcool Líquido Coperalcool 1L")?.key,
+    ).toBe("limpeza:alcool");
+    expect(genericBasketFamily("Álcool Líquido Coperalcool 1L")?.key).toBe(
+      "limpeza:alcool",
+    );
+  });
+
   it("adds common hygiene and cleaning needs", () => {
     expect(genericBasketFamily("Papel Toalha Kitchen 2un")?.key).toBe(
       "limpeza:papel-toalha",
