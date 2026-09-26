@@ -2873,7 +2873,7 @@ export default function OffersPage() {
                     Sem oferta vigente
                   </h2>
                   <p className="mt-0.5 text-sm text-muted-foreground">
-                    Não encontrei “{normalizedSearch}” nos tabloides válidos de hoje.
+                    Não há promoção ativa para “{normalizedSearch}”. Use o histórico abaixo como referência.
                   </p>
                 </div>
               </div>
@@ -2886,8 +2886,20 @@ export default function OffersPage() {
                       <p className="text-xs font-extrabold">Último pago</p>
                     </div>
                     <p className="mt-2 text-xl font-black">
-                      {brl(Number(latestReceiptReference.price))}
+                      {latestReceiptReferenceValue &&
+                      latestReceiptReferenceValue.baseUnit !== "un"
+                        ? formatNormalizedPrice(
+                            latestReceiptReferenceValue.value,
+                            latestReceiptReferenceValue.baseUnit,
+                          )
+                        : brl(Number(latestReceiptReference.price))}
                     </p>
+                    {latestReceiptReferenceValue &&
+                      latestReceiptReferenceValue.baseUnit !== "un" && (
+                        <p className="mt-1 text-[10px] text-muted-foreground">
+                          Embalagem: {brl(Number(latestReceiptReference.price))}
+                        </p>
+                      )}
                     <p className="mt-1 text-[11px] font-semibold text-muted-foreground">
                       {canonicalRetailerName(latestReceiptReference.supermarket) ||
                         latestReceiptReference.supermarket ||
@@ -2948,7 +2960,7 @@ export default function OffersPage() {
               >
                 <Camera className="h-5 w-5 shrink-0 text-primary" />
                 <span className="min-w-0 flex-1">
-                  Comparar com o preço que encontrei agora
+                  Registrar preço de gôndola e comparar
                 </span>
                 <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
               </button>
