@@ -295,10 +295,15 @@ export function useVoiceSearch() {
     };
   }, [clearTimers]);
 
+  const clearError = useCallback(() => {
+    setError(null);
+  }, []);
+
   return {
     isSupported,
     isListening,
     error,
+    clearError,
     startListening,
     stopListening,
   };
