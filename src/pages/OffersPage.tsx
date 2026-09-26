@@ -3132,8 +3132,7 @@ export default function OffersPage() {
         !isLoading &&
         !error &&
         !loadingStoreReferences &&
-        !!bestCurrentOffer &&
-        (latestReceiptReference || bestStoreReference || reference360) && (
+        !!bestCurrentOffer && (
           <>
             <section className="mt-4 mb-4 rounded-[22px] border border-primary/35 bg-gradient-to-br from-primary/[0.08] via-card to-card p-3 sm:p-4 shadow-sm">
               <div className="mb-3 flex items-start gap-3">
@@ -3145,7 +3144,9 @@ export default function OffersPage() {
                     Resumo para decidir
                   </h2>
                   <p className="mt-0.5 text-sm text-muted-foreground">
-                    Oferta vigente + gôndola + seu histórico
+                    {bestStoreReference || latestReceiptReference || reference360
+                      ? "Oferta vigente + gôndola + seu histórico"
+                      : "Oferta vigente · histórico ainda não registrado"}
                   </p>
                 </div>
               </div>
