@@ -28,7 +28,7 @@ describe("generic basket families", () => {
     expect(genericBasketFamily("Sardinha ao Molho de Tomate 125g")).toBeNull();
   });
 
-  it("keeps pastry and pizza dough out of the Macarrão basket family", () => {
+  it("keeps non-macaroni dough and instant noodles out of the generic Macarrão family", () => {
     expect(
       genericBasketFamily(
         "Massa Fresca da Feira para Pastel rolo Massa da Feira 1kg",
@@ -40,8 +40,11 @@ describe("generic basket families", () => {
       ),
     ).toBeNull();
     expect(
-      genericBasketFamily("Massa para Lasanha Adria Sêmola 500g")?.key,
-    ).toBe("mercearia:macarrao");
+      genericBasketFamily("Massa para Lasanha Adria Sêmola 500g"),
+    ).toBeNull();
+    expect(
+      genericBasketFamily("Macarrão Instantâneo Lámen Nissin 85g"),
+    ).toBeNull();
     expect(genericBasketFamily("Macarrão Barilla 500g")?.key).toBe(
       "mercearia:macarrao",
     );
@@ -85,6 +88,29 @@ describe("generic basket families", () => {
       genericBasketFamily("Bebida Láctea Achocolatado Nescau 180ml"),
     ).toBeNull();
     expect(genericBasketFamily("Cereal Nestlé Nescau 210g")).toBeNull();
+  });
+
+  it("keeps household basket categories broad without accepting unrelated products", () => {
+    expect(
+      genericBasketFamilies("Feijão Carioca Solito 1kg").map(
+        (family) => family.key,
+      ),
+    ).toContain("graos:feijao");
+    expect(
+      genericBasketFamilies("Açúcar Demerara Orgânico Native 1kg").map(
+        (family) => family.key,
+      ),
+    ).toContain("mercearia:acucar");
+
+    expect(
+      genericBasketFamily("Lava Roupas em Pó Brilhante 1,6kg")?.key,
+    ).toBe("limpeza:sabao-po");
+    expect(
+      genericBasketFamily("Papel Toalha Interfolhado Fiel 1000un"),
+    ).toBeNull();
+    expect(genericBasketFamily("Papel Toalha Snob 2un")?.key).toBe(
+      "limpeza:papel-toalha",
+    );
   });
 
   it("adds common hygiene and cleaning needs", () => {
