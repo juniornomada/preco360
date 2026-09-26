@@ -2178,6 +2178,110 @@ export default function OffersPage() {
       </div>
 
 
+      {hasSearch &&
+        !isLoading &&
+        !error &&
+        bestCurrentOffer &&
+        resultFamilyCount === 1 && (() => {
+          const quickItem = bestCurrentOffer.item;
+          const quickCandidate = bestCurrentOffer.candidate;
+          const quickPack = packageLabel(quickItem);
+          const quickRetailer =
+            canonicalRetailerName(bestCurrentOffer.flyer?.retailer) ||
+            bestCurrentOffer.flyer?.retailer ||
+            "Supermercado";
+          const quickUnit =
+            quickCandidate.baseUnit !== "un"
+              ? formatNormalizedPrice(
+                  quickCandidate.normalizedPrice,
+                  quickCandidate.baseUnit,
+                )
+              : null;
+
+          return (
+            <section className="mb-4 rounded-[22px] border-2 border-primary/50 bg-primary/[0.10] p-3 shadow-[0_8px_28px_hsl(var(--primary)/0.08)]">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">
+                  Melhor custo-benefício agora
+                </p>
+                <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
+                  {analyzed.length} oferta{analyzed.length === 1 ? "" : "s"} vigente{analyzed.length === 1 ? "" : "s"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+                <ProductVisual
+                  name={quickItem.raw_name}
+                  category={bestCurrentOffer.product?.category}
+                  imageUrl={quickItem.image_url}
+                  compact
+                />
+
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <div className="min-w-0 flex-1">
+                      <AdaptiveProductName
+                        text={compactOfferName(quickItem)}
+                        className="font-extrabold"
+                        minPx={12}
+                        maxPx={16}
+                        desktopMaxPx={17}
+                      />
+                    </div>
+                    {quickPack && (
+                      <span className="shrink-0 rounded-md border border-primary/20 bg-background/35 px-1.5 py-0.5 text-[10px] font-extrabold">
+                        {quickPack}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-background/30 px-2 py-0.5 font-bold">
+                      <Store className="h-3.5 w-3.5 text-primary" />
+                      {quickRetailer}
+                    </span>
+                    {quickUnit && (
+                      <span className="font-semibold text-muted-foreground">
+                        menor preço por {quickCandidate.baseUnit === "l" ? "litro" : quickCandidate.baseUnit === "kg" ? "kg" : "unidade"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="shrink-0 text-right">
+                  <p className="text-xl font-black leading-none text-primary">
+                    {brl(quickCandidate.price)}
+                  </p>
+                  {quickUnit && (
+                    <p className="mt-1 text-[11px] font-extrabold text-primary/90">
+                      {quickUnit}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </section>
+          );
+        })()}
+
+      {hasSearch &&
+        !isLoading &&
+        !error &&
+        bestCurrentOffer &&
+        resultFamilyCount > 1 && (
+          <section className="mb-4 rounded-2xl border border-primary/30 bg-primary/[0.07] p-3">
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">
+              Há mais de um tipo de produto
+            </p>
+            <p className="mt-1 text-sm font-bold">
+              Compare o melhor de cada tipo abaixo
+            </p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              Para não comparar produtos diferentes como se fossem equivalentes, o Preço 360 destaca o melhor dentro de cada família.
+            </p>
+          </section>
+        )}
+
+
 
       {hasSearch && storeReferencesError && (
         <p className="mb-3 text-[10px] text-muted-foreground">
