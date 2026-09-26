@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
@@ -8,10 +9,11 @@ import { useToast } from "@/hooks/use-toast";
 const db = supabase as any;
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { DollarSign, Laptop, Loader2, LogOut, Moon, Package, RefreshCw, Store, Sun } from "lucide-react";
+import { DollarSign, Laptop, Loader2, LogOut, Moon, Package, RefreshCw, Store, Sun, Upload } from "lucide-react";
 
 export default function ProfilePage() {
   const { user, signOut } = useAuth();
+  const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const { toast } = useToast();
   const [collecting, setCollecting] = useState(false);
@@ -111,6 +113,15 @@ export default function ProfilePage() {
           <Button type="button" className="w-full gap-2" onClick={runFlyerCollection} disabled={collecting}>
             {collecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             {collecting ? "Executando coleta..." : "Executar coleta agora"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-2 w-full gap-2"
+            onClick={() => navigate("/radar?view=import")}
+          >
+            <Upload className="h-4 w-4" />
+            Importar ofertas, gôndola ou prints do app
           </Button>
           {collectionReport && (
             <div className="mt-3 space-y-2">
