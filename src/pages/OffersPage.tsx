@@ -605,6 +605,8 @@ type OfferFamily =
   | "cannedFish"
   | "sugar"
   | "salt"
+  | "disinfectant"
+  | "alcoholDisinfectant"
   | "other";
 
 type SearchFamilyIntent = OfferFamily | "milk" | "corn" | "coffee";
@@ -616,6 +618,17 @@ function hasAny(tokens: Set<string>, values: string[]) {
 function queryOfferFamily(query: string): SearchFamilyIntent | null {
   if (isGenericSaltSearch(query)) return "salt";
   if (isGenericSugarSearch(query)) return "sugar";
+
+  const normalized = normalizeSearchText(query);
+  if (
+    /^desinfetante\b/.test(normalized) &&
+    /\balcool(?:ico|ica)?\b/.test(normalized)
+  ) {
+    return "alcoholDisinfectant";
+  }
+  if (/^alcool\b/.test(normalized)) return "alcoholDisinfectant";
+  if (/^desinfetante\b/.test(normalized)) return "disinfectant";
+
   if (isBroadBeefSearch(query)) return "beef";
   if (isBroadPorkSearch(query)) return "pork";
   if (isBroadFishSearch(query)) return "fish";
@@ -747,6 +760,13 @@ function inferOfferFamily(
   if (isFishOfferText(raw)) return "fish";
   if (/^bolos?\b/.test(raw)) return "cake";
 
+  if (/^desinfetante\b/.test(raw)) {
+    return /\balcool(?:ico|ica)?\b/.test(raw)
+      ? "alcoholDisinfectant"
+      : "disinfectant";
+  }
+  if (/^alcool\b/.test(raw) && isVolume) return "alcoholDisinfectant";
+
   if (/^(?:mistura de )?creme de leite\b/.test(raw)) return "milkCream";
   if (/^leite condensado\b/.test(raw)) return "milkCondensed";
   if (/^leite fermentado\b/.test(raw)) return "milkFermented";
@@ -855,6 +875,8 @@ function familyLabel(family: OfferFamily) {
   if (family === "cannedFish") return "Peixe enlatado";
   if (family === "sugar") return "Açúcar";
   if (family === "salt") return "Sal";
+  if (family === "disinfectant") return "Desinfetante";
+  if (family === "alcoholDisinfectant") return "Álcool / desinfetante alcoólico";
   return "Produto";
 }
 
@@ -900,6 +922,15 @@ function productHeadRule(
   }
   if (family === "refrigerante") return { label: "Refrigerante", pattern: /^refrigerante\b/i };
   if (family === "juice" && /^suco\b/i.test(value)) return { label: "Suco", pattern: /^suco\b/i };
+  if (family === "disinfectant") {
+    return { label: "Desinfetante", pattern: /^desinfetante\b/i };
+  }
+  if (family === "alcoholDisinfectant") {
+    return {
+      label: "Álcool / desinfetante alcoólico",
+      pattern: /^(?:desinfetante\s+)?[aá]lcool(?:\s+l[ií]quido)?\b/i,
+    };
+  }
 
   const genericRules: Array<{ label: string; pattern: RegExp }> = [
     { label: "Água Sanitária", pattern: /^[aá]gua\s+sanit[aá]ria\b/i },
@@ -1048,6 +1079,16 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   if (intent === "cake") add("bolo", "bolos");
   if (intent === "sugar") add("acucar", "acucares");
   if (intent === "salt") add("sal");
+  if (intent === "disinfectant") add("desinfetante", "desinfetantes");
+  if (intent === "alcoholDisinfectant") {
+    add(
+      "alcool",
+      "alcoolico",
+      "alcoolica",
+      "desinfetante",
+      "desinfetantes",
+    );
+  }
   if (intent === "beef") add(...BEEF_SEMANTIC_TOKENS);
   if (intent === "pork") add(...PORK_SEMANTIC_TOKENS);
   if (intent === "fish") add(...FISH_SEMANTIC_TOKENS);
