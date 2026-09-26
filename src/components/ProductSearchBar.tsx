@@ -33,6 +33,7 @@ const ProductSearchBar = forwardRef<HTMLInputElement, ProductSearchBarProps>(
     const {
       isListening,
       error: voiceSearchError,
+      clearError,
       startListening,
       stopListening,
     } = useVoiceSearch();
@@ -40,6 +41,7 @@ const ProductSearchBar = forwardRef<HTMLInputElement, ProductSearchBarProps>(
     useImperativeHandle(forwardedRef, () => inputRef.current as HTMLInputElement);
 
     const handleTyping = (event: ChangeEvent<HTMLInputElement>) => {
+      clearError();
       onChange(event.target.value, "typing");
     };
 
