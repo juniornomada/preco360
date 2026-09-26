@@ -31,6 +31,7 @@ import {
   Save,
   ShoppingBasket,
   Sparkles,
+  Smartphone,
   Store,
   Tags,
   Trash2,
@@ -1830,12 +1831,12 @@ export default function FlyerPage() {
               <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
                 Tipo de importação
               </p>
-              <div className="mt-2 grid grid-cols-2 gap-2">
+              <div className="mt-2 grid grid-cols-3 gap-2">
                 <div className="rounded-xl border border-primary/35 bg-primary/10 p-3">
                   <Upload className="h-4 w-4 text-primary" />
                   <p className="mt-1.5 text-sm font-bold">Tabloide</p>
                   <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
-                    Ofertas com período de validade.
+                    PDF ou imagens com ofertas e vigência.
                   </p>
                 </div>
                 <button
@@ -1844,9 +1845,20 @@ export default function FlyerPage() {
                   className="rounded-xl border bg-card p-3 text-left transition-colors hover:border-primary/35 hover:bg-primary/5"
                 >
                   <Store className="h-4 w-4 text-primary" />
-                  <p className="mt-1.5 text-sm font-bold">Pesquisa em loja</p>
+                  <p className="mt-1.5 text-sm font-bold">Gôndola</p>
                   <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
-                    Fotos de preços normais de gôndola.
+                    Fotos de preços normais da loja.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate("/radar/app-offers")}
+                  className="rounded-xl border bg-card p-3 text-left transition-colors hover:border-primary/35 hover:bg-primary/5"
+                >
+                  <Smartphone className="h-4 w-4 text-primary" />
+                  <p className="mt-1.5 text-sm font-bold">Ofertas do app</p>
+                  <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
+                    Prints com preço promocional e vigência.
                   </p>
                 </button>
               </div>
