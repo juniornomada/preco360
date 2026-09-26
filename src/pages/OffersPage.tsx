@@ -621,6 +621,7 @@ type OfferFamily =
   | "milkLiquid"
   | "milkPowder"
   | "milkCream"
+  | "milkCreamNata"
   | "milkCondensed"
   | "milkFermented"
   | "milkCoconut"
@@ -687,6 +688,12 @@ function queryOfferFamily(query: string): SearchFamilyIntent | null {
 
   if (hasMilk) {
     if (hasAny(tokens, ["bolo", "bolos"])) return "cake";
+    if (
+      hasAny(tokens, ["creme", "cremes"]) &&
+      hasAny(tokens, ["nata", "fresco", "fresca"])
+    ) {
+      return "milkCreamNata";
+    }
     if (hasAny(tokens, ["creme", "cremes"])) return "milkCream";
     if (hasAny(tokens, ["condensado", "condensados"])) return "milkCondensed";
     if (hasAny(tokens, ["fermentado", "fermentados"])) return "milkFermented";
@@ -806,7 +813,11 @@ function inferOfferFamily(
   }
   if (/^alcool\b/.test(raw) && isVolume) return "alcoholDisinfectant";
 
-  if (/^(?:mistura de )?creme de leite\b/.test(raw)) return "milkCream";
+  if (/^(?:mistura de )?creme de leite\b/.test(raw)) {
+    return /\b(?:nata|fresc[oa])\b/.test(raw)
+      ? "milkCreamNata"
+      : "milkCream";
+  }
   if (/^leite condensado\b/.test(raw)) return "milkCondensed";
   if (/^leite fermentado\b/.test(raw)) return "milkFermented";
   if (/^leite de coco\b/.test(raw)) return "milkCoconut";
@@ -891,6 +902,7 @@ function familyLabel(family: OfferFamily) {
   if (family === "milkLiquid") return "Leite";
   if (family === "milkPowder") return "Leite em pó";
   if (family === "milkCream") return "Creme de leite";
+  if (family === "milkCreamNata") return "Creme de leite nata";
   if (family === "milkCondensed") return "Leite condensado";
   if (family === "milkFermented") return "Leite fermentado";
   if (family === "milkCoconut") return "Leite de coco";
@@ -945,6 +957,7 @@ function productHeadRule(
   if (family === "milkLiquid") return { label: "Leite", pattern: /^leite\b/i };
   if (family === "milkPowder") return { label: "Leite em Pó", pattern: /^leite(?:\s+em)?\s+p[oó]\b/i };
   if (family === "milkCream") return { label: "Creme de Leite", pattern: /^(?:mistura\s+de\s+)?creme\s+de\s+leite\b/i };
+  if (family === "milkCreamNata") return { label: "Creme de Leite Nata", pattern: /^(?:mistura\s+de\s+)?creme\s+de\s+leite\b/i };
   if (family === "milkCondensed") return { label: "Leite Condensado", pattern: /^leite\s+condensado\b/i };
   if (family === "milkFermented") return { label: "Leite Fermentado", pattern: /^leite\s+fermentado\b/i };
   if (family === "milkCoconut") return { label: "Leite de Coco", pattern: /^leite\s+de\s+coco\b/i };
