@@ -161,9 +161,39 @@ function offerNameWithPackage(
   quantity: number | null | undefined,
   unit: string | null | undefined,
 ) {
-  const cleanName = String(name ?? "").replace(/\s+/g, " ").trim();
+  let cleanName = String(name ?? "").replace(/\s+/g, " ").trim();
   const label = packageNameLabel(quantity, unit);
   if (!cleanName || !label) return cleanName;
+
+  const value = Number(quantity);
+  const rawUnit = String(unit ?? "").trim().toLowerCase();
+  const quantityPattern = String(value).replace(".", "[,.]");
+  const unitPattern =
+    rawUnit === "l" || rawUnit === "lt" || rawUnit === "litro" || rawUnit === "litros"
+      ? "(?:l|lt|litro|litros)"
+      : rawUnit === "kg" || rawUnit === "quilo" || rawUnit === "quilos"
+        ? "(?:kg|quilo|quilos)"
+        : rawUnit === "g" || rawUnit === "grama" || rawUnit === "gramas"
+          ? "(?:g|grama|gramas)"
+          : rawUnit === "ml"
+            ? "ml"
+            : ["un", "und", "unid", "unidade", "unidades"].includes(rawUnit)
+              ? "(?:un|und|unid|unidade|unidades)"
+              : rawUnit.replace(/[.*+?^$()|[\]\\]/g, "\\$&");
+
+  // OCR from app cards sometimes leaves a packaging abbreviation plus a bare
+  // quantity, and the UI used to append the parsed package again:
+  // "FR 500 500ml" / "F 150 150ml". Collapse that to one clean size.
+  const duplicatePackageSuffix = new RegExp(
+    `\\s+(?:(?:f|fr|frasco|tp|pet|pct|pacote|cx|caixa)\\s+)?${quantityPattern}\\s+${quantityPattern}\\s*${unitPattern}\\s*$`,
+    "i",
+  );
+  if (duplicatePackageSuffix.test(cleanName)) {
+    cleanName = cleanName
+      .replace(duplicatePackageSuffix, ` ${label}`)
+      .replace(/\s+/g, " ")
+      .trim();
+  }
 
   const expected = inferPackage(label);
   const current = inferPackage(cleanName);
@@ -177,197 +207,19 @@ function offerNameWithPackage(
     return cleanName;
   }
 
-  // Some app cards/OCR keep the amount but lose the unit, e.g. "TP 250".
-  // Complete that suffix as "TP 250ml" instead of producing "TP 250 250ml".
-  const numericQuantity = new Intl.NumberFormat("pt-BR", {
-    maximumFractionDigits: 3,
-  }).format(Number(quantity));
-  const escapedQuantity = numericQuantity.replace(/[.*+?^$()|[\]\\]/g, "\\  if (
-    expected &&
-    current &&
-    expected.baseUnit === current.baseUnit &&
-    Math.abs(expected.baseQuantity - current.baseQuantity) < 0.0001
-  ) {
-    return cleanName;
-  }
-
-  // If a previous package was present and the reviewer changes quantity/unit,");
-  const trailingQuantity = new RegExp(
-    `\\b${escapedQuantity.replace(",", "[,.]")}\\s*import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  CalendarDays,
-  CheckCircle2,
-  ImagePlus,
-  Loader2,
-  Save,
-  Smartphone,
-  Trash2,
-} from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
-import { useToast } from "@/hooks/use-toast";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import {
-  inferPackage,
-  matchFlyerItem,
-  normalizeSearchText,
-  normalizedUnitPrice,
-  type FlyerCandidate,
-  type ProductForMatch,
-} from "@/lib/flyerAnalysis";
-import { canonicalRetailerName } from "@/lib/retailerNames";
-
-const db = supabase as any;
-const JOB_KEY = "preco360-active-app-offer-job";
-
-type ExtractedAppOffer = {
-  product_name: string;
-  brand: string | null;
-  package_quantity: number | null;
-  package_unit: string | null;
-  promotional_price: number;
-  regular_price: number | null;
-  valid_from: string | null;
-  valid_to: string | null;
-  app_activation_required: boolean;
-  app_activated: boolean | null;
-  notes: string[];
-  confidence: number;
-  source_index?: number;
-  source_file_name?: string;
-  source_image_path?: string;
-  source_hash?: string | null;
-};
-
-type ReviewOffer = {
-  localId: string;
-  rawName: string;
-  brand: string | null;
-  packageQuantity: number | null;
-  packageUnit: string | null;
-  price: number;
-  regularPrice: number | null;
-  validFrom: string;
-  validTo: string;
-  notes: string[];
-  confidence: number;
-  productId: string | null;
-  matchConfidence: number;
-  matchType: "exact" | "equivalent" | "suggested" | "manual" | "unmatched";
-  sourceIndex: number;
-  sourceFileName: string;
-  sourceImagePath: string | null;
-  sourceHash: string | null;
-};
-
-type AppOfferJob = {
-  id: string;
-  retailer: string;
-  status: "queued" | "processing" | "completed" | "failed";
-  progress_current: number;
-  progress_total: number;
-  progress_label: string;
-  source_files: any[];
-  result: { offers?: ExtractedAppOffer[]; files?: any[] } | null;
-  warning_message: string | null;
-  error_message: string | null;
-  saved_at: string | null;
-  updated_at: string | null;
-};
-
-const todayLocal = () => {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60_000;
-  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
-};
-
-const brl = (value: number) =>
-  value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-
-const safeName = (value: string) =>
-  value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9._-]+/g, "-")
-    .slice(0, 90);
-
-async function sha256(file: File) {
-  try {
-    const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-    return [...new Uint8Array(digest)]
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("");
-  } catch {
-    return `${file.name}-${file.size}-${file.lastModified}`;
-  }
-}
-
-function numericInput(value: string) {
-  const text = value.trim();
-  if (!text) return null;
-  const normalized = text.includes(",")
-    ? text.replace(/\./g, "").replace(",", ".")
-    : text;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function displayNumber(value: number | null) {
-  return value == null || !Number.isFinite(value)
-    ? ""
-    : String(value).replace(".", ",");
-}
-
-function packageNameLabel(
-  quantity: number | null | undefined,
-  unit: string | null | undefined,
-) {
-  const value = Number(quantity);
-  const rawUnit = String(unit ?? "").trim().toLowerCase();
-  if (!Number.isFinite(value) || value <= 0 || !rawUnit) return "";
-
-  const displayUnit =
-    rawUnit === "l" || rawUnit === "lt" || rawUnit === "litro" || rawUnit === "litros"
-      ? "L"
-      : rawUnit === "kg" || rawUnit === "quilo" || rawUnit === "quilos"
-        ? "kg"
-        : rawUnit === "g" || rawUnit === "grama" || rawUnit === "gramas"
-          ? "g"
-          : rawUnit === "ml"
-            ? "ml"
-            : ["un", "und", "unid", "unidade", "unidades"].includes(rawUnit)
-              ? "un"
-              : String(unit).trim();
-
-  const displayQuantity = new Intl.NumberFormat("pt-BR", {
-    maximumFractionDigits: 3,
-  }).format(value);
-
-  return `${displayQuantity}${displayUnit}`;
-}
-
-function offerNameWithPackage(
-  name: string,
-  quantity: number | null | undefined,
-  unit: string | null | undefined,
-) {
-  const cleanName = String(name ?? "").replace(/\s+/g, " ").trim();
-  const label = packageNameLabel(quantity, unit);
-  if (!cleanName || !label) return cleanName;
-
-  const expected = inferPackage(label);
-  const current = inferPackage(cleanName);
-
-,
+  // If the OCR kept only a trailing amount, optionally preceded by an
+  // abbreviation such as F/FR/TP, replace that suffix with the complete size.
+  // "Desodorante ... F 150" -> "Desodorante ... 150ml"
+  // "Detergente ... FR 500" -> "Detergente ... 500ml"
+  const barePackageSuffix = new RegExp(
+    `\\s+(?:(?:f|fr|frasco|tp|pet|pct|pacote|cx|caixa)\\s+)?${quantityPattern}\\s*$`,
     "i",
   );
-  if (!current && trailingQuantity.test(cleanName)) {
-    return cleanName.replace(trailingQuantity, label).replace(/\s+/g, " ").trim();
+  if (barePackageSuffix.test(cleanName)) {
+    return cleanName
+      .replace(barePackageSuffix, ` ${label}`)
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   // If a previous package was present and the reviewer changes quantity/unit,
