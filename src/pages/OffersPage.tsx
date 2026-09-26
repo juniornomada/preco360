@@ -1414,7 +1414,7 @@ export default function OffersPage() {
   const navigate = useNavigate();
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [packageFilter, setPackageFilter] = useState("all");
+  const [packageFilters, setPackageFilters] = useState<string[]>([]);
   const searchTimerRef = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const normalizedSearch = normalizeProductSearchText(search.trim());
@@ -1456,7 +1456,7 @@ export default function OffersPage() {
   }, []);
 
   useEffect(() => {
-    setPackageFilter("all");
+    setPackageFilters([]);
   }, [normalizedSearch]);
 
   useEffect(() => {
@@ -2111,9 +2111,16 @@ export default function OffersPage() {
   }, [preparedOffers, hasSearch, normalizedSearch]);
 
   const bestCurrentOffer = useMemo(() => {
-    if (!analyzed.length) return null;
+    const candidates =
+      packageFilters.length === 0
+        ? analyzed
+        : analyzed.filter((entry) =>
+            packageFilters.includes(packageLabel(entry.item) ?? ""),
+          );
 
-    return [...analyzed].sort((a, b) => {
+    if (!candidates.length) return null;
+
+    return [...candidates].sort((a, b) => {
       if (a.candidate.baseUnit === b.candidate.baseUnit) {
         const normalizedDiff =
           a.candidate.normalizedPrice - b.candidate.normalizedPrice;
@@ -2122,7 +2129,7 @@ export default function OffersPage() {
 
       return a.candidate.price - b.candidate.price;
     })[0];
-  }, [analyzed]);
+  }, [analyzed, packageFilters]);
 
   const currentVsReference = useMemo(() => {
     if (!bestCurrentOffer || !reference360) return null;
@@ -2381,10 +2388,12 @@ export default function OffersPage() {
 
   const visibleAnalyzed = useMemo(
     () =>
-      packageFilter === "all"
+      packageFilters.length === 0
         ? analyzed
-        : analyzed.filter((entry) => packageLabel(entry.item) === packageFilter),
-    [analyzed, packageFilter],
+        : analyzed.filter((entry) =>
+            packageFilters.includes(packageLabel(entry.item) ?? ""),
+          ),
+    [analyzed, packageFilters],
   );
 
   const listedAnalyzed = useMemo(() => {
@@ -2463,7 +2472,7 @@ export default function OffersPage() {
                   Melhor custo-benefício agora
                 </p>
                 <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
-                  {analyzed.length} oferta{analyzed.length === 1 ? "" : "s"} vigente{analyzed.length === 1 ? "" : "s"}
+                  {visibleAnalyzed.length} oferta{visibleAnalyzed.length === 1 ? "" : "s"} vigente{visibleAnalyzed.length === 1 ? "" : "s"}
                 </span>
               </div>
 
@@ -2559,29 +2568,40 @@ export default function OffersPage() {
           <div className="mb-4 -mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <button
               type="button"
-              onClick={() => setPackageFilter("all")}
+              onClick={() => setPackageFilters([])}
               className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
-                packageFilter === "all"
+                packageFilters.length === 0
                   ? "border-primary bg-primary/15 text-primary"
                   : "border-border bg-card/40 text-muted-foreground"
               }`}
             >
               Todos ({analyzed.length})
             </button>
-            {packageFilterOptions.map((option) => (
-              <button
-                key={option.label}
-                type="button"
-                onClick={() => setPackageFilter(option.label)}
-                className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
-                  packageFilter === option.label
-                    ? "border-primary bg-primary/15 text-primary"
-                    : "border-border bg-card/40 text-muted-foreground"
-                }`}
-              >
-                {option.label} ({option.count})
-              </button>
-            ))}
+            {packageFilterOptions.map((option) => {
+              const selected = packageFilters.includes(option.label);
+
+              return (
+                <button
+                  key={option.label}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() =>
+                    setPackageFilters((current) =>
+                      current.includes(option.label)
+                        ? current.filter((label) => label !== option.label)
+                        : [...current, option.label],
+                    )
+                  }
+                  className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                    selected
+                      ? "border-primary bg-primary/15 text-primary"
+                      : "border-border bg-card/40 text-muted-foreground"
+                  }`}
+                >
+                  {option.label} ({option.count})
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -2680,10 +2700,10 @@ export default function OffersPage() {
               </p>
               <p className="text-sm font-bold">
                 {resultFamilyCount === 1 && bestCurrentOffer
-                  ? packageFilter === "all"
+                  ? packageFilters.length === 0
                     ? `${listedAnalyzed.length} outra(s) oferta(s)`
-                    : `${listedAnalyzed.length} outra(s) de ${visibleAnalyzed.length} nesta embalagem`
-                  : packageFilter === "all"
+                    : `${listedAnalyzed.length} outra(s) de ${visibleAnalyzed.length} nas embalagens selecionadas`
+                  : packageFilters.length === 0
                     ? `${analyzed.length} oferta(s) encontrada(s)`
                     : `${visibleAnalyzed.length} de ${analyzed.length} oferta(s)`}
               </p>
