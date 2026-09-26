@@ -615,6 +615,7 @@ export const basketNeedsCatalog: BasketNeed[] = [
   { key: "limpeza:amaciante", label: "Amaciante", category: "Limpeza", aliases: [], baseUnit: "l" },
   { key: "limpeza:agua-sanitaria", label: "Água sanitária", category: "Limpeza", aliases: ["agua sanitaria", "alvejante clorado"], baseUnit: "l" },
   { key: "limpeza:desinfetante", label: "Desinfetante", category: "Limpeza", aliases: [], baseUnit: "l" },
+  { key: "limpeza:alcool", label: "Álcool / desinfetante alcoólico", category: "Limpeza", aliases: ["alcool", "alcool liquido", "desinfetante alcool", "desinfetante alcoolico"], baseUnit: "l" },
   { key: "limpeza:multiuso", label: "Limpador multiuso", category: "Limpeza", aliases: ["multiuso", "limpador geral"], baseUnit: "l" },
   { key: "limpeza:papel-toalha", label: "Papel toalha", category: "Limpeza", aliases: ["papel de cozinha"], baseUnit: "un" },
 ];
@@ -932,7 +933,20 @@ export function genericBasketFamily(value: string): GenericBasketFamily | null {
   }
 
   if (startsComparison(t, "desinfetante")) {
+    if (hasComparisonToken(t, "alcool", "alcoolico", "alcoolica")) {
+      return {
+        key: "limpeza:alcool",
+        label: "Álcool / desinfetante alcoólico",
+      };
+    }
     return { key: "limpeza:desinfetante", label: "Desinfetante" };
+  }
+
+  if (startsComparison(t, "alcool")) {
+    return {
+      key: "limpeza:alcool",
+      label: "Álcool / desinfetante alcoólico",
+    };
   }
 
   if (
