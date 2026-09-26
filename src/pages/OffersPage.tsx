@@ -660,6 +660,11 @@ function queryOfferFamily(query: string): SearchFamilyIntent | null {
   if (isGenericSugarSearch(query)) return "sugar";
 
   const normalized = normalizeSearchText(query);
+
+  if (/^(?:nata|creme\s+de\s+leite\s+(?:nata|fresc[oa]))\b/.test(normalized)) {
+    return "milkCreamNata";
+  }
+
   if (
     /^desinfetante\b/.test(normalized) &&
     /\balcool(?:ico|ica)?\b/.test(normalized)
@@ -1079,6 +1084,17 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   if (intent === "milk" || intent === "milkLiquid") add("leite", "leites");
   if (intent === "milkPowder") add("leite", "leites", "po");
   if (intent === "milkCream") add("creme", "cremes", "leite", "leites");
+  if (intent === "milkCreamNata") {
+    add(
+      "creme",
+      "cremes",
+      "leite",
+      "leites",
+      "nata",
+      "fresco",
+      "fresca",
+    );
+  }
   if (intent === "milkCondensed") {
     add("leite", "leites", "condensado", "condensados");
   }
