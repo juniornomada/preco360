@@ -2449,7 +2449,10 @@ export default function OffersPage() {
               : null;
 
           return (
-            <section className="mb-4 rounded-[22px] border-2 border-primary/50 bg-primary/[0.10] p-3 shadow-[0_8px_28px_hsl(var(--primary)/0.08)]">
+            <section
+              id={`best-current-offer-${quickItem.id}`}
+              className="mb-4 rounded-[22px] border-2 border-primary/50 bg-primary/[0.10] p-3 shadow-[0_8px_28px_hsl(var(--primary)/0.08)]"
+            >
               <div className="mb-2 flex items-center justify-between gap-3">
                 <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">
                   Melhor custo-benefício agora
@@ -3214,38 +3217,92 @@ export default function OffersPage() {
                   )}
                 </div>
 
-                <div className="min-w-0 rounded-2xl border border-primary/45 bg-primary/[0.12] p-2.5 sm:p-3">
-                  <div className="mb-1.5 flex items-center gap-1.5">
-                    <Trophy className="h-4 w-4 shrink-0 text-primary" />
-                    <p className="text-[10px] font-extrabold leading-tight text-primary sm:text-xs">
-                      Melhor agora
+                {bestCurrentOffer ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = document.getElementById(
+                        `best-current-offer-${bestCurrentOffer.item.id}`,
+                      );
+                      if (!target) return;
+
+                      target.scrollIntoView({
+                        behavior: "smooth",
+                        block: "center",
+                      });
+
+                      window.setTimeout(() => {
+                        target.animate(
+                          [
+                            {
+                              boxShadow:
+                                "0 0 0 0 hsl(var(--primary) / 0.55)",
+                              transform: "scale(1)",
+                            },
+                            {
+                              boxShadow:
+                                "0 0 0 10px hsl(var(--primary) / 0.12)",
+                              transform: "scale(1.01)",
+                            },
+                            {
+                              boxShadow:
+                                "0 0 0 0 hsl(var(--primary) / 0)",
+                              transform: "scale(1)",
+                            },
+                          ],
+                          {
+                            duration: 900,
+                            easing: "ease-out",
+                          },
+                        );
+                      }, 350);
+                    }}
+                    className="min-w-0 rounded-2xl border border-primary/45 bg-primary/[0.12] p-2.5 text-left transition hover:bg-primary/[0.16] active:scale-[0.99] sm:p-3"
+                    aria-label="Ver a oferta com melhor preço agora"
+                  >
+                    <div className="mb-1.5 flex items-center gap-1.5">
+                      <Trophy className="h-4 w-4 shrink-0 text-primary" />
+                      <p className="text-[10px] font-extrabold leading-tight text-primary sm:text-xs">
+                        Melhor agora
+                      </p>
+                      <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 text-primary/80" />
+                    </div>
+                    <p className="text-[9px] text-muted-foreground sm:text-[10px]">
+                      toque para ver a oferta
                     </p>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground sm:text-[10px]">
-                    oferta vigente
-                  </p>
-                  {bestCurrentOffer ? (
-                    <>
-                      <p className="mt-2 text-[clamp(.95rem,4vw,1.35rem)] font-black leading-none text-primary">
-                        {bestCurrentOffer.candidate.baseUnit !== "un"
-                          ? formatNormalizedPrice(
-                              bestCurrentOffer.candidate.normalizedPrice,
-                              bestCurrentOffer.candidate.baseUnit,
-                            )
-                          : brl(bestCurrentOffer.candidate.price)}
+                    <p className="mt-2 text-[clamp(.95rem,4vw,1.35rem)] font-black leading-none text-primary">
+                      {bestCurrentOffer.candidate.baseUnit !== "un"
+                        ? formatNormalizedPrice(
+                            bestCurrentOffer.candidate.normalizedPrice,
+                            bestCurrentOffer.candidate.baseUnit,
+                          )
+                        : brl(bestCurrentOffer.candidate.price)}
+                    </p>
+                    <p className="mt-1 line-clamp-2 text-[9px] font-extrabold leading-tight text-foreground sm:text-[10px]">
+                      {standardizedOfferName(
+                        bestCurrentOffer.item,
+                        bestCurrentOffer.family,
+                      )}
+                    </p>
+                    <p className="mt-1 truncate text-[9px] font-bold text-primary/90 sm:text-[10px]">
+                      {canonicalRetailerName(bestCurrentOffer.flyer?.retailer) ||
+                        bestCurrentOffer.flyer?.retailer ||
+                        "Supermercado"}
+                    </p>
+                  </button>
+                ) : (
+                  <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-2.5 sm:p-3">
+                    <div className="mb-1.5 flex items-center gap-1.5">
+                      <Trophy className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <p className="text-[10px] font-extrabold leading-tight sm:text-xs">
+                        Melhor agora
                       </p>
-                      <p className="mt-1 truncate text-[9px] font-bold text-primary/90 sm:text-[10px]">
-                        {canonicalRetailerName(bestCurrentOffer.flyer?.retailer) ||
-                          bestCurrentOffer.flyer?.retailer ||
-                          "Supermercado"}
-                      </p>
-                    </>
-                  ) : (
+                    </div>
                     <p className="mt-2 text-[10px] leading-snug text-muted-foreground">
                       Sem oferta
                     </p>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
               {decisionReference && (
