@@ -48,7 +48,6 @@ import {
   BadgeCheck,
   Camera,
   ChevronRight,
-  CircleDollarSign,
   Clock3,
   History,
   ReceiptText,
@@ -2127,7 +2126,7 @@ export default function OffersPage() {
 
       <ProductSearchBar
         ref={searchInputRef}
-        className="mb-2"
+        className="mb-4"
         value={searchInput}
         placeholder="Busque sabão em pó, água sanitária, café..."
         autoFocus
@@ -2149,34 +2148,6 @@ export default function OffersPage() {
           }, 140);
         }}
       />
-
-      <div className="mb-4 grid grid-cols-3 gap-2">
-        <button
-          type="button"
-          onClick={() => searchInputRef.current?.focus()}
-          className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-primary bg-primary/10 px-2 text-sm font-extrabold text-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.12)]"
-        >
-          <Tags className="h-5 w-5 text-primary" />
-          <span>Ofertas</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate("/offers/store-prices")}
-          className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-border bg-card/40 px-2 text-sm font-bold text-foreground/90 transition hover:border-primary/30 hover:bg-muted/50"
-        >
-          <Store className="h-5 w-5 text-muted-foreground" />
-          <span>Gôndola</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate("/search")}
-          className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-border bg-card/40 px-2 text-sm font-bold text-foreground/90 transition hover:border-primary/30 hover:bg-muted/50"
-        >
-          <CircleDollarSign className="h-5 w-5 text-muted-foreground" />
-          <span>Cotar</span>
-        </button>
-      </div>
-
 
       {hasSearch &&
         !isLoading &&
