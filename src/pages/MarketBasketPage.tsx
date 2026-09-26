@@ -243,6 +243,10 @@ function compactOfferName(label: string, rawName: string) {
 }
 
 function validClubPrice(offer: OfferWithMarket) {
+  if ((offer.offer_notes ?? []).some((note) => /elo/i.test(String(note ?? "")))) {
+    return null;
+  }
+
   const regular = Number(offer.advertised_price);
   const club = Number(offer.club_advertised_price);
   return Number.isFinite(club) &&
