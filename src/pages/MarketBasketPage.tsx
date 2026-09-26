@@ -316,10 +316,34 @@ function packageLabel(offer: OfferWithMarket) {
   return offer.base_unit === "un" ? "1 un" : "1 embalagem";
 }
 
-function desiredBaseQuantity(group: Group, packageCount: number) {
+function representativeBaseQuantity(group: Group) {
+  const packageSizes = group.offers
+    .map(packageBaseQuantity)
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b);
+
+  if (!packageSizes.length) return 1;
+
   const reference = [...group.offers].sort(compareOfferValue)[0];
-  if (!reference) return packageCount;
-  return packageBaseQuantity(reference) * packageCount;
+  const referenceSize = reference ? packageBaseQuantity(reference) : 1;
+
+  // Generic basket groups can contain institutional/outlier packs
+  // (for example flour 25kg beside several household 1kg packs).
+  // The cheapest R$/kg pack must not silently redefine "1x" as 25kg.
+  // Keep the cheapest package size when it is reasonably close to the
+  // market's typical size; otherwise fall back to the lower median size.
+  const medianIndex = Math.floor((packageSizes.length - 1) / 2);
+  const medianSize = packageSizes[medianIndex] || 1;
+
+  const isExtremeOutlier =
+    referenceSize >= medianSize * 4 ||
+    referenceSize <= medianSize / 4;
+
+  return isExtremeOutlier ? medianSize : referenceSize;
+}
+
+function desiredBaseQuantity(group: Group, packageCount: number) {
+  return representativeBaseQuantity(group) * packageCount;
 }
 
 function equivalentGroupCost(
