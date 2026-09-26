@@ -11,7 +11,7 @@ import {
   Plus,
   Mic,
   Sparkles,
-  Split,
+  Trophy,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { basketNeedsCatalog, genericBasketFamilies } from "@/lib/flyerAnalysis";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
 import { canonicalRetailerName } from "@/lib/retailerNames";
+import RetailerLogo from "@/components/RetailerLogo";
 
 const db = supabase as any;
 const LEGACY_STORAGE_KEY = "preco360-basket-selection-v2";
@@ -1125,87 +1126,150 @@ export default function MarketBasketPage() {
         </Card>
       )}
 
-      {selectedGroups.length > 0 && split && split.rows.length > 0 && (
+      {selectedGroups.length > 0 && split && (
         <div className="mb-4 space-y-3">
-          <details className="rounded-xl border border-primary/25 bg-card">
-            <summary className="flex cursor-pointer list-none items-center gap-3 p-4">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <Split className="h-4 w-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-bold leading-tight">
-                  {splitIsComplete
-                    ? "Cesta completa pelo menor preço"
-                    : "Menor preço dos itens encontrados"}
-                </p>
-                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-                  Cada item com preço é comprado onde está mais barato · {split.markets.length} mercado{split.markets.length === 1 ? "" : "s"}
-                  {!splitIsComplete && unpricedSelectedCount > 0
-                    ? ` · ${unpricedSelectedCount} item(ns) sem preço`
-                    : ""}
-                </p>
-              </div>
-              <div className="shrink-0 text-right">
-                <p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
-                  Total
-                </p>
-                <p className="text-lg font-extrabold leading-none text-primary">
-                  {brl(split.total)}
-                </p>
-              </div>
-            </summary>
-            <div className="space-y-2 border-t p-3">
-              <p className="rounded-lg bg-primary/5 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-                Este é o custo da <span className="font-semibold text-foreground">cesta inteira</span>.
-                Os valores “Parcial” abaixo somam somente os itens encontrados no tabloide de cada supermercado.
-              </p>
-              {split.rows.map((row) => (
-                <div key={row.key} className="flex items-start justify-between gap-3 rounded-lg bg-muted/40 p-3">
-                  <div className="min-w-0">
-                    <p className="font-medium">
-                      {row.quantity}× {row.label}
-                      <span className="ml-1 text-xs font-normal text-muted-foreground">
-                        ({row.quantity} pacote{row.quantity > 1 ? "s" : ""})
-                      </span>
-                    </p>
-                    {row.offer.raw_name !== row.label && (
-                      <p className="mt-0.5 text-xs font-medium text-primary">
-                        Comprar: {compactOfferName(row.label, row.offer.raw_name)}
-                      </p>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      {canonicalRetailerName(row.offer.retailer)} · válido até {dateBr(row.offer.validTo)}
-                    </p>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <p className="font-bold">{brl(row.subtotal)}</p>
-                    {normalizedPriceLabel(row.offer) ? (
-                      <>
-                        <p className="text-[11px] text-muted-foreground">
-                          equivalente · {normalizedPriceLabel(row.offer)}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {validClubPrice(row.offer)
-                            ? "clube " +
-                              brl(effectiveAdvertisedPrice(row.offer)) +
-                              (requiresAppActivation(
-                                row.offer.retailer,
-                                row.offer.offer_notes,
-                              )
-                                ? " · ativar desconto APP"
-                                : "") +
-                              " · normal " +
-                              brl(Number(row.offer.advertised_price))
-                            : "embalagem " +
-                              brl(Number(row.offer.advertised_price))}
-                        </p>
-                      </>
-                    ) : null}
-                  </div>
+          <Card className="overflow-hidden border-primary/40 bg-gradient-to-br from-primary/[0.08] via-card to-card">
+            <CardContent className="p-0">
+              <div className="flex items-start gap-3 p-4">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary">
+                  <Trophy className="h-5 w-5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
+                    Melhor preço item por item
+                  </p>
+                  <h2 className="mt-0.5 text-xl font-extrabold tracking-tight">
+                    Cesta perfeita
+                  </h2>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    Veja de bate-pronto onde comprar cada item da sua lista pelo melhor custo vigente.
+                  </p>
                 </div>
-              ))}
-            </div>
-          </details>
+                <div className="shrink-0 text-right">
+                  <p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+                    Total
+                  </p>
+                  <p className="text-lg font-extrabold leading-none text-primary">
+                    {brl(split.total)}
+                  </p>
+                  <p className="mt-1 text-[9px] text-muted-foreground">
+                    {split.rows.length}/{selectedGroups.length} com preço
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-y border-border/70 bg-background/25 px-4 py-2.5">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+                  <span>
+                    <strong className="text-foreground">{split.markets.length}</strong>{" "}
+                    mercado{split.markets.length === 1 ? "" : "s"}
+                  </span>
+                  <span>·</span>
+                  <span>
+                    {splitIsComplete
+                      ? "todos os itens encontrados"
+                      : `${unpricedSelectedCount} item(ns) sem oferta vigente`}
+                  </span>
+                  <span>·</span>
+                  <span>preço real da embalagem</span>
+                </div>
+              </div>
+
+              <div className="divide-y divide-border/60">
+                {selectedGroups.map((group) => {
+                  const row = split.rows.find((item) => item.key === group.key);
+
+                  if (!row) {
+                    return (
+                      <div
+                        key={"perfect-missing-" + group.key}
+                        className="flex items-center gap-3 px-4 py-3"
+                      >
+                        <div className="flex h-11 w-16 shrink-0 items-center justify-center rounded-xl border border-dashed bg-muted/20 text-[9px] font-bold uppercase text-muted-foreground">
+                          Sem oferta
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold leading-tight">
+                            {group.quantity}× {group.label}
+                          </p>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">
+                            Nenhum preço vigente compatível nas redes pesquisadas.
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  const normalized = normalizedPriceLabel(row.offer);
+                  const club = validClubPrice(row.offer);
+
+                  return (
+                    <div
+                      key={"perfect-" + row.key}
+                      className="flex items-center gap-3 px-4 py-3"
+                    >
+                      <RetailerLogo
+                        retailer={row.offer.retailer}
+                        className="shrink-0"
+                        imageClassName="h-11 w-16"
+                      />
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <p className="truncate font-extrabold leading-tight">
+                            {row.quantity}× {row.label}
+                          </p>
+                          {club && (
+                            <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-primary">
+                              Clube
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                          {compactOfferName(row.label, row.offer.raw_name)}
+                        </p>
+
+                        <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px]">
+                          <span className="font-semibold text-primary">
+                            {canonicalRetailerName(row.offer.retailer)}
+                          </span>
+                          <span className="text-muted-foreground">·</span>
+                          <span className="text-muted-foreground">
+                            {packageLabel(row.offer)}
+                          </span>
+                          <span className="text-muted-foreground">·</span>
+                          <span className="text-muted-foreground">
+                            até {dateBr(row.offer.validTo)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 text-right">
+                        <p className="font-extrabold">{brl(row.subtotal)}</p>
+                        {normalized && (
+                          <p className="mt-0.5 text-[10px] font-semibold text-primary">
+                            {normalized}
+                          </p>
+                        )}
+                        {row.quantity > 1 && (
+                          <p className="mt-0.5 text-[9px] text-muted-foreground">
+                            {brl(effectiveAdvertisedPrice(row.offer))}/emb.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {!splitIsComplete && (
+                <div className="border-t border-amber-500/20 bg-amber-500/[0.04] px-4 py-3 text-[10px] leading-relaxed text-muted-foreground">
+                  O total considera apenas os itens com oferta vigente. Itens sem preço continuam na sua lista e entram automaticamente quando surgir uma oferta compatível.
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {bestSingle && rankedMarkets.length > 0 && (
             <Card>
