@@ -235,6 +235,69 @@ function offerNameWithPackage(
   return `${cleanName} ${label}`;
 }
 
+function offerNameWithBrandAndPackage(
+  name: string,
+  brand: string | null | undefined,
+  quantity: number | null | undefined,
+  unit: string | null | undefined,
+) {
+  const packaged = offerNameWithPackage(name, quantity, unit);
+  const cleanBrand = String(brand ?? "").replace(/\s+/g, " ").trim();
+  if (!packaged || !cleanBrand) return packaged;
+
+  const normalizedName = normalizeSearchText(packaged);
+  const normalizedBrand = normalizeSearchText(cleanBrand);
+  if (!normalizedBrand || normalizedName.includes(normalizedBrand)) return packaged;
+
+  const heads = [
+    /^(doce\s+de\s+soro\s+de\s+leite)\b/i,
+    /^(kit\s+shampoo\s+e\s+condicionador)\b/i,
+    /^(lava\s+roupas\s+l[ií]quido)\b/i,
+    /^(leite\s+condensado)\b/i,
+    /^(extrato\s+de\s+tomate)\b/i,
+    /^(fil[eé]\s+de\s+til[aá]pia)\b/i,
+    /^(fermento\s+em\s+p[oó])\b/i,
+    /^(iogurte\s+natural)\b/i,
+    /^(mistura\s+para\s+bolo)\b/i,
+    /^(milho\s+verde)\b/i,
+    /^(lanche\s+hot\s+hit)\b/i,
+    /^(bebida\s+l[aá]ctea)\b/i,
+    /^(creme\s+de\s+leite)\b/i,
+    /^(detergente\s+l[ií]quido)\b/i,
+    /^(desodorante\s+aerossol)\b/i,
+    /^(energ[eé]tico)\b/i,
+    /^(hamb[uú]rguer)\b/i,
+    /^(maionese)\b/i,
+    /^(mostarda)\b/i,
+    /^(gelatina)\b/i,
+    /^(fralda)\b/i,
+    /^(gin)\b/i,
+    /^(caf[eé])\b/i,
+    /^(chocolate)\b/i,
+    /^(coquetel)\b/i,
+  ];
+
+  for (const head of heads) {
+    const match = packaged.match(head);
+    if (!match) continue;
+    return packaged
+      .replace(head, `${match[1]} ${cleanBrand}`)
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  // Safe fallback: keep the OCR wording and place the brand immediately
+  // before the package size instead of omitting the brand.
+  const label = packageNameLabel(quantity, unit);
+  if (label && packaged.toLowerCase().endsWith(label.toLowerCase())) {
+    return `${packaged.slice(0, -label.length).trim()} ${cleanBrand} ${label}`
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  return `${packaged} ${cleanBrand}`.replace(/\s+/g, " ").trim();
+}
+
 function candidateFromOffer(offer: ExtractedAppOffer): FlyerCandidate {
   const packageText =
     offer.package_quantity && offer.package_unit
@@ -245,8 +308,9 @@ function candidateFromOffer(offer: ExtractedAppOffer): FlyerCandidate {
   );
   const normalized = normalizedUnitPrice(offer.promotional_price, packageInfo);
   return {
-    rawName: offerNameWithPackage(
+    rawName: offerNameWithBrandAndPackage(
       offer.product_name,
+      offer.brand,
       offer.package_quantity,
       offer.package_unit,
     ),
@@ -438,8 +502,9 @@ export default function AppOfferImportPage() {
 
     for (const offer of extracted) {
       const name = String(offer.product_name || "").trim();
-      const displayName = offerNameWithPackage(
+      const displayName = offerNameWithBrandAndPackage(
         name,
+        offer.brand,
         offer.package_quantity,
         offer.package_unit,
       );
@@ -682,8 +747,9 @@ export default function AppOfferImportPage() {
         if (flyerError) throw flyerError;
 
         const itemRows = groupRows.map((row) => {
-          const finalName = offerNameWithPackage(
+          const finalName = offerNameWithBrandAndPackage(
             row.rawName,
+            row.brand,
             row.packageQuantity,
             row.packageUnit,
           );
