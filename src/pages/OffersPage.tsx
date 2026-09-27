@@ -26,6 +26,7 @@ import {
 } from "@/lib/beefSearch";
 import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
+import { isCardOnlyPriceCondition } from "@/lib/priceConditions";
 import { canonicalRetailerName } from "@/lib/retailerNames";
 import {
   isGenericPoncaSearch,
@@ -1399,8 +1400,11 @@ function comparableOfferIdentity(current: FlyerItemRow, previous: FlyerItemRow) 
 }
 
 function validClubPrice(item: FlyerItemRow) {
+  // A discount requiring the Muffato/Credifatto payment card is not available to this user.
+  if (isCardOnlyPriceCondition(item.offer_notes)) return null;
+
   const conditionalPromo = (item.offer_notes ?? []).some((note) =>
-    /cart[aã]o\s+elo|com\s+elo/i.test(String(note ?? "")),
+    /cart[aã]o\\s+elo|com\\s+elo/i.test(String(note ?? "")),
   );
   if (conditionalPromo) return null;
 
