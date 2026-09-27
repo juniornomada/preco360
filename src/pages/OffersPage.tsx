@@ -1437,12 +1437,14 @@ function duplicateOfferPreferenceScore(item: SearchOfferItemRow) {
 }
 
 function offerDuplicateKey(item: SearchOfferItemRow) {
-  const effectivePrice = validClubPrice(item) ?? Number(item.advertised_price);
-  const productIdentity = item.product_id
-    ? `product:${item.product_id}`
-    : `name:${offerIdentityTokens(item.raw_name).join(" ")}|${normalizeSearchText(
-        item.brand ?? "",
-      )}`;
+  const nameIdentity = [...new Set(offerIdentityTokens(item.raw_name))]
+    .sort()
+    .join(" ");
+  const productIdentity = nameIdentity
+    ? `name:${nameIdentity}|${normalizeSearchText(item.brand ?? "")}`
+    : item.product_id
+      ? `product:${item.product_id}`
+      : `row:${item.id}`;
 
   const quantity = Number(item.package_quantity);
   const packageQuantity =
@@ -1456,10 +1458,36 @@ function offerDuplicateKey(item: SearchOfferItemRow) {
     productIdentity,
     packageQuantity,
     packageUnit,
-    Number.isFinite(effectivePrice) ? effectivePrice.toFixed(4) : "",
     item.valid_from ?? "",
     item.valid_to ?? "",
   ].join("|");
+}
+
+function isPreferredDuplicateOffer(
+  candidate: SearchOfferItemRow,
+  current: SearchOfferItemRow,
+) {
+  const candidateScore = duplicateOfferPreferenceScore(candidate);
+  const currentScore = duplicateOfferPreferenceScore(current);
+
+  if (candidateScore !== currentScore) {
+    return candidateScore > currentScore;
+  }
+
+  const candidateEffective =
+    validClubPrice(candidate) ?? Number(candidate.advertised_price);
+  const currentEffective =
+    validClubPrice(current) ?? Number(current.advertised_price);
+
+  if (
+    Number.isFinite(candidateEffective) &&
+    Number.isFinite(currentEffective) &&
+    Math.abs(candidateEffective - currentEffective) > 0.0001
+  ) {
+    return candidateEffective < currentEffective;
+  }
+
+  return candidate.id.localeCompare(current.id) < 0;
 }
 
 function dedupeActiveOfferRows(items: SearchOfferItemRow[]) {
@@ -1469,11 +1497,7 @@ function dedupeActiveOfferRows(items: SearchOfferItemRow[]) {
     const key = offerDuplicateKey(item);
     const current = bestByOffer.get(key);
 
-    if (
-      !current ||
-      duplicateOfferPreferenceScore(item) >
-        duplicateOfferPreferenceScore(current)
-    ) {
+    if (!current || isPreferredDuplicateOffer(item, current)) {
       bestByOffer.set(key, item);
     }
   }
@@ -1770,7 +1794,7 @@ export default function OffersPage() {
       historyByProduct.set(previous.product_id, rows);
     }
 
-    return activeItems.map((item) => {
+    const mappedOffers = activeItems.map((item) => {
       const flyer: FlyerRow = {
         id: item.flyer_id,
         retailer: item.retailer,
@@ -1818,6 +1842,39 @@ export default function OffersPage() {
         normalizedProductName: normalizeSearchText(product?.name ?? ""),
       };
     });
+
+    const bestByCanonicalProduct = new Map<string, (typeof mappedOffers)[number]>();
+
+    for (const entry of mappedOffers) {
+      const quantity = Number(entry.item.package_quantity);
+      const packageQuantity =
+        Number.isFinite(quantity) && quantity > 0 ? quantity : "";
+      const packageUnit = normalizeSearchText(entry.item.package_unit ?? "");
+      const retailer = normalizeSearchText(
+        canonicalRetailerName(entry.item.retailer) || entry.item.retailer,
+      );
+      const canonicalIdentity = entry.productId
+        ? `product:${entry.productId}`
+        : `name:${[...new Set(offerIdentityTokens(entry.item.raw_name))]
+            .sort()
+            .join(" ")}`;
+
+      const key = [
+        retailer,
+        canonicalIdentity,
+        packageQuantity,
+        packageUnit,
+        entry.item.valid_from ?? "",
+        entry.item.valid_to ?? "",
+      ].join("|");
+
+      const current = bestByCanonicalProduct.get(key);
+      if (!current || isPreferredDuplicateOffer(entry.item, current.item)) {
+        bestByCanonicalProduct.set(key, entry);
+      }
+    }
+
+    return [...bestByCanonicalProduct.values()];
   }, [hasSearch, productContext, searchRows]);
 
   const directSearchProductIds = useMemo(() => {
