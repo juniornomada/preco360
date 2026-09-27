@@ -100,8 +100,7 @@ AS $function$
     ), '[]'::jsonb) as items,
     s.total_count, s.missing_count, s.horti_count, s.filtered_count, s.flyer_count
   from stats s;
-$function$
-
+$function$;
 
 revoke all on function public.offer_images_audit_page_v4(date, text, boolean, integer, integer) from public, anon;
 grant execute on function public.offer_images_audit_page_v4(date, text, boolean, integer, integer) to authenticated;
