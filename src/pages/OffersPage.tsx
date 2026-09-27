@@ -1490,6 +1490,106 @@ function isPreferredDuplicateOffer(
   return candidate.id.localeCompare(current.id) < 0;
 }
 
+function canonicalOfferPackageKey(item: SearchOfferItemRow) {
+  const regularPrice = Number(item.advertised_price) || 0;
+  const pkg = offerPackageInfo(
+    item.raw_name,
+    item.package_quantity,
+    item.package_unit,
+    item.offer_notes,
+    regularPrice,
+  );
+
+  if (pkg && pkg.baseQuantity > 0) {
+    return `${pkg.baseUnit}:${pkg.baseQuantity.toFixed(6)}`;
+  }
+
+  const quantity = Number(item.package_quantity);
+  const unit = normalizeSearchText(item.package_unit ?? "");
+  return Number.isFinite(quantity) && quantity > 0 && unit
+    ? `${unit}:${quantity.toFixed(6)}`
+    : "";
+}
+
+function duplicateNameSimilarity(a: SearchOfferItemRow, b: SearchOfferItemRow) {
+  const aTokens = new Set(offerIdentityTokens(a.raw_name));
+  const bTokens = new Set(offerIdentityTokens(b.raw_name));
+  if (!aTokens.size || !bTokens.size) return 0;
+
+  const common = [...aTokens].filter((token) => bTokens.has(token)).length;
+  const smaller = Math.min(aTokens.size, bTokens.size);
+  const larger = Math.max(aTokens.size, bTokens.size);
+
+  // Strong subset matches catch OCR/import variants such as
+  // "Água de Coco Sococo TP" vs "Água de Coco Sococo".
+  const containment = smaller > 0 ? common / smaller : 0;
+  const overlap = larger > 0 ? common / larger : 0;
+
+  return Math.max(containment * 0.85 + overlap * 0.15, overlap);
+}
+
+function offersAreEquivalentDuplicates(
+  a: SearchOfferItemRow,
+  b: SearchOfferItemRow,
+) {
+  const retailerA = normalizeSearchText(
+    canonicalRetailerName(a.retailer) || a.retailer,
+  );
+  const retailerB = normalizeSearchText(
+    canonicalRetailerName(b.retailer) || b.retailer,
+  );
+  if (!retailerA || retailerA !== retailerB) return false;
+
+  // The same offer may be imported from a flyer and from the retailer app with
+  // different start dates, but the same expiry date shown to the user.
+  if (a.valid_to && b.valid_to && a.valid_to !== b.valid_to) return false;
+
+  const packageA = canonicalOfferPackageKey(a);
+  const packageB = canonicalOfferPackageKey(b);
+  if (packageA && packageB && packageA !== packageB) return false;
+
+  const priceA = validClubPrice(a) ?? Number(a.advertised_price);
+  const priceB = validClubPrice(b) ?? Number(b.advertised_price);
+  if (
+    !Number.isFinite(priceA) ||
+    !Number.isFinite(priceB) ||
+    Math.abs(priceA - priceB) > 0.005
+  ) {
+    return false;
+  }
+
+  if (a.product_id && b.product_id && a.product_id === b.product_id) {
+    return true;
+  }
+
+  const brandA = normalizeSearchText(a.brand ?? "");
+  const brandB = normalizeSearchText(b.brand ?? "");
+  if (brandA && brandB && brandA !== brandB) return false;
+
+  return duplicateNameSimilarity(a, b) >= 0.82;
+}
+
+function collapseEquivalentOfferRows(items: SearchOfferItemRow[]) {
+  const kept: SearchOfferItemRow[] = [];
+
+  for (const item of items) {
+    const duplicateIndex = kept.findIndex((current) =>
+      offersAreEquivalentDuplicates(item, current),
+    );
+
+    if (duplicateIndex < 0) {
+      kept.push(item);
+      continue;
+    }
+
+    if (isPreferredDuplicateOffer(item, kept[duplicateIndex])) {
+      kept[duplicateIndex] = item;
+    }
+  }
+
+  return kept;
+}
+
 function dedupeActiveOfferRows(items: SearchOfferItemRow[]) {
   const bestByOffer = new Map<string, SearchOfferItemRow>();
 
@@ -1502,7 +1602,7 @@ function dedupeActiveOfferRows(items: SearchOfferItemRow[]) {
     }
   }
 
-  return [...bestByOffer.values()];
+  return collapseEquivalentOfferRows([...bestByOffer.values()]);
 }
 
 function candidateFromItem(item: FlyerItemRow): FlyerCandidate {
