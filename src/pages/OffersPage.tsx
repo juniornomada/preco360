@@ -1413,6 +1413,74 @@ function validClubPrice(item: FlyerItemRow) {
     : null;
 }
 
+function duplicateOfferPreferenceScore(item: SearchOfferItemRow) {
+  const club = validClubPrice(item);
+  const notes = normalizeOfferNotes(item.offer_notes);
+  let score = 0;
+
+  // When the same effective offer exists twice, keep the most complete row.
+  if (club !== null) score += 100;
+  if (item.club_price === true) score += 25;
+  if (
+    item.club_advertised_price !== null &&
+    item.club_advertised_price !== undefined &&
+    Number.isFinite(Number(item.club_advertised_price))
+  ) {
+    score += 20;
+  }
+  if (notes.length) score += Math.min(notes.length, 5) * 5;
+  if (item.product_id) score += 10;
+  if (item.image_url) score += 5;
+  if (item.brand) score += 2;
+
+  return score;
+}
+
+function offerDuplicateKey(item: SearchOfferItemRow) {
+  const effectivePrice = validClubPrice(item) ?? Number(item.advertised_price);
+  const productIdentity = item.product_id
+    ? `product:${item.product_id}`
+    : `name:${offerIdentityTokens(item.raw_name).join(" ")}|${normalizeSearchText(
+        item.brand ?? "",
+      )}`;
+
+  const quantity = Number(item.package_quantity);
+  const packageQuantity =
+    Number.isFinite(quantity) && quantity > 0 ? quantity : "";
+  const packageUnit = normalizeSearchText(item.package_unit ?? "");
+  const retailer =
+    normalizeSearchText(canonicalRetailerName(item.retailer) || item.retailer);
+
+  return [
+    retailer,
+    productIdentity,
+    packageQuantity,
+    packageUnit,
+    Number.isFinite(effectivePrice) ? effectivePrice.toFixed(4) : "",
+    item.valid_from ?? "",
+    item.valid_to ?? "",
+  ].join("|");
+}
+
+function dedupeActiveOfferRows(items: SearchOfferItemRow[]) {
+  const bestByOffer = new Map<string, SearchOfferItemRow>();
+
+  for (const item of items) {
+    const key = offerDuplicateKey(item);
+    const current = bestByOffer.get(key);
+
+    if (
+      !current ||
+      duplicateOfferPreferenceScore(item) >
+        duplicateOfferPreferenceScore(current)
+    ) {
+      bestByOffer.set(key, item);
+    }
+  }
+
+  return [...bestByOffer.values()];
+}
+
 function candidateFromItem(item: FlyerItemRow): FlyerCandidate {
   const regularPrice = Number(item.advertised_price) || 0;
   const clubPrice = validClubPrice(item);
@@ -1690,7 +1758,9 @@ export default function OffersPage() {
     );
 
     const historicalItems = searchRows.filter((item) => !item.is_active);
-    const activeItems = searchRows.filter((item) => item.is_active);
+    const activeItems = dedupeActiveOfferRows(
+      searchRows.filter((item) => item.is_active),
+    );
 
     const historyByProduct = new Map<string, FlyerItemRow[]>();
     for (const previous of historicalItems) {
