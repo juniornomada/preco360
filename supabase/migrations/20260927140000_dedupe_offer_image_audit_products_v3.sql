@@ -103,5 +103,5 @@ AS $function$
 $function$
 
 
-revoke all on function public.offer_images_audit_page_v3(date, text, boolean, integer, integer) from public;
+revoke all on function public.offer_images_audit_page_v3(date, text, boolean, integer, integer) from public, anon;
 grant execute on function public.offer_images_audit_page_v3(date, text, boolean, integer, integer) to authenticated;
