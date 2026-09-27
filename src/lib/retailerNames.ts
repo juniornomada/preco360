@@ -32,7 +32,7 @@ export function retailerLogoPath(value?: string | null) {
     case "Tauste":
       return "/retailer-logos/tauste.webp";
     case "Kawakami":
-      return "/retailer-logos/kawakami.webp";
+      return "/retailer-logos/kawakami.webp?v=kawakami-correct-20260927";
     case "Confiança":
       return "/retailer-logos/confianca.webp";
     case "Max Atacadista":
