@@ -36,6 +36,7 @@ type AuditPageResponse = {
   items: AuditItem[];
   totalCount: number;
   missingCount: number;
+  hortiCount: number;
   filteredCount: number;
   flyerCount: number;
 };
@@ -130,6 +131,7 @@ export default function OfferImagesAuditPage() {
         items: Array.isArray(row?.items) ? (row.items as AuditItem[]) : [],
         totalCount: Number(row?.total_count ?? 0),
         missingCount: Number(row?.missing_count ?? 0),
+        hortiCount: Number(row?.horti_count ?? 0),
         filteredCount: Number(row?.filtered_count ?? 0),
         flyerCount: Number(row?.flyer_count ?? 0),
       };
@@ -151,7 +153,8 @@ export default function OfferImagesAuditPage() {
 
   const totalCount = stats?.totalCount ?? 0;
   const missingCount = stats?.missingCount ?? 0;
-  const withImageCount = Math.max(0, totalCount - missingCount);
+  const hortiCount = stats?.hortiCount ?? 0;
+  const withImageCount = Math.max(0, totalCount - missingCount - hortiCount);
   const filteredCount = stats?.filteredCount ?? 0;
   const flyerCount = stats?.flyerCount ?? 0;
 
@@ -285,6 +288,9 @@ export default function OfferImagesAuditPage() {
           {withImageCount} com imagem
         </span>
         <span className="rounded-full border bg-card px-2.5 py-1">
+          {hortiCount} hortifruti com ícone
+        </span>
+        <span className="rounded-full border bg-card px-2.5 py-1">
           {missingCount} sem imagem
         </span>
       </div>
@@ -337,12 +343,16 @@ export default function OfferImagesAuditPage() {
             const price = Number(item.advertised_price) || 0;
             const pack = packageLabel(item);
             const hasImage = Boolean(item.image_url);
+            const isHortiSkipped =
+              item.image_source === "horti_skip" ||
+              item.image_match_status === "horti_skipped";
+            const needsImage = !hasImage && !isHortiSkipped;
 
             return (
               <Card
                 key={item.id}
                 className={
-                  (!hasImage ? "border-amber-500/30 " : "") +
+                  (needsImage ? "border-amber-500/30 " : "") +
                   "[content-visibility:auto] [contain-intrinsic-size:84px]"
                 }
               >
@@ -376,16 +386,24 @@ export default function OfferImagesAuditPage() {
                             "rounded-full border px-2 py-0.5 text-[10px] font-bold " +
                             (hasImage
                               ? "border-green-500/30 bg-green-500/10 text-green-500"
-                              : "border-amber-500/30 bg-amber-500/10 text-amber-500")
+                              : isHortiSkipped
+                                ? "border-primary/20 bg-primary/5 text-primary"
+                                : "border-amber-500/30 bg-amber-500/10 text-amber-500")
                           }
                         >
-                          {hasImage ? "Com imagem" : "Sem imagem"}
+                          {hasImage
+                            ? "Com imagem"
+                            : isHortiSkipped
+                              ? "Hortifruti · ícone"
+                              : "Sem imagem"}
                         </span>
                       </div>
                       <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
                         {hasImage
                           ? `${item.image_source ?? "imagem"} · ${imageHost(item.image_url)} · status ${item.image_match_status ?? "—"}`
-                          : `status ${item.image_match_status ?? "sem imagem"}`}
+                          : isHortiSkipped
+                            ? "hortifruti · usa ícone padrão"
+                            : `status ${item.image_match_status ?? "sem imagem"}`}
                       </p>
                     </div>
 
