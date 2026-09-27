@@ -1,4 +1,5 @@
 import { canonicalRetailerName } from "@/lib/retailerNames";
+import { isCardOnlyPriceCondition } from "@/lib/priceConditions";
 
 export type BaseUnit = "kg" | "l" | "un";
 
@@ -1454,6 +1455,7 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
       const regularPrice = Number(entry.advertised_price);
       const clubPrice = Number(entry.club_advertised_price);
       const hasValidClub =
+        !isCardOnlyPriceCondition(entry.offer_notes) &&
         Number.isFinite(clubPrice) &&
         clubPrice > 0 &&
         (!Number.isFinite(regularPrice) || regularPrice <= 0 || clubPrice <= regularPrice);
