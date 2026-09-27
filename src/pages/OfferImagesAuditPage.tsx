@@ -102,7 +102,7 @@ export default function OfferImagesAuditPage() {
     isFetchingNextPage,
   } = useInfiniteQuery({
     queryKey: [
-      "offer-images-audit-v3",
+      "offer-images-audit-v4",
       user?.id,
       today,
       normalizedQuery,
@@ -115,7 +115,7 @@ export default function OfferImagesAuditPage() {
     refetchOnWindowFocus: false,
     queryFn: async ({ pageParam, signal }): Promise<AuditPageResponse> => {
       const { data: rows, error: rpcError } = await db
-        .rpc("offer_images_audit_page_v3", {
+        .rpc("offer_images_audit_page_v4", {
           p_on_date: today,
           p_query: normalizedQuery,
           p_only_missing: onlyMissing,
