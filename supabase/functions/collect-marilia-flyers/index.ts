@@ -493,7 +493,8 @@ async function collectKawakami(db:any, report:any[]){
   const pages:any[]=[];
   for(const page of rawPages){
     try{
-      const imageUrl=String(page.image_source||page.source_url);\n      const r=await fetch(imageUrl,{headers:{"user-agent":UA,"accept":"image/*,*/*","referer":sourcePage}});
+      const imageUrl=String(page.image_source||page.source_url);
+      const r=await fetch(imageUrl,{headers:{"user-agent":UA,"accept":"image/*,*/*","referer":sourcePage}});
       if(!r.ok) throw new Error("imagem HTTP "+r.status);
       const ct=r.headers.get("content-type")||"image/png";
       const bytes=new Uint8Array(await r.arrayBuffer());
