@@ -278,7 +278,7 @@ export default function ProductVisual({
           src={safeImageUrl}
           alt=""
           loading="lazy"
-          className={`${showImage ? "block" : "hidden"} h-full w-full object-contain p-0.5`}
+          className={`${showImage ? "block" : "hidden"} h-full w-full object-contain p-0.5 ${isMarilanTeens54 ? "scale-[1.55]" : ""}`}
           onLoad={() => setImageFailed(false)}
           onError={() => setImageFailed(true)}
         />
