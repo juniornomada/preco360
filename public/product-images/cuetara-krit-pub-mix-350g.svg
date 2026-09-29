@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600">
+  <defs>
+    <linearGradient id="glass" x1="0" x2="1">
+      <stop offset="0" stop-color="#eef2f5" stop-opacity=".82"/>
+      <stop offset=".18" stop-color="#ffffff" stop-opacity=".48"/>
+      <stop offset=".5" stop-color="#d7dde2" stop-opacity=".28"/>
+      <stop offset=".82" stop-color="#ffffff" stop-opacity=".52"/>
+      <stop offset="1" stop-color="#c4ccd3" stop-opacity=".7"/>
+    </linearGradient>
+    <linearGradient id="lid" x1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3f78a8"/>
+      <stop offset="1" stop-color="#16456f"/>
+    </linearGradient>
+    <linearGradient id="label" x1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f9df43"/>
+      <stop offset="1" stop-color="#f2b51e"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-opacity=".22"/>
+    </filter>
+  </defs>
+  <rect width="600" height="600" fill="#ffffff"/>
+  <g filter="url(#shadow)">
+    <ellipse cx="300" cy="541" rx="155" ry="18" fill="#88929a" opacity=".24"/>
+    <rect x="168" y="112" width="264" height="390" rx="42" fill="url(#glass)" stroke="#b8c0c7" stroke-width="4"/>
+    <ellipse cx="300" cy="112" rx="132" ry="30" fill="url(#lid)" stroke="#123d61" stroke-width="4"/>
+    <path d="M185 116 C195 92, 405 92, 415 116 L410 140 C386 156,214 156,190 140 Z" fill="#245b89" opacity=".97"/>
+    <ellipse cx="300" cy="141" rx="118" ry="19" fill="#d6dee5" opacity=".58"/>
+    <rect x="184" y="202" width="232" height="196" rx="9" fill="url(#label)" stroke="#c28b0e" stroke-width="3"/>
+    <path d="M184 202 H416 V248 C370 264 230 264 184 248 Z" fill="#f8e34d"/>
+    <ellipse cx="300" cy="238" rx="88" ry="25" fill="#e31e24"/>
+    <text x="300" y="247" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="31" fill="#fff">Cuétara</text>
+    <text x="300" y="296" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="62" fill="#111">Krit</text>
+    <text x="300" y="330" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="31" fill="#154f83">PUB-MIX</text>
+    <g opacity=".96">
+      <circle cx="232" cy="361" r="18" fill="#d8b37d" stroke="#a97843" stroke-width="3"/>
+      <circle cx="274" cy="356" r="16" fill="#c89353" stroke="#8a5b2d" stroke-width="3"/>
+      <circle cx="322" cy="360" r="18" fill="#e2bb80" stroke="#a97843" stroke-width="3"/>
+      <circle cx="367" cy="354" r="16" fill="#c78c4a" stroke="#8a5b2d" stroke-width="3"/>
+      <path d="M218 365 l10 -8 l10 8 l-10 8z M260 361 l10 -8 l10 8 l-10 8z M308 364 l10 -8 l10 8 l-10 8z M353 359 l10 -8 l10 8 l-10 8z" fill="#f6ddad"/>
+    </g>
+    <text x="300" y="423" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="27" font-weight="700" fill="#4c3820">BISCOITOS SALGADOS</text>
+    <text x="300" y="458" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#111">350 g</text>
+    <path d="M203 165 C190 235, 190 375, 203 450" stroke="#ffffff" stroke-width="16" opacity=".38" fill="none"/>
+    <path d="M398 170 C410 240, 410 372, 397 448" stroke="#ffffff" stroke-width="10" opacity=".18" fill="none"/>
+  </g>
+</svg>
