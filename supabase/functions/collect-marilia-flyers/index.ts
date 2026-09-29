@@ -482,13 +482,32 @@ async function collectKawakami(db:any, report:any[]){
   }
 
   const val=manifest?.validity||{from:null,to:null};
-  const pages=Array.isArray(manifest?.pages)?manifest.pages.filter((p:any)=>p?.path&&p?.hash):[];
+  const rawPages=Array.isArray(manifest?.pages)?manifest.pages.filter((p:any)=>p?.image_source&&p?.hash):[];
   const used=String(manifest?.source_url||sourcePage);
   if(!val.from||!val.to) { report.push({retailer:"Kawakami",endpoint:used,result:"erro",error:"Validade oficial não identificada com segurança",files:0,offers:0}); return; }
 
   const today=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
-  if(val.to<today) { report.push({retailer:"Kawakami",endpoint:used,validity:val,result:"sem novo encarte vigente",files:pages.length,offers:0}); return; }
-  if(!pages.length) { report.push({retailer:"Kawakami",endpoint:used,validity:val,result:"nenhuma página renderizada pelo navegador",files:0,offers:0}); return; }
+  if(val.to<today) { report.push({retailer:"Kawakami",endpoint:used,validity:val,result:"sem novo encarte vigente",files:rawPages.length,offers:0}); return; }
+  if(!rawPages.length) { report.push({retailer:"Kawakami",endpoint:used,validity:val,result:"nenhuma página renderizada pelo navegador",files:0,offers:0}); return; }
+
+  const pages:any[]=[];
+  for(const page of rawPages){
+    try{
+      const r=await fetch(String(page.image_source),{headers:{"user-agent":UA,"accept":"image/*,*/*","referer":sourcePage}});
+      if(!r.ok) throw new Error("imagem HTTP "+r.status);
+      const ct=r.headers.get("content-type")||"image/png";
+      const bytes=new Uint8Array(await r.arrayBuffer());
+      if(!bytes.length) throw new Error("imagem vazia");
+      const hash=await sha(bytes);
+      const path=`auto/marilia/kawakami/browser/${hash}.png`;
+      const {error:upErr}=await db.storage.from("flyers").upload(path,bytes,{contentType:"image/png",upsert:false});
+      if(upErr && !/already exists|resource already exists|duplicate/i.test(upErr.message)) throw upErr;
+      pages.push({...page,hash,path,mime_type:"image/png",size:bytes.byteLength});
+    }catch(e){
+      report.push({retailer:"Kawakami",endpoint:used,validity:val,result:"erro ao baixar página renderizada",error:`Página ${page.index||pages.length+1}: ${String(e)}`,files:pages.length,offers:0});
+      return;
+    }
+  }
 
   const sourceKey=`kawakami:marilia:${val.from}:${val.to}`;
   const title="Ofertas";
