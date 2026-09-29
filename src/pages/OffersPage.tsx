@@ -2669,12 +2669,25 @@ export default function OffersPage() {
   return (
     <div className="page-container !pb-24 mx-auto w-full max-w-3xl">
       <header className="mb-4">
-        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-primary">
-          Preço 360
-        </p>
-        <h1 className="mt-1 text-[clamp(2rem,9vw,3rem)] font-extrabold leading-none tracking-tight">
-          Ofertas
-        </h1>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-primary">
+              Preço 360
+            </p>
+            <h1 className="mt-1 text-[clamp(2rem,9vw,3rem)] font-extrabold leading-none tracking-tight">
+              Ofertas
+            </h1>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-1 h-10 shrink-0 border-primary/30 bg-primary/5 px-3 text-xs font-bold"
+            onClick={() => navigate("/radar?view=import")}
+          >
+            <Upload className="mr-1.5 h-4 w-4 text-primary" />
+            Radar
+          </Button>
+        </div>
       </header>
 
       <ProductSearchBar
