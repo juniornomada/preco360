@@ -314,6 +314,7 @@ export default function FlyerPage() {
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [processing, setProcessing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [kawakamiCapturing, setKawakamiCapturing] = useState(false);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ current: 0, total: 0, label: "" });
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -382,6 +383,93 @@ export default function FlyerPage() {
       resetImportForm();
     }
     setView(next);
+  };
+
+  const captureKawakami = async () => {
+    if (!user || kawakamiCapturing) return;
+
+    setKawakamiCapturing(true);
+    setView("import");
+    setSafeReviewMode(true);
+    setItems([]);
+    setPendingRecovery(null);
+    setDuplicateFlyer(null);
+    setProcessing(true);
+    setProgress({ current: 0, total: 1, label: "Consultando o encarte oficial do Kawakami…" });
+    appliedJobRef.current = null;
+
+    try {
+      const { data, error } = await supabase.functions.invoke("collect-marilia-flyers", {
+        body: { retailer: "Kawakami" },
+      });
+
+      if (error) throw error;
+
+      const report = Array.isArray(data?.report) ? data.report : [];
+      const kawakamiReport = report.find((entry: any) => entry?.retailer === "Kawakami");
+      const result = String(kawakamiReport?.result || "");
+
+      if (/sem novo encarte vigente/i.test(result)) {
+        setProcessing(false);
+        toast({
+          title: "Kawakami sem encarte vigente",
+          description: kawakamiReport?.validity?.to
+            ? `O último encarte encontrado terminou em ${dateBr(kawakamiReport.validity.to)}.`
+            : "O site oficial não apresentou um encarte vigente.",
+        });
+        return;
+      }
+
+      if (/erro/i.test(result) && !kawakamiReport?.job_id) {
+        throw new Error(String(kawakamiReport?.error || "Não foi possível capturar o encarte do Kawakami."));
+      }
+
+      const { data: jobs, error: jobError } = await db
+        .from("flyer_import_jobs")
+        .select("id,status,progress_current,progress_total,progress_label,source_file_path,source_file_name,mime_type,source_files,file_hash,page_count,retailer,valid_from,valid_to,result,missing_pages,warning_message,error_message,updated_at,created_at")
+        .eq("user_id", user.id)
+        .eq("retailer", "Kawakami")
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (jobError) throw jobError;
+
+      const job = jobs?.[0];
+      if (!job) {
+        setProcessing(false);
+        toast({
+          title: "Nenhuma importação foi criada",
+          description: "O Kawakami não disponibilizou um encarte novo para captura.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setRetailer("Kawakami");
+      setValidFrom(job.valid_from || "");
+      setValidTo(job.valid_to || "");
+      setActiveJobId(job.id);
+      localStorage.setItem(IMPORT_JOB_KEY, job.id);
+      setProgress({
+        current: Number(job.progress_current) || 0,
+        total: Math.max(1, Number(job.progress_total) || Number(job.page_count) || 1),
+        label: job.progress_label || "Captura concluída. Processando ofertas…",
+      });
+
+      toast({
+        title: "Kawakami capturado",
+        description: "O encarte foi enviado para leitura. Quando terminar, a revisão aparecerá aqui antes de salvar.",
+      });
+    } catch (error: any) {
+      setProcessing(false);
+      toast({
+        title: "Não consegui capturar o Kawakami",
+        description: error?.message ?? "Tente novamente em instantes.",
+        variant: "destructive",
+      });
+    } finally {
+      setKawakamiCapturing(false);
+    }
   };
 
   const { data: products = [] } = useQuery<ProductForMatch[]>({
@@ -1861,6 +1949,38 @@ export default function FlyerPage() {
                     Prints com preço promocional e vigência.
                   </p>
                 </button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-emerald-500/25 bg-emerald-500/5">
+            <CardContent className="p-3.5">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl bg-emerald-500/10 p-2 text-emerald-500">
+                  <Radar className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold">Kawakami · captura automática</p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Busca o encarte oficial de Marília, captura as páginas pelo navegador e prepara as ofertas para revisão.
+                  </p>
+                  <Button
+                    type="button"
+                    className="mt-3 h-10 w-full text-sm font-bold"
+                    disabled={kawakamiCapturing || processing || saving}
+                    onClick={() => void captureKawakami()}
+                  >
+                    {kawakamiCapturing ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Radar className="mr-2 h-4 w-4" />
+                    )}
+                    {kawakamiCapturing ? "Capturando Kawakami…" : "Capturar Kawakami"}
+                  </Button>
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    Nada é salvo em Ofertas sem passar pela revisão e confirmação.
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>
