@@ -58,8 +58,7 @@ import {
   Tags,
   TrendingDown,
   TrendingUp,
-  Trophy,
-  Upload,
+  Trophy
 } from "lucide-react";
 import {
   evaluateFlyerOffer,
