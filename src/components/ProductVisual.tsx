@@ -268,16 +268,17 @@ export default function ProductVisual({
   }, [safeImageUrl]);
 
   const showImage = Boolean(safeImageUrl) && !imageFailed;
+  const isMarilanTeens54 = /marilan teens.*54g|teens.*54g/i.test(safeName);
 
   return (
-    <div className={`flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-muted/50 ${compact ? "h-[52px] w-[52px] sm:h-14 sm:w-14" : "h-14 w-14"}`}>
+    <div className={`flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-muted/50 ${isMarilanTeens54 ? "h-20 w-20 sm:h-24 sm:w-24" : compact ? "h-[52px] w-[52px] sm:h-14 sm:w-14" : "h-14 w-14"}`}>
       {safeImageUrl ? (
         <img
           key={safeImageUrl}
           src={safeImageUrl}
           alt=""
           loading="lazy"
-          className={`${showImage ? "block" : "hidden"} h-full w-full object-contain p-1`}
+          className={`${showImage ? "block" : "hidden"} h-full w-full object-contain p-0.5`}
           onLoad={() => setImageFailed(false)}
           onError={() => setImageFailed(true)}
         />
