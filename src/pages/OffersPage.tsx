@@ -2684,7 +2684,6 @@ export default function OffersPage() {
             className="mt-1 h-10 shrink-0 border-primary/30 bg-primary/5 px-3 text-xs font-bold"
             onClick={() => navigate("/radar?view=import")}
           >
-            <Upload className="mr-1.5 h-4 w-4 text-primary" />
             Radar
           </Button>
         </div>
