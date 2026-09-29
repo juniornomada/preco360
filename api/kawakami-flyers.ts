@@ -1,10 +1,6 @@
 import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
-import { createClient } from "@supabase/supabase-js";
-
 const SOURCE_URL = "https://institucional.kawakami.com.br/oferta/marilia";
-const BUCKET = "flyers";
-
 function cleanUrl(value: unknown) {
   try {
     const url = new URL(String(value ?? ""));
@@ -66,11 +62,6 @@ export default {
 
     let browser: any;
     try {
-      const supabaseUrl = process.env.SUPABASE_URL;
-      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (!supabaseUrl || !serviceKey) throw new Error("Supabase server configuration is missing");
-
-      const db = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
       const executablePath = await chromium.executablePath();
       browser = await puppeteer.launch({
         args: chromium.args,
@@ -129,19 +120,9 @@ export default {
             : await targetPage.screenshot({ type: "png", fullPage: true });
           const data = new Uint8Array(bytes);
           const hash = await sha256(data);
-          const path = `auto/marilia/kawakami/browser/${hash}.png`;
-
-          const { error } = await db.storage.from(BUCKET).upload(path, data, {
-            contentType: "image/png",
-            upsert: false,
-          });
-          if (error && !/already exists|resource already exists|duplicate/i.test(error.message)) {
-            throw error;
-          }
 
           pages.push({
             index: i + 1,
-            path,
             hash,
             source_url: cleanUrl(item.href || item.imageSrc),
             image_source: cleanUrl(item.imageSrc),
