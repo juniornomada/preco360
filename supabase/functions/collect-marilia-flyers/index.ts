@@ -482,7 +482,7 @@ async function collectKawakami(db:any, report:any[]){
   }
 
   const val=manifest?.validity||{from:null,to:null};
-  const rawPages=Array.isArray(manifest?.pages)?manifest.pages.filter((p:any)=>p?.image_source&&p?.hash):[];
+  const rawPages=Array.isArray(manifest?.pages)?manifest.pages.filter((p:any)=>(p?.image_source||p?.source_url)&&p?.hash):[];
   const used=String(manifest?.source_url||sourcePage);
   if(!val.from||!val.to) { report.push({retailer:"Kawakami",endpoint:used,result:"erro",error:"Validade oficial não identificada com segurança",files:0,offers:0}); return; }
 
@@ -493,7 +493,7 @@ async function collectKawakami(db:any, report:any[]){
   const pages:any[]=[];
   for(const page of rawPages){
     try{
-      const r=await fetch(String(page.image_source),{headers:{"user-agent":UA,"accept":"image/*,*/*","referer":sourcePage}});
+      const imageUrl=String(page.image_source||page.source_url);\n      const r=await fetch(imageUrl,{headers:{"user-agent":UA,"accept":"image/*,*/*","referer":sourcePage}});
       if(!r.ok) throw new Error("imagem HTTP "+r.status);
       const ct=r.headers.get("content-type")||"image/png";
       const bytes=new Uint8Array(await r.arrayBuffer());
