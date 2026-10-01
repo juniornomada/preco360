@@ -87,7 +87,7 @@ export function normalizeVoiceSearchTranscript(value: string) {
   ]);
 
   if (poncaAliases.has(key)) {
-    return "ponkan";
+    return "poncan";
   }
 
   return normalized;
@@ -170,7 +170,7 @@ export function useVoiceSearch() {
         ).filter(Boolean);
 
         return (
-          alternatives.find((candidate) => candidate === "ponkan") ??
+          alternatives.find((candidate) => candidate === "poncan") ??
           alternatives[0] ??
           ""
         );
