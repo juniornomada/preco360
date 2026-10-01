@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 type SpeechAlternative = {
   transcript: string;
@@ -33,10 +34,6 @@ type SpeechRecognitionLike = {
   abort: () => void;
   onstart: ((event: Event) => void) | null;
   onend: ((event: Event) => void) | null;
-  onaudiostart: ((event: Event) => void) | null;
-  onaudioend: ((event: Event) => void) | null;
-  onspeechstart: ((event: Event) => void) | null;
-  onspeechend: ((event: Event) => void) | null;
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
 };
@@ -48,9 +45,22 @@ type SpeechWindow = Window & {
   webkitSpeechRecognition?: SpeechRecognitionConstructor;
 };
 
-const SILENCE_COMMIT_MS = 900;
-const SPEECH_END_STOP_MS = 850;
-const MAX_LISTENING_MS = 6000;
+const MAX_RECORDING_MS = 3200;
+const NATIVE_MAX_MS = 6000;
+
+const PONCAN_ALIASES = new Set([
+  "ponca",
+  "poncan",
+  "poncam",
+  "ponka",
+  "ponkan",
+  "ponkam",
+  "poca",
+  "pocan",
+  "pocam",
+  "pokan",
+  "pokam",
+]);
 
 export function normalizeVoiceSearchTranscript(value: string) {
   const normalized = value
@@ -64,31 +74,8 @@ export function normalizeVoiceSearchTranscript(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLocaleLowerCase("pt-BR");
 
-  // On pt-BR speech recognition, the final "l" in a very short utterance can
-  // occasionally be emitted phonetically as "u" ("sal" -> "sau").
-  if (key === "sau") {
-    return "sal";
-  }
-
-  // Ponkan/Poncã has several accepted spellings. Keep the browser-native
-  // recognizer, but collapse only closely related spellings to one search term.
-  const poncaAliases = new Set([
-    "ponca",
-    "poncan",
-    "poncam",
-    "ponka",
-    "ponkan",
-    "ponkam",
-    "poca",
-    "pocan",
-    "pocam",
-    "pokan",
-    "pokam",
-  ]);
-
-  if (poncaAliases.has(key)) {
-    return "poncan";
-  }
+  if (key === "sau") return "sal";
+  if (PONCAN_ALIASES.has(key)) return "poncan";
 
   return normalized;
 }
@@ -100,6 +87,14 @@ function getSpeechRecognitionConstructor() {
     speechWindow.SpeechRecognition ??
     speechWindow.webkitSpeechRecognition ??
     null
+  );
+}
+
+function canRecordAudio() {
+  return (
+    typeof window !== "undefined" &&
+    typeof MediaRecorder !== "undefined" &&
+    !!navigator.mediaDevices?.getUserMedia
   );
 }
 
@@ -116,33 +111,55 @@ function voiceErrorMessage(error?: string) {
   return "Não consegui reconhecer o produto. Tente novamente.";
 }
 
+function preferredAudioMimeType() {
+  if (typeof MediaRecorder === "undefined") return "";
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg;codecs=opus",
+  ];
+  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? "";
+}
+
 export function useVoiceSearch() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  const silenceTimerRef = useRef<number | null>(null);
-  const maxTimerRef = useRef<number | null>(null);
-  const pendingTranscriptRef = useRef("");
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<number | null>(null);
   const deliveredRef = useRef(false);
-  const speechStartedRef = useRef(false);
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const isSupported = getSpeechRecognitionConstructor() !== null;
 
-  const clearTimers = useCallback(() => {
-    if (silenceTimerRef.current !== null) {
-      window.clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
+  const isSupported =
+    canRecordAudio() || getSpeechRecognitionConstructor() !== null;
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
     }
-    if (maxTimerRef.current !== null) {
-      window.clearTimeout(maxTimerRef.current);
-      maxTimerRef.current = null;
-    }
+  }, []);
+
+  const releaseStream = useCallback(() => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
   }, []);
 
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-  }, []);
+    clearTimer();
 
-  const startListening = useCallback(
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+      return;
+    }
+
+    recognitionRef.current?.stop();
+  }, [clearTimer]);
+
+  const startNativeRecognition = useCallback(
     (onTranscript: (transcript: string) => void) => {
       const Recognition = getSpeechRecognitionConstructor();
       if (!Recognition) {
@@ -150,17 +167,15 @@ export function useVoiceSearch() {
         return false;
       }
 
-      clearTimers();
       recognitionRef.current?.abort();
-      pendingTranscriptRef.current = "";
       deliveredRef.current = false;
-      speechStartedRef.current = false;
 
       const recognition = new Recognition();
       recognition.lang = "pt-BR";
       recognition.interimResults = true;
       recognition.continuous = false;
       recognition.maxAlternatives = 5;
+      recognitionRef.current = recognition;
 
       const bestTranscript = (result?: SpeechResult) => {
         if (!result?.length) return "";
@@ -176,137 +191,220 @@ export function useVoiceSearch() {
         );
       };
 
-      const deliverPending = () => {
-        const transcript = normalizeVoiceSearchTranscript(
-          pendingTranscriptRef.current,
-        );
-        if (!transcript || deliveredRef.current) return false;
-
-        deliveredRef.current = true;
-        onTranscript(transcript);
-        return true;
-      };
-
-      const scheduleSilenceCommit = () => {
-        if (silenceTimerRef.current !== null) {
-          window.clearTimeout(silenceTimerRef.current);
-        }
-        silenceTimerRef.current = window.setTimeout(() => {
-          deliverPending();
-          recognition.stop();
-        }, SILENCE_COMMIT_MS);
-      };
-
       recognition.onstart = () => {
-        recognitionRef.current = recognition;
         setError(null);
         setIsListening(true);
-
-        maxTimerRef.current = window.setTimeout(() => {
-          const delivered = deliverPending();
-          if (!delivered && !pendingTranscriptRef.current) {
-            setError(
-              "Não consegui ouvir o produto. Toque no microfone e tente novamente.",
-            );
-          }
-          recognition.stop();
-        }, MAX_LISTENING_MS);
-      };
-
-      recognition.onspeechstart = () => {
-        speechStartedRef.current = true;
-        if (silenceTimerRef.current !== null) {
-          window.clearTimeout(silenceTimerRef.current);
-          silenceTimerRef.current = null;
-        }
-      };
-
-      recognition.onspeechend = () => {
-        if (silenceTimerRef.current !== null) {
-          window.clearTimeout(silenceTimerRef.current);
-        }
-        // Chrome/Android may need a little longer after speechend to return a
-        // hypothesis for short words. Waiting here avoids cutting off terms
-        // such as "sal", "pocan" and "poncan" before onresult is fired.
-        silenceTimerRef.current = window.setTimeout(() => {
-          recognition.stop();
-        }, SPEECH_END_STOP_MS);
+        clearTimer();
+        timerRef.current = window.setTimeout(() => recognition.stop(), NATIVE_MAX_MS);
       };
 
       recognition.onresult = (event) => {
-        const resultCount = event.results.length;
-        const transcripts = Array.from({ length: resultCount }, (_, offset) => {
-          const index = resultCount - 1 - offset;
-          return bestTranscript(event.results[index]);
-        }).filter(Boolean);
+        const transcripts = Array.from(
+          { length: event.results.length },
+          (_, offset) =>
+            bestTranscript(event.results[event.results.length - 1 - offset]),
+        ).filter(Boolean);
 
         const transcript =
           transcripts.find((candidate) => candidate === "poncan") ??
           transcripts[0] ??
           "";
 
-        if (!transcript) return;
-        pendingTranscriptRef.current = transcript;
+        if (!transcript || deliveredRef.current) return;
 
-        const lastResult = event.results[resultCount - 1];
-        if (lastResult?.isFinal) {
-          deliverPending();
-          clearTimers();
-          recognition.stop();
-          return;
-        }
-
-        scheduleSilenceCommit();
+        deliveredRef.current = true;
+        onTranscript(transcript);
+        recognition.stop();
       };
 
       recognition.onerror = (event) => {
-        clearTimers();
-
-        const delivered = deliverPending();
-        if (!delivered && event.error !== "aborted") {
+        clearTimer();
+        if (!deliveredRef.current && event.error !== "aborted") {
           setError(voiceErrorMessage(event.error));
         }
         setIsListening(false);
       };
 
       recognition.onend = () => {
-        clearTimers();
-
-        // If a final/interim result was already delivered, ending the browser
-        // recognition session is expected and must not surface a false error.
-        const wasAlreadyDelivered = deliveredRef.current;
-        const deliveredNow = wasAlreadyDelivered ? false : deliverPending();
-        if (!wasAlreadyDelivered && !deliveredNow && speechStartedRef.current) {
+        clearTimer();
+        recognitionRef.current = null;
+        setIsListening(false);
+        if (!deliveredRef.current) {
           setError(
             "Ouvi sua fala, mas não consegui identificar o produto. Tente falar novamente.",
           );
         }
-        if (recognitionRef.current === recognition) {
-          recognitionRef.current = null;
-        }
-        setIsListening(false);
       };
 
       try {
         recognition.start();
         return true;
       } catch {
-        clearTimers();
+        clearTimer();
         setError("Não foi possível iniciar o microfone. Tente novamente.");
         setIsListening(false);
         return false;
       }
     },
-    [clearTimers],
+    [clearTimer],
+  );
+
+  const startRecordedTranscription = useCallback(
+    (onTranscript: (transcript: string) => void) => {
+      deliveredRef.current = false;
+      chunksRef.current = [];
+      setError(null);
+
+      void navigator.mediaDevices
+        .getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        })
+        .then((stream) => {
+          streamRef.current = stream;
+          const mimeType = preferredAudioMimeType();
+          const recorder = mimeType
+            ? new MediaRecorder(stream, { mimeType })
+            : new MediaRecorder(stream);
+
+          recorderRef.current = recorder;
+
+          recorder.ondataavailable = (event) => {
+            if (event.data.size > 0) chunksRef.current.push(event.data);
+          };
+
+          recorder.onerror = () => {
+            clearTimer();
+            recorderRef.current = null;
+            releaseStream();
+            setIsListening(false);
+            setError("Não foi possível gravar o áudio. Tente novamente.");
+          };
+
+          recorder.onstop = async () => {
+            clearTimer();
+            recorderRef.current = null;
+            setIsListening(false);
+
+            const chunks = chunksRef.current;
+            chunksRef.current = [];
+            const recordedType =
+              recorder.mimeType || chunks[0]?.type || "audio/webm";
+            const blob = new Blob(chunks, { type: recordedType });
+            releaseStream();
+
+            if (!blob.size) {
+              setError("Não consegui ouvir o produto. Tente novamente.");
+              return;
+            }
+
+            try {
+              const {
+                data: { session },
+              } = await supabase.auth.getSession();
+
+              if (!session?.access_token) {
+                setError("Sua sessão expirou. Entre novamente para usar a busca por voz.");
+                return;
+              }
+
+              const form = new FormData();
+              const extension = recordedType.includes("mp4")
+                ? "m4a"
+                : recordedType.includes("ogg")
+                  ? "ogg"
+                  : "webm";
+              form.append(
+                "file",
+                new File([blob], `voice-search.${extension}`, {
+                  type: recordedType,
+                }),
+              );
+              form.append("access_token", session.access_token);
+
+              const { data, error: invokeError } = await supabase.functions.invoke(
+                "transcribe-radar-voice",
+                { body: form },
+              );
+
+              if (invokeError) throw invokeError;
+
+              const transcript = normalizeVoiceSearchTranscript(
+                String(data?.transcript ?? ""),
+              );
+
+              if (!transcript) {
+                setError(
+                  "Ouvi sua fala, mas não consegui identificar o produto. Tente novamente.",
+                );
+                return;
+              }
+
+              deliveredRef.current = true;
+              onTranscript(transcript);
+            } catch (transcriptionError) {
+              console.error("Voice transcription failed", transcriptionError);
+              setError(
+                "Não consegui transcrever o áudio agora. Tente novamente.",
+              );
+            }
+          };
+
+          recorder.start(200);
+          setIsListening(true);
+
+          clearTimer();
+          timerRef.current = window.setTimeout(() => {
+            if (recorder.state !== "inactive") recorder.stop();
+          }, MAX_RECORDING_MS);
+        })
+        .catch((captureError) => {
+          console.error("Microphone capture failed", captureError);
+          releaseStream();
+
+          // Keep the browser-native recognizer as a compatibility fallback
+          // when MediaRecorder/getUserMedia cannot be used by the device.
+          startNativeRecognition(onTranscript);
+        });
+
+      return true;
+    },
+    [clearTimer, releaseStream, startNativeRecognition],
+  );
+
+  const startListening = useCallback(
+    (onTranscript: (transcript: string) => void) => {
+      clearTimer();
+      recognitionRef.current?.abort();
+
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") recorder.stop();
+
+      if (canRecordAudio()) {
+        return startRecordedTranscription(onTranscript);
+      }
+
+      return startNativeRecognition(onTranscript);
+    },
+    [clearTimer, startNativeRecognition, startRecordedTranscription],
   );
 
   useEffect(() => {
     return () => {
-      clearTimers();
+      clearTimer();
       recognitionRef.current?.abort();
       recognitionRef.current = null;
+
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") recorder.stop();
+      recorderRef.current = null;
+
+      releaseStream();
     };
-  }, [clearTimers]);
+  }, [clearTimer, releaseStream]);
 
   const clearError = useCallback(() => {
     setError(null);
