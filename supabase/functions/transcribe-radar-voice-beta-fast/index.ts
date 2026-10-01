@@ -10,9 +10,9 @@ const corsHeaders = {
 
 const PRIMARY_MODEL = "gemini-3.5-flash-lite";
 const FALLBACK_MODEL = "gemini-3.1-flash-lite";
-const PRIMARY_TIMEOUT_MS = 3300;
-const FALLBACK_TIMEOUT_MS = 2600;
-const FALLBACK_DELAY_MS = 1200;
+const PRIMARY_TIMEOUT_MS = 3000;
+const FALLBACK_TIMEOUT_MS = 2400;
+const FALLBACK_DELAY_MS = 650;
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -51,6 +51,8 @@ function normalizeTranscript(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 
+  const compactKey = key.replace(/[\s-]+/g, "");
+
   if (key === "sau") return "sal";
 
   const poncanAliases = new Set([
@@ -58,12 +60,34 @@ function normalizeTranscript(value: string) {
     "poca", "pocan", "pocam", "pokan", "pokam",
   ]);
 
-  if (poncanAliases.has(key)) return "poncan";
+  if (poncanAliases.has(key) || poncanAliases.has(compactKey)) return "poncan";
   return text;
 }
 
 function parseTranscript(payload: any) {
   return normalizeTranscript(extractText(payload));
+}
+
+function isSuspiciousTranscript(value: string) {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+  if (/https?:\/\/|www\.|\.[a-z]{2,}$/i.test(normalized)) {
+    return true;
+  }
+
+  const tokens = new Set(normalized.split(/\s+/).filter(Boolean));
+  const fruitConflicts = ["laranja", "morango", "tangerina", "mexerica", "bergamota"];
+  const hasPoncan =
+    tokens.has("poncan") ||
+    tokens.has("ponca") ||
+    tokens.has("ponkan") ||
+    tokens.has("pocan");
+
+  return hasPoncan && fruitConflicts.some((fruit) => tokens.has(fruit));
 }
 
 function createModelAttempt(
@@ -183,10 +207,10 @@ Deno.serve(async (req: Request) => {
     const audioReadMs = Math.round(performance.now() - audioReadStartedAt);
 
     const prompt =
-      "Transcreva esta busca curta de supermercado em português do Brasil. " +
-      "Responda somente com as palavras faladas, sem JSON, aspas, pontuação ou explicações. " +
-      "Não invente palavras. Se ouvir a fruta poncã/poncan/ponkan/pocan ou variante equivalente, responda poncan. " +
-      "Se não houver fala inteligível, responda vazio.";
+      "Faça uma transcrição literal desta fala curta em português do Brasil. " +
+      "Responda somente com as palavras realmente ouvidas, sem JSON, aspas, pontuação, URLs, domínio .com, explicações, correções ou palavras relacionadas. " +
+      "Se ouvir uma palavra, devolva uma palavra; se ouvir duas ou três, devolva apenas essas. " +
+      "Não complete, não associe produtos e não invente termos. Se não houver fala inteligível, responda vazio.";
 
     const primaryAttempt = createModelAttempt(
       PRIMARY_MODEL,
@@ -270,6 +294,30 @@ Deno.serve(async (req: Request) => {
     }
 
     const totalMs = Math.round(performance.now() - startedAt);
+
+    if (isSuspiciousTranscript(winner.transcript)) {
+      console.log(
+        JSON.stringify({
+          event: "beta_voice_transcription_rejected",
+          transcript: winner.transcript,
+          model: winner.model,
+          model_ms: winner.model_ms,
+          total_ms: totalMs,
+          audio_bytes: file.size,
+        }),
+      );
+
+      return json(200, {
+        transcript: "",
+        rejected_transcript: winner.transcript,
+        model: winner.model,
+        timing: {
+          audio_read_ms: audioReadMs,
+          model_ms: winner.model_ms,
+          total_ms: totalMs,
+        },
+      });
+    }
 
     console.log(
       JSON.stringify({
