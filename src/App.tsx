@@ -153,6 +153,7 @@ function AppRoutes() {
         <Route path="/search" element={<SearchPage />} />
         <Route path="/upload" element={<ReceiptImportPage />} />
         <Route path="/offers" element={<OffersPage />} />
+        <Route path="/offers-beta" element={<OffersPage betaVoice />} />
         <Route path="/offers/images" element={<OfferImagesAuditPage />} />
         <Route path="/offers/basket" element={<MarketBasketPage />} />
         <Route path="/offers/store-prices" element={<StorePriceHistoryPage />} />
