@@ -5,12 +5,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Max-Age": "86400",
 };
 
 const MODELS = [
   "gemini-3.5-flash-lite",
   "gemini-3.1-flash-lite",
-  "gemini-3.5-flash",
 ] as const;
 
 const MODEL_TIMEOUT_MS = 3800;
@@ -64,16 +64,7 @@ function normalizeTranscript(value: string) {
 }
 
 function parseTranscript(payload: any) {
-  const raw = extractText(payload);
-  let transcript = "";
-
-  try {
-    transcript = String(JSON.parse(raw)?.transcript || "");
-  } catch {
-    transcript = raw;
-  }
-
-  return normalizeTranscript(transcript);
+  return normalizeTranscript(extractText(payload));
 }
 
 function createModelAttempt(
@@ -118,8 +109,7 @@ function createModelAttempt(
             ],
             generationConfig: {
               temperature: 0,
-              maxOutputTokens: 32,
-              responseMimeType: "application/json",
+              maxOutputTokens: 16,
             },
           }),
         },
@@ -190,13 +180,10 @@ Deno.serve(async (req: Request) => {
     const audioReadMs = Math.round(performance.now() - audioReadStartedAt);
 
     const prompt =
-      "Transcreva uma busca curta de supermercado falada em português do Brasil. " +
-      "Retorne SOMENTE JSON no formato {\"transcript\":\"...\"}. " +
-      "Não acrescente palavras não faladas. Palavras curtas e nomes de alimentos são válidos. " +
-      "Preserve expressões como 'morango', 'farinha de trigo', 'azeite' e 'abóbora' exatamente quando forem faladas. " +
-      "Se ouvir poncã, poncan, ponkan, ponkam, ponca, pocã, pocan, pocam, pokan, pokam " +
-      "ou pronúncia equivalente da fruta, retorne \"poncan\". " +
-      "Se não houver fala inteligível, retorne {\"transcript\":\"\"}.";
+      "Transcreva esta busca curta de supermercado em português do Brasil. " +
+      "Responda somente com as palavras faladas, sem JSON, aspas, pontuação ou explicações. " +
+      "Não invente palavras. Se ouvir a fruta poncã/poncan/ponkan/pocan ou variante equivalente, responda poncan. " +
+      "Se não houver fala inteligível, responda vazio.";
 
     const attempts = MODELS.map((model) =>
       createModelAttempt(model, apiKey, prompt, mimeType, audioBase64)
