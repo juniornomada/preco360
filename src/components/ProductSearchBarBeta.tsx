@@ -33,6 +33,7 @@ const ProductSearchBarBeta = forwardRef<HTMLInputElement, ProductSearchBarBetaPr
       isListening,
       error,
       lastTimingMs,
+      poncanFallbackArmed,
       clearError,
       startListening,
       stopListening,
@@ -88,7 +89,13 @@ const ProductSearchBarBeta = forwardRef<HTMLInputElement, ProductSearchBarBetaPr
         </div>
 
         {error && (
-          <p className="mt-1 px-1 text-[10px] text-destructive">{error}</p>
+          <p
+            className={`mt-1 px-1 text-[10px] ${
+              poncanFallbackArmed ? "text-amber-500" : "text-destructive"
+            }`}
+          >
+            {error}
+          </p>
         )}
 
         {!error && lastTimingMs !== null && (
