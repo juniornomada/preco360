@@ -51,7 +51,7 @@ const poncaSearchVariantSet = new Set<string>(PONCA_SEARCH_VARIANTS);
 
 export function normalizePoncaSearchToken(value: string) {
   const normalized = normalizeSearchText(value).trim();
-  return poncaSearchVariantSet.has(normalized) ? "ponca" : normalized;
+  return poncaSearchVariantSet.has(normalized) ? "poncan" : normalized;
 }
 
 export function isGenericPoncaSearch(query: string) {
