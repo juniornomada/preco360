@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
-const MAX_RECORDING_MS = 2400;
-const MIN_RECORDING_MS = 450;
-const SILENCE_AFTER_SPEECH_MS = 420;
+const MAX_RECORDING_MS = 1800;
+const MIN_RECORDING_MS = 320;
+const SILENCE_AFTER_SPEECH_MS = 280;
 const SPEECH_RMS_THRESHOLD = 0.018;
 
 const PONCAN_ALIASES = new Set([
@@ -55,7 +55,7 @@ export function useVoiceSearchBeta() {
   const animationRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const [isListening, setIsListening] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);\n  const [lastTimingMs, setLastTimingMs] = useState<number | null>(null);
 
   const isSupported =
     typeof window !== "undefined" &&
@@ -155,15 +155,6 @@ export function useVoiceSearchBeta() {
             }
 
             try {
-              const {
-                data: { session },
-              } = await supabase.auth.getSession();
-
-              if (!session?.access_token) {
-                setError("Sua sessão expirou. Entre novamente para usar a busca por voz.");
-                return;
-              }
-
               const form = new FormData();
               const extension = recordedType.includes("mp4")
                 ? "m4a"
@@ -177,10 +168,8 @@ export function useVoiceSearchBeta() {
                   type: recordedType,
                 }),
               );
-              form.append("access_token", session.access_token);
-
               const { data, error: invokeError } = await supabase.functions.invoke(
-                "transcribe-radar-voice",
+                "transcribe-radar-voice-beta-fast",
                 { body: form },
               );
 
@@ -197,6 +186,7 @@ export function useVoiceSearchBeta() {
                 return;
               }
 
+              setLastTimingMs(Math.round(performance.now() - requestStartedAt));
               onTranscript(transcript);
             } catch (transcriptionError) {
               console.error("Beta voice transcription failed", transcriptionError);
@@ -204,7 +194,7 @@ export function useVoiceSearchBeta() {
             }
           };
 
-          recorder.start(100);
+          recorder.start(80);
           setIsListening(true);
 
           try {
@@ -296,6 +286,7 @@ export function useVoiceSearchBeta() {
     isSupported,
     isListening,
     error,
+    lastTimingMs,
     clearError,
     startListening,
     stopListening,
