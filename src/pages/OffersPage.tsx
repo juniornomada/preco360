@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import ProductSearchBar from "@/components/ProductSearchBar";
+import ProductSearchBarBeta from "@/components/ProductSearchBarBeta";
 import {
   normalizeProductSearchText,
   productMatchesSearch,
@@ -1640,7 +1641,11 @@ function candidateFromItem(item: FlyerItemRow): FlyerCandidate {
   };
 }
 
-export default function OffersPage() {
+type OffersPageProps = {
+  betaVoice?: boolean;
+};
+
+export default function OffersPage({ betaVoice = false }: OffersPageProps) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchInput, setSearchInput] = useState("");
@@ -2695,6 +2700,32 @@ export default function OffersPage() {
         </div>
       </header>
 
+      {betaVoice ? (
+      <ProductSearchBarBeta
+        ref={searchInputRef}
+        className="mb-4"
+        value={searchInput}
+        placeholder="Busque sabão em pó, água sanitária, café..."
+        autoFocus
+        onChange={(value, source) => {
+          setSearchInput(value);
+
+          if (searchTimerRef.current !== null) {
+            window.clearTimeout(searchTimerRef.current);
+            searchTimerRef.current = null;
+          }
+
+          if (source === "voice") {
+            setSearch(value);
+            return;
+          }
+
+          searchTimerRef.current = window.setTimeout(() => {
+            setSearch(value);
+          }, 140);
+        }}
+      />
+      ) : (
       <ProductSearchBar
         ref={searchInputRef}
         className="mb-4"
@@ -2719,6 +2750,7 @@ export default function OffersPage() {
           }, 140);
         }}
       />
+      )}
 
       {hasSearch &&
         !isLoading &&
