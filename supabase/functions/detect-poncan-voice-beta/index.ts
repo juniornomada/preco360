@@ -27,6 +27,11 @@ const PONCAN_ALIASES = new Set([
   "pocam",
   "pokan",
   "pokam",
+  // Phonetic renderings observed on the user's Android fallback.
+  "paocom",
+  "poucao",
+  "pocao",
+  "poncao",
 ]);
 
 function json(status: number, body: unknown) {
@@ -134,6 +139,7 @@ function createAttempt(
       return {
         raw,
         key,
+        isPoncan: PONCAN_ALIASES.has(key),
         model,
         model_ms: elapsedMs,
       };
@@ -184,29 +190,68 @@ Deno.serve(async (req: Request) => {
       createAttempt(model, apiKey, mimeType, audioBase64)
     );
 
-    let winner: {
+    type AttemptResult = {
       raw: string;
       key: string;
+      isPoncan: boolean;
       model: string;
       model_ms: number;
     };
 
-    try {
-      winner = await Promise.any(attempts.map((attempt) => attempt.promise));
-    } catch (error) {
+    const settledResults = await new Promise<{
+      winner: AttemptResult | null;
+      results: AttemptResult[];
+      errors: string[];
+    }>((resolve) => {
+      const results: AttemptResult[] = [];
+      const errors: string[] = [];
+      let pending = attempts.length;
+      let done = false;
+
+      const finishIfNeeded = () => {
+        if (done) return;
+
+        const positive = results.find((result) => result.isPoncan);
+        if (positive) {
+          done = true;
+          resolve({ winner: positive, results, errors });
+          return;
+        }
+
+        if (pending === 0) {
+          done = true;
+          resolve({ winner: null, results, errors });
+        }
+      };
+
+      for (const attempt of attempts) {
+        attempt.promise
+          .then((result) => {
+            results.push(result);
+            pending -= 1;
+            finishIfNeeded();
+          })
+          .catch((error) => {
+            errors.push(error instanceof Error ? error.message : String(error));
+            pending -= 1;
+            finishIfNeeded();
+          });
+      }
+    });
+
+    const winner =
+      settledResults.winner ??
+      settledResults.results[0] ??
+      null;
+
+    if (!winner) {
       const totalMs = Math.round(performance.now() - startedAt);
-      const errors =
-        error instanceof AggregateError
-          ? error.errors.map((item) =>
-              item instanceof Error ? item.message : String(item)
-            )
-          : [error instanceof Error ? error.message : String(error)];
 
       console.log(
         JSON.stringify({
           event: "beta_poncan_detection_failed",
           total_ms: totalMs,
-          errors,
+          errors: settledResults.errors,
         }),
       );
 
@@ -223,8 +268,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const totalMs = Math.round(performance.now() - startedAt);
-
-    const isPoncan = PONCAN_ALIASES.has(winner.key);
+    const isPoncan = winner.isPoncan;
 
     console.log(
       JSON.stringify({
@@ -232,6 +276,13 @@ Deno.serve(async (req: Request) => {
         raw: winner.raw,
         normalized: winner.key,
         is_poncan: isPoncan,
+        candidates: settledResults.results.map((result) => ({
+          raw: result.raw,
+          normalized: result.key,
+          is_poncan: result.isPoncan,
+          model: result.model,
+          model_ms: result.model_ms,
+        })),
         model: winner.model,
         model_ms: winner.model_ms,
         total_ms: totalMs,
