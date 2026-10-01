@@ -64,6 +64,24 @@ export function isGenericPoncaSearch(query: string) {
 }
 
 
+
+export function isGenericStrawberrySearch(query: string) {
+  const tokens = normalizeSearchText(query)
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((token) => !["de", "da", "do", "das", "dos", "em"].includes(token));
+
+  return (
+    tokens.length === 1 &&
+    (tokens[0] === "morango" || tokens[0] === "morangos")
+  );
+}
+
+export function isStrawberryProductName(value: string) {
+  const normalized = normalizeSearchText(value).trim();
+  return /^morangos?\b/.test(normalized);
+}
+
 const powderedDrinkTerms = new Set(["suco", "sucos", "refresco", "refrescos"]);
 
 export function isPowderedDrinkSearch(query: string) {
