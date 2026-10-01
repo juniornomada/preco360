@@ -108,6 +108,7 @@ export function useVoiceSearchBeta() {
       setLastTimingMs(null);
       chunksRef.current = [];
       const requestStartedAt = performance.now();
+      const sessionPromise = supabase.auth.getSession();
 
       void navigator.mediaDevices
         .getUserMedia({
@@ -176,7 +177,7 @@ export function useVoiceSearchBeta() {
               );
               const {
                 data: { session },
-              } = await supabase.auth.getSession();
+              } = await sessionPromise;
 
               if (!session?.access_token) {
                 setError("Sua sessão expirou. Entre novamente para usar a busca por voz.");
