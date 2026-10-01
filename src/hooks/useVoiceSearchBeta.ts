@@ -5,9 +5,10 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 const MAX_RECORDING_MS = 1800;
-const MIN_RECORDING_MS = 320;
-const SILENCE_AFTER_SPEECH_MS = 280;
-const SPEECH_RMS_THRESHOLD = 0.018;
+const MIN_RECORDING_MS = 520;
+const SILENCE_AFTER_SPEECH_MS = 320;
+const SPEECH_START_RMS_THRESHOLD = 0.008;
+const SPEECH_CONTINUE_RMS_THRESHOLD = 0.0045;
 
 const PONCAN_ALIASES = new Set([
   "ponca",
@@ -110,6 +111,24 @@ export function useVoiceSearchBeta() {
       const requestStartedAt = performance.now();
       const sessionPromise = supabase.auth.getSession();
 
+      const AudioContextCtor =
+        window.AudioContext ??
+        (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+
+      let preparedAudioContext: AudioContext | null = null;
+      if (AudioContextCtor) {
+        try {
+          preparedAudioContext = new AudioContextCtor();
+          audioContextRef.current = preparedAudioContext;
+          if (preparedAudioContext.state === "suspended") {
+            void preparedAudioContext.resume().catch(() => {});
+          }
+        } catch (audioContextError) {
+          console.warn("Beta audio analysis could not start", audioContextError);
+        }
+      }
+
       void navigator.mediaDevices
         .getUserMedia({
           audio: {
@@ -128,6 +147,7 @@ export function useVoiceSearchBeta() {
           recorderRef.current = recorder;
           const startedAt = performance.now();
           let heardSpeech = false;
+          let speechFrames = 0;
           let lastSpeechAt = 0;
 
           recorder.ondataavailable = (event) => {
@@ -227,18 +247,17 @@ export function useVoiceSearchBeta() {
           setIsListening(true);
 
           try {
-            const AudioContextCtor =
-              window.AudioContext ??
-              (window as typeof window & { webkitAudioContext?: typeof AudioContext })
-                .webkitAudioContext;
+            const context = preparedAudioContext;
 
-            if (AudioContextCtor) {
-              const context = new AudioContextCtor();
-              audioContextRef.current = context;
+            if (context) {
+              if (context.state === "suspended") {
+                void context.resume().catch(() => {});
+              }
+
               const source = context.createMediaStreamSource(stream);
               const analyser = context.createAnalyser();
               analyser.fftSize = 1024;
-              analyser.smoothingTimeConstant = 0.2;
+              analyser.smoothingTimeConstant = 0.08;
               source.connect(analyser);
 
               const samples = new Float32Array(analyser.fftSize);
@@ -251,15 +270,24 @@ export function useVoiceSearchBeta() {
                 for (let i = 0; i < samples.length; i += 1) {
                   sum += samples[i] * samples[i];
                 }
+
                 const rms = Math.sqrt(sum / samples.length);
                 const now = performance.now();
                 const elapsed = now - startedAt;
 
-                if (rms >= SPEECH_RMS_THRESHOLD) {
-                  heardSpeech = true;
+                if (!heardSpeech) {
+                  if (rms >= SPEECH_START_RMS_THRESHOLD) {
+                    speechFrames += 1;
+                    if (speechFrames >= 2) {
+                      heardSpeech = true;
+                      lastSpeechAt = now;
+                    }
+                  } else {
+                    speechFrames = 0;
+                  }
+                } else if (rms >= SPEECH_CONTINUE_RMS_THRESHOLD) {
                   lastSpeechAt = now;
                 } else if (
-                  heardSpeech &&
                   elapsed >= MIN_RECORDING_MS &&
                   now - lastSpeechAt >= SILENCE_AFTER_SPEECH_MS
                 ) {
