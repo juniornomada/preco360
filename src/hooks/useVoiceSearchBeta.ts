@@ -55,7 +55,8 @@ export function useVoiceSearchBeta() {
   const animationRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const [isListening, setIsListening] = useState(false);
-  const [error, setError] = useState<string | null>(null);\n  const [lastTimingMs, setLastTimingMs] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lastTimingMs, setLastTimingMs] = useState<number | null>(null);
 
   const isSupported =
     typeof window !== "undefined" &&
@@ -101,7 +102,9 @@ export function useVoiceSearchBeta() {
       }
 
       setError(null);
+      setLastTimingMs(null);
       chunksRef.current = [];
+      const requestStartedAt = performance.now();
 
       void navigator.mediaDevices
         .getUserMedia({
