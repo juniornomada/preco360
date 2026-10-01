@@ -153,6 +153,39 @@ function preferredAudioMimeType() {
   return candidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? "";
 }
 
+type NativeVoiceTelemetry = {
+  event: "start" | "result" | "error" | "end_no_text";
+  session_id: string;
+  alternatives?: string[];
+  normalized?: string;
+  is_final?: boolean;
+  speech_started?: boolean;
+  error?: string;
+  elapsed_ms?: number;
+  phrase_bias_supported?: boolean;
+};
+
+function logNativeVoiceBeta(payload: NativeVoiceTelemetry) {
+  // Diagnostic-only and intentionally fire-and-forget so telemetry never
+  // delays or blocks the native voice-search path.
+  void supabase.auth.getSession().then(({ data: { session } }) => {
+    if (!session?.access_token) return;
+
+    void fetch(
+      `${SUPABASE_URL}/functions/v1/log-native-voice-beta`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: SUPABASE_PUBLISHABLE_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ).catch(() => undefined);
+  }).catch(() => undefined);
+}
+
 function voiceErrorMessage(error?: string) {
   if (error === "not-allowed" || error === "service-not-allowed") {
     return "Permita o acesso ao microfone para buscar por voz.";
@@ -393,6 +426,7 @@ export function useVoiceSearchBeta() {
       setLastTimingMs(null);
 
       const startedAt = performance.now();
+      const nativeSessionId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
       const recognition = new Recognition();
 
       recognition.lang = "pt-BR";
@@ -405,6 +439,7 @@ export function useVoiceSearchBeta() {
       // the exact native path below. A moderate boost limits false positives.
       const speechWindow = window as SpeechWindow;
       const Phrase = speechWindow.SpeechRecognitionPhrase;
+      const phraseBiasSupported = Boolean(Phrase && "phrases" in recognition);
       if (Phrase && "phrases" in recognition) {
         try {
           recognition.phrases = PONCAN_CONTEXT_PHRASES.map(
@@ -414,6 +449,20 @@ export function useVoiceSearchBeta() {
           console.debug("Poncan contextual bias unavailable", phraseError);
         }
       }
+
+      logNativeVoiceBeta({
+        event: "start",
+        session_id: nativeSessionId,
+        elapsed_ms: 0,
+        phrase_bias_supported: phraseBiasSupported,
+      });
+
+      const rawAlternatives = (result?: SpeechResult) =>
+        result?.length
+          ? Array.from({ length: result.length }, (_, index) =>
+              result[index]?.transcript?.trim() ?? "",
+            ).filter(Boolean)
+          : [];
 
       const bestTranscript = (result?: SpeechResult) => {
         if (!result?.length) return "";
@@ -501,6 +550,18 @@ export function useVoiceSearchBeta() {
       recognition.onresult = (event) => {
         const lastResult = event.results[event.results.length - 1];
         const transcript = bestTranscript(lastResult);
+        const alternatives = rawAlternatives(lastResult);
+
+        logNativeVoiceBeta({
+          event: "result",
+          session_id: nativeSessionId,
+          alternatives,
+          normalized: transcript,
+          is_final: Boolean(lastResult?.isFinal),
+          speech_started: speechStartedRef.current,
+          elapsed_ms: Math.round(performance.now() - startedAt),
+          phrase_bias_supported: phraseBiasSupported,
+        });
 
         if (!transcript) return;
 
@@ -518,6 +579,16 @@ export function useVoiceSearchBeta() {
 
       recognition.onerror = (event) => {
         clearTimers();
+
+        logNativeVoiceBeta({
+          event: "error",
+          session_id: nativeSessionId,
+          normalized: pendingTranscriptRef.current,
+          speech_started: speechStartedRef.current,
+          error: event.error ?? "unknown",
+          elapsed_ms: Math.round(performance.now() - startedAt),
+          phrase_bias_supported: phraseBiasSupported,
+        });
 
         const delivered = deliverPending();
 
@@ -538,6 +609,13 @@ export function useVoiceSearchBeta() {
         const delivered = deliverPending();
 
         if (!delivered && speechStartedRef.current) {
+          logNativeVoiceBeta({
+            event: "end_no_text",
+            session_id: nativeSessionId,
+            speech_started: true,
+            elapsed_ms: Math.round(performance.now() - startedAt),
+            phrase_bias_supported: phraseBiasSupported,
+          });
           armPoncanFallback();
         }
 
