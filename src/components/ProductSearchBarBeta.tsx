@@ -32,6 +32,7 @@ const ProductSearchBarBeta = forwardRef<HTMLInputElement, ProductSearchBarBetaPr
     const {
       isListening,
       error,
+      lastTimingMs,
       clearError,
       startListening,
       stopListening,
@@ -88,6 +89,12 @@ const ProductSearchBarBeta = forwardRef<HTMLInputElement, ProductSearchBarBetaPr
 
         {error && (
           <p className="mt-1 px-1 text-[10px] text-destructive">{error}</p>
+        )}
+
+        {!error && lastTimingMs !== null && (
+          <p className="mt-1 px-1 text-[10px] text-muted-foreground">
+            Beta: resultado em {(lastTimingMs / 1000).toFixed(1)} s
+          </p>
         )}
       </div>
     );
