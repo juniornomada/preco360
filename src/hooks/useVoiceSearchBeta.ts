@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
 const MAX_RECORDING_MS = 1800;
 const MIN_RECORDING_MS = 320;
 const SILENCE_AFTER_SPEECH_MS = 280;
@@ -171,12 +174,34 @@ export function useVoiceSearchBeta() {
                   type: recordedType,
                 }),
               );
-              const { data, error: invokeError } = await supabase.functions.invoke(
-                "transcribe-radar-voice-beta-fast",
-                { body: form },
+              const {
+                data: { session },
+              } = await supabase.auth.getSession();
+
+              if (!session?.access_token) {
+                setError("Sua sessão expirou. Entre novamente para usar a busca por voz.");
+                return;
+              }
+
+              const response = await fetch(
+                `${SUPABASE_URL}/functions/v1/transcribe-radar-voice-beta-fast`,
+                {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${session.access_token}`,
+                    apikey: SUPABASE_PUBLISHABLE_KEY,
+                  },
+                  body: form,
+                },
               );
 
-              if (invokeError) throw invokeError;
+              const data = await response.json().catch(() => ({}));
+
+              if (!response.ok) {
+                throw new Error(
+                  String(data?.error ?? `Falha na transcrição (${response.status})`),
+                );
+              }
 
               const transcript = normalizeVoiceSearchBetaTranscript(
                 String(data?.transcript ?? ""),
