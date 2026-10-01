@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   isGenericSaltSearch,
+  isGenericStrawberrySearch,
   isGenericSugarSearch,
   isSaltProductName,
+  isStrawberryProductName,
   isSugarProductName,
   isGenericPoncaSearch,
   isPowderedDrinkSearch,
@@ -40,6 +42,20 @@ describe("offer search guards", () => {
     expect(isSaltProductName("Sal Cisne Refinado Extra 1kg")).toBe(true);
     expect(isSaltProductName("Manteiga com Sal Lider Pote 200g")).toBe(false);
     expect(isSaltProductName("Salame Ceratti Italiano 100g")).toBe(false);
+  });
+
+
+  it("treats plain morango as fruit, not strawberry-flavored products", () => {
+    expect(isGenericStrawberrySearch("morango")).toBe(true);
+    expect(isGenericStrawberrySearch("morangos")).toBe(true);
+    expect(isGenericStrawberrySearch("morango congelado")).toBe(false);
+    expect(isGenericStrawberrySearch("suco de morango")).toBe(false);
+    expect(isGenericStrawberrySearch("iogurte de morango")).toBe(false);
+
+    expect(isStrawberryProductName("Morango bandeja 250g")).toBe(true);
+    expect(isStrawberryProductName("Morangos congelados 1kg")).toBe(true);
+    expect(isStrawberryProductName("Suco de morango 1L")).toBe(false);
+    expect(isStrawberryProductName("Iogurte sabor morango 170g")).toBe(false);
   });
 
   it("treats Ponkan spellings as one search identity", () => {
