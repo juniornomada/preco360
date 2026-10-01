@@ -49,7 +49,7 @@ type SpeechWindow = Window & {
 };
 
 const SILENCE_COMMIT_MS = 900;
-const SPEECH_END_STOP_MS = 250;
+const SPEECH_END_STOP_MS = 850;
 const MAX_LISTENING_MS = 6000;
 
 export function normalizeVoiceSearchTranscript(value: string) {
@@ -225,21 +225,30 @@ export function useVoiceSearch() {
         if (silenceTimerRef.current !== null) {
           window.clearTimeout(silenceTimerRef.current);
         }
-        // Chrome/Android sometimes keeps very short words such as "sal" in a
-        // non-final state. Stopping recognition shortly after speechend forces
-        // the browser to flush the final result instead of leaving the mic on.
+        // Chrome/Android may need a little longer after speechend to return a
+        // hypothesis for short words. Waiting here avoids cutting off terms
+        // such as "sal", "pocan" and "poncan" before onresult is fired.
         silenceTimerRef.current = window.setTimeout(() => {
           recognition.stop();
         }, SPEECH_END_STOP_MS);
       };
 
       recognition.onresult = (event) => {
-        const lastResult = event.results[event.results.length - 1];
-        const transcript = bestTranscript(lastResult);
+        const resultCount = event.results.length;
+        const transcripts = Array.from({ length: resultCount }, (_, offset) => {
+          const index = resultCount - 1 - offset;
+          return bestTranscript(event.results[index]);
+        }).filter(Boolean);
+
+        const transcript =
+          transcripts.find((candidate) => candidate === "poncan") ??
+          transcripts[0] ??
+          "";
 
         if (!transcript) return;
         pendingTranscriptRef.current = transcript;
 
+        const lastResult = event.results[resultCount - 1];
         if (lastResult?.isFinal) {
           deliverPending();
           clearTimers();
