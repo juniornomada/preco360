@@ -39,7 +39,7 @@ describe("normalizeVoiceSearchTranscript", () => {
     ];
 
     for (const variant of variants) {
-      expect(normalizeVoiceSearchTranscript(variant)).toBe("poncã");
+      expect(normalizeVoiceSearchTranscript(variant)).toBe("poncan");
     }
   });
 });
