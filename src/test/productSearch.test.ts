@@ -52,3 +52,13 @@ describe("productMatchesSearch", () => {
     ).toBe(false);
   });
 });
+
+
+describe("Poncan search aliases", () => {
+  it("canonicalizes common speech spellings to poncan", () => {
+    const variants = ["poncã", "ponca", "poncan", "ponkan", "pocan", "pokan"];
+    for (const variant of variants) {
+      expect(productSearchTokens(variant)).toEqual(["poncan"]);
+    }
+  });
+});
