@@ -87,7 +87,7 @@ export function normalizeVoiceSearchTranscript(value: string) {
   ]);
 
   if (poncaAliases.has(key)) {
-    return "poncã";
+    return "ponkan";
   }
 
   return normalized;
@@ -170,7 +170,7 @@ export function useVoiceSearch() {
         ).filter(Boolean);
 
         return (
-          alternatives.find((candidate) => candidate === "poncã") ??
+          alternatives.find((candidate) => candidate === "ponkan") ??
           alternatives[0] ??
           ""
         );
@@ -262,8 +262,12 @@ export function useVoiceSearch() {
 
       recognition.onend = () => {
         clearTimers();
-        const delivered = deliverPending();
-        if (!delivered && speechStartedRef.current) {
+
+        // If a final/interim result was already delivered, ending the browser
+        // recognition session is expected and must not surface a false error.
+        const wasAlreadyDelivered = deliveredRef.current;
+        const deliveredNow = wasAlreadyDelivered ? false : deliverPending();
+        if (!wasAlreadyDelivered && !deliveredNow && speechStartedRef.current) {
           setError(
             "Ouvi sua fala, mas não consegui identificar o produto. Tente falar novamente.",
           );
