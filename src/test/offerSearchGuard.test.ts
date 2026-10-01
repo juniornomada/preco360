@@ -45,7 +45,7 @@ describe("offer search guards", () => {
   it("treats Ponkan spellings as one search identity", () => {
     for (const variant of PONCA_SEARCH_VARIANTS) {
       expect(isGenericPoncaSearch(variant)).toBe(true);
-      expect(normalizePoncaSearchToken(variant)).toBe("ponca");
+      expect(normalizePoncaSearchToken(variant)).toBe("poncan");
     }
     expect(isGenericPoncaSearch("tangerina")).toBe(false);
   });
