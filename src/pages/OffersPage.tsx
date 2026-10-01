@@ -31,9 +31,11 @@ import { canonicalRetailerName } from "@/lib/retailerNames";
 import {
   isGenericPoncaSearch,
   isGenericSaltSearch,
+  isGenericStrawberrySearch,
   isPowderedDrinkSearch,
   isGenericSugarSearch,
   isSaltProductName,
+  isStrawberryProductName,
   isSugarProductName,
   normalizePoncaSearchToken,
   powderedDrinkSearchRequests,
@@ -646,6 +648,7 @@ type OfferFamily =
   | "cannedFish"
   | "sugar"
   | "salt"
+  | "strawberry"
   | "disinfectant"
   | "alcoholDisinfectant"
   | "other";
@@ -659,6 +662,7 @@ function hasAny(tokens: Set<string>, values: string[]) {
 function queryOfferFamily(query: string): SearchFamilyIntent | null {
   if (isGenericSaltSearch(query)) return "salt";
   if (isGenericSugarSearch(query)) return "sugar";
+  if (isGenericStrawberrySearch(query)) return "strawberry";
 
   const normalized = normalizeSearchText(query);
 
@@ -806,6 +810,7 @@ function inferOfferFamily(
   // keyword appearing later as flavor, ingredient or accompaniment.
   if (isSaltProductName(raw)) return "salt";
   if (isSugarProductName(raw)) return "sugar";
+  if (isStrawberryProductName(raw)) return "strawberry";
   if (isBeefOfferText(raw)) return "beef";
   if (isPorkOfferText(raw)) return "pork";
   if (isCannedFishOffer(raw)) return "cannedFish";
@@ -932,6 +937,7 @@ function familyLabel(family: OfferFamily) {
   if (family === "cannedFish") return "Peixe enlatado";
   if (family === "sugar") return "Açúcar";
   if (family === "salt") return "Sal";
+  if (family === "strawberry") return "Morango";
   if (family === "disinfectant") return "Desinfetante";
   if (family === "alcoholDisinfectant") return "Álcool / desinfetante alcoólico";
   return "Produto";
