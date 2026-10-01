@@ -27,8 +27,12 @@ type SpeechRecognitionErrorEventLike = Event & {
   error?: string;
 };
 
+type SpeechRecognitionPhraseLike = { phrase: string; boost: number };
+type SpeechRecognitionPhraseConstructor = new (phrase: string, boost?: number) => SpeechRecognitionPhraseLike;
+
 type SpeechRecognitionLike = {
   lang: string;
+  phrases?: SpeechRecognitionPhraseLike[];
   interimResults: boolean;
   continuous: boolean;
   maxAlternatives: number;
@@ -48,12 +52,23 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 type SpeechWindow = Window & {
   SpeechRecognition?: SpeechRecognitionConstructor;
   webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  SpeechRecognitionPhrase?: SpeechRecognitionPhraseConstructor;
 };
 
 const SILENCE_COMMIT_MS = 900;
 const SPEECH_END_STOP_MS = 250;
 const MAX_LISTENING_MS = 6000;
 const PONCAN_FALLBACK_RECORDING_MS = 1500;
+
+const PONCAN_CONTEXT_PHRASES = [
+  "poncã",
+  "poncan",
+  "ponkan",
+  "pocan",
+  "pokan",
+] as const;
+
+const PONCAN_HELPER_SUFFIXES = new Set(["fruta"]);
 
 const PONCAN_ALIASES = new Set([
   "ponca",
@@ -82,8 +97,23 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     .toLocaleLowerCase("pt-BR");
 
   const compactKey = key.replace(/[\s-]+/g, "");
+  const words = key.split(/[\s-]+/).filter(Boolean);
 
   if (key === "sau") return "sal";
+
+  // Android/Chrome often recognizes the difficult short term when the user
+  // supplies a harmless second word ("poncan fruta") or repeats it
+  // ("poncan poncan"). Only collapse combinations whose parts are already
+  // known Poncan aliases, avoiding broad matches such as "com" / "pão com".
+  if (words.length === 2) {
+    const [first, second] = words;
+    const repeatedAlias =
+      PONCAN_ALIASES.has(first) && PONCAN_ALIASES.has(second);
+    const aliasWithHelper =
+      PONCAN_ALIASES.has(first) && PONCAN_HELPER_SUFFIXES.has(second);
+
+    if (repeatedAlias || aliasWithHelper) return "poncan";
+  }
   if (PONCAN_ALIASES.has(key) || PONCAN_ALIASES.has(compactKey)) {
     return "poncan";
   }
@@ -369,6 +399,21 @@ export function useVoiceSearchBeta() {
       recognition.interimResults = true;
       recognition.continuous = false;
       recognition.maxAlternatives = 5;
+
+      // Progressive enhancement: newer Web Speech implementations can bias
+      // recognition toward troublesome vocabulary. Unsupported browsers keep
+      // the exact native path below. A moderate boost limits false positives.
+      const speechWindow = window as SpeechWindow;
+      const Phrase = speechWindow.SpeechRecognitionPhrase;
+      if (Phrase && "phrases" in recognition) {
+        try {
+          recognition.phrases = PONCAN_CONTEXT_PHRASES.map(
+            (phrase) => new Phrase(phrase, 3),
+          );
+        } catch (phraseError) {
+          console.debug("Poncan contextual bias unavailable", phraseError);
+        }
+      }
 
       const bestTranscript = (result?: SpeechResult) => {
         if (!result?.length) return "";
