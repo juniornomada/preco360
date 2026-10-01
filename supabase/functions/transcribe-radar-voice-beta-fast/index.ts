@@ -80,6 +80,22 @@ function isSuspiciousTranscript(value: string) {
   }
 
   const tokens = new Set(normalized.split(/\s+/).filter(Boolean));
+  const standaloneNonProductTerms = new Set([
+    "feminino",
+    "masculino",
+    "sim",
+    "não",
+    "nao",
+    "isso",
+    "aquilo",
+    "obrigado",
+    "obrigada",
+  ]);
+
+  if (standaloneNonProductTerms.has(normalized)) {
+    return true;
+  }
+
   const fruitConflicts = ["laranja", "morango", "tangerina", "mexerica", "bergamota"];
   const hasPoncan =
     tokens.has("poncan") ||
@@ -152,6 +168,18 @@ function createModelAttempt(
       const transcript = parseTranscript(payload);
       if (!transcript) {
         throw new Error(`${model}:EMPTY:${elapsedMs}`);
+      }
+
+      if (isSuspiciousTranscript(transcript)) {
+        console.log(
+          JSON.stringify({
+            event: "beta_voice_candidate_rejected",
+            transcript,
+            model,
+            model_ms: elapsedMs,
+          }),
+        );
+        throw new Error(`${model}:SUSPICIOUS:${elapsedMs}`);
       }
 
       return {
