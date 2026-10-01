@@ -7,8 +7,8 @@ const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const MAX_RECORDING_MS = 1800;
 const MIN_RECORDING_MS = 520;
 const SILENCE_AFTER_SPEECH_MS = 320;
-const SPEECH_START_RMS_THRESHOLD = 0.008;
-const SPEECH_CONTINUE_RMS_THRESHOLD = 0.0045;
+const MIN_SPEECH_START_RMS = 0.008;
+const MIN_SPEECH_CONTINUE_RMS = 0.0055;
 
 const PONCAN_ALIASES = new Set([
   "ponca",
@@ -36,8 +36,10 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLocaleLowerCase("pt-BR");
 
+  const compactKey = key.replace(/[\s-]+/g, "");
+
   if (key === "sau") return "sal";
-  if (PONCAN_ALIASES.has(key)) return "poncan";
+  if (PONCAN_ALIASES.has(key) || PONCAN_ALIASES.has(compactKey)) return "poncan";
   return normalized;
 }
 
@@ -149,6 +151,7 @@ export function useVoiceSearchBeta() {
           let heardSpeech = false;
           let speechFrames = 0;
           let lastSpeechAt = 0;
+          let noiseFloor = 0.003;
 
           recorder.ondataavailable = (event) => {
             if (event.data.size > 0) chunksRef.current.push(event.data);
@@ -276,7 +279,19 @@ export function useVoiceSearchBeta() {
                 const elapsed = now - startedAt;
 
                 if (!heardSpeech) {
-                  if (rms >= SPEECH_START_RMS_THRESHOLD) {
+                  if (elapsed < 260) {
+                    noiseFloor = Math.min(
+                      0.006,
+                      noiseFloor * 0.88 + rms * 0.12,
+                    );
+                  }
+
+                  const startThreshold = Math.max(
+                    MIN_SPEECH_START_RMS,
+                    noiseFloor * 2.2,
+                  );
+
+                  if (rms >= startThreshold) {
                     speechFrames += 1;
                     if (speechFrames >= 2) {
                       heardSpeech = true;
@@ -285,14 +300,21 @@ export function useVoiceSearchBeta() {
                   } else {
                     speechFrames = 0;
                   }
-                } else if (rms >= SPEECH_CONTINUE_RMS_THRESHOLD) {
-                  lastSpeechAt = now;
-                } else if (
-                  elapsed >= MIN_RECORDING_MS &&
-                  now - lastSpeechAt >= SILENCE_AFTER_SPEECH_MS
-                ) {
-                  recorder.stop();
-                  return;
+                } else {
+                  const continueThreshold = Math.max(
+                    MIN_SPEECH_CONTINUE_RMS,
+                    noiseFloor * 1.55,
+                  );
+
+                  if (rms >= continueThreshold) {
+                    lastSpeechAt = now;
+                  } else if (
+                    elapsed >= MIN_RECORDING_MS &&
+                    now - lastSpeechAt >= SILENCE_AFTER_SPEECH_MS
+                  ) {
+                    recorder.stop();
+                    return;
+                  }
                 }
 
                 animationRef.current = requestAnimationFrame(inspect);
