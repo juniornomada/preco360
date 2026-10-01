@@ -6,7 +6,7 @@ import {
 } from "react";
 import { Mic, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { useVoiceSearch } from "@/hooks/useVoiceSearch";
+import { useVoiceSearchProduction } from "@/hooks/useVoiceSearchProduction";
 
 export type ProductSearchSource = "typing" | "voice";
 
@@ -36,7 +36,7 @@ const ProductSearchBar = forwardRef<HTMLInputElement, ProductSearchBarProps>(
       clearError,
       startListening,
       stopListening,
-    } = useVoiceSearch();
+    } = useVoiceSearchProduction();
 
     useImperativeHandle(forwardedRef, () => inputRef.current as HTMLInputElement);
 
