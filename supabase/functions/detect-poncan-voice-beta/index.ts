@@ -8,11 +8,26 @@ const corsHeaders = {
   "Access-Control-Max-Age": "86400",
 };
 
-const PRIMARY_MODEL = "gemini-3.5-flash-lite";
-const FALLBACK_MODEL = "gemini-3.1-flash-lite";
-const PRIMARY_TIMEOUT_MS = 2600;
-const FALLBACK_TIMEOUT_MS = 2200;
-const FALLBACK_DELAY_MS = 550;
+const MODELS = [
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+] as const;
+
+const MODEL_TIMEOUT_MS = 3400;
+
+const PONCAN_ALIASES = new Set([
+  "ponca",
+  "poncan",
+  "poncam",
+  "ponka",
+  "ponkan",
+  "ponkam",
+  "poca",
+  "pocan",
+  "pocam",
+  "pokan",
+  "pokam",
+]);
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -36,7 +51,11 @@ function extractText(payload: any) {
       ?.map((part: any) => part?.text || "")
       .join("")
       .trim() || "",
-  )
+  );
+}
+
+function normalize(value: string) {
+  return String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
@@ -45,7 +64,6 @@ function extractText(payload: any) {
 
 function createAttempt(
   model: string,
-  timeoutMs: number,
   apiKey: string,
   mimeType: string,
   audioBase64: string,
@@ -54,7 +72,7 @@ function createAttempt(
 
   const promise = (async () => {
     const startedAt = performance.now();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const timeout = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
 
     try {
       const response = await fetch(
@@ -75,10 +93,9 @@ function createAttempt(
                 parts: [
                   {
                     text:
-                      "Classifique somente se esta fala corresponde ao nome da fruta poncã, " +
-                      "incluindo pronúncias equivalentes como poncan, ponkan, pocan ou ponca. " +
-                      "Responda exatamente PONCAN se corresponder. Caso contrário responda exatamente NAO. " +
-                      "Não transcreva outras palavras e não explique.",
+                      "Transcreva literalmente esta fala curta em português do Brasil. " +
+                      "Responda somente com a palavra ou expressão falada, sem explicações, sem JSON e sem pontuação. " +
+                      "Não corrija e não complete a fala.",
                   },
                   {
                     inlineData: {
@@ -91,7 +108,7 @@ function createAttempt(
             ],
             generationConfig: {
               temperature: 0,
-              maxOutputTokens: 4,
+              maxOutputTokens: 12,
               thinkingConfig: {
                 thinkingLevel: "minimal",
               },
@@ -107,13 +124,16 @@ function createAttempt(
         throw new Error(`${model}:HTTP_${response.status}:${elapsedMs}`);
       }
 
-      const answer = extractText(payload);
-      if (answer !== "poncan" && answer !== "nao") {
-        throw new Error(`${model}:INVALID:${answer}:${elapsedMs}`);
+      const raw = extractText(payload);
+      const key = normalize(raw);
+
+      if (!key) {
+        throw new Error(`${model}:EMPTY:${elapsedMs}`);
       }
 
       return {
-        isPoncan: answer === "poncan",
+        raw,
+        key,
         model,
         model_ms: elapsedMs,
       };
@@ -160,55 +180,58 @@ Deno.serve(async (req: Request) => {
       new Uint8Array(await file.arrayBuffer()),
     );
 
-    const primary = createAttempt(
-      PRIMARY_MODEL,
-      PRIMARY_TIMEOUT_MS,
-      apiKey,
-      mimeType,
-      audioBase64,
+    const attempts = MODELS.map((model) =>
+      createAttempt(model, apiKey, mimeType, audioBase64)
     );
 
-    let fallback: ReturnType<typeof createAttempt> | null = null;
-    let fallbackTimer: number | null = null;
-
-    const fallbackPromise = new Promise<{
-      isPoncan: boolean;
-      model: string;
-      model_ms: number;
-    }>((resolve, reject) => {
-      fallbackTimer = setTimeout(() => {
-        fallback = createAttempt(
-          FALLBACK_MODEL,
-          FALLBACK_TIMEOUT_MS,
-          apiKey,
-          mimeType,
-          audioBase64,
-        );
-        fallback.promise.then(resolve, reject);
-      }, FALLBACK_DELAY_MS);
-    });
-
     let winner: {
-      isPoncan: boolean;
+      raw: string;
+      key: string;
       model: string;
       model_ms: number;
     };
 
     try {
-      winner = await Promise.any([primary.promise, fallbackPromise]);
-    } finally {
-      if (fallbackTimer !== null) clearTimeout(fallbackTimer);
+      winner = await Promise.any(attempts.map((attempt) => attempt.promise));
+    } catch (error) {
+      const totalMs = Math.round(performance.now() - startedAt);
+      const errors =
+        error instanceof AggregateError
+          ? error.errors.map((item) =>
+              item instanceof Error ? item.message : String(item)
+            )
+          : [error instanceof Error ? error.message : String(error)];
+
+      console.log(
+        JSON.stringify({
+          event: "beta_poncan_detection_failed",
+          total_ms: totalMs,
+          errors,
+        }),
+      );
+
+      return json(504, {
+        error: "PONCAN_DETECTION_FAILED",
+        timing: { total_ms: totalMs },
+      });
     }
 
-    if (winner.model !== PRIMARY_MODEL) primary.controller.abort();
-    if (fallback && winner.model !== FALLBACK_MODEL) fallback.controller.abort();
+    for (const attempt of attempts) {
+      if (attempt.model !== winner.model) {
+        attempt.controller.abort();
+      }
+    }
 
     const totalMs = Math.round(performance.now() - startedAt);
+
+    const isPoncan = PONCAN_ALIASES.has(winner.key);
 
     console.log(
       JSON.stringify({
         event: "beta_poncan_detection",
-        is_poncan: winner.isPoncan,
+        raw: winner.raw,
+        normalized: winner.key,
+        is_poncan: isPoncan,
         model: winner.model,
         model_ms: winner.model_ms,
         total_ms: totalMs,
@@ -217,7 +240,8 @@ Deno.serve(async (req: Request) => {
     );
 
     return json(200, {
-      is_poncan: winner.isPoncan,
+      is_poncan: isPoncan,
+      heard: winner.raw,
       model: winner.model,
       timing: {
         model_ms: winner.model_ms,
@@ -229,13 +253,13 @@ Deno.serve(async (req: Request) => {
 
     console.log(
       JSON.stringify({
-        event: "beta_poncan_detection_failed",
+        event: "beta_poncan_detection_error",
         total_ms: totalMs,
         error: error instanceof Error ? error.message : String(error),
       }),
     );
 
-    return json(504, {
+    return json(500, {
       error: "PONCAN_DETECTION_FAILED",
       timing: { total_ms: totalMs },
     });
