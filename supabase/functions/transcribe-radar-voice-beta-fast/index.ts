@@ -8,12 +8,11 @@ const corsHeaders = {
   "Access-Control-Max-Age": "86400",
 };
 
-const MODELS = [
-  "gemini-3.5-flash-lite",
-  "gemini-3.1-flash-lite",
-] as const;
-
-const MODEL_TIMEOUT_MS = 3800;
+const PRIMARY_MODEL = "gemini-3.5-flash-lite";
+const FALLBACK_MODEL = "gemini-3.1-flash-lite";
+const PRIMARY_TIMEOUT_MS = 3300;
+const FALLBACK_TIMEOUT_MS = 2600;
+const FALLBACK_DELAY_MS = 1200;
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -69,6 +68,7 @@ function parseTranscript(payload: any) {
 
 function createModelAttempt(
   model: string,
+  timeoutMs: number,
   apiKey: string,
   prompt: string,
   mimeType: string,
@@ -78,7 +78,7 @@ function createModelAttempt(
 
   const promise = (async () => {
     const startedAt = performance.now();
-    const timeout = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(
@@ -110,6 +110,9 @@ function createModelAttempt(
             generationConfig: {
               temperature: 0,
               maxOutputTokens: 16,
+              thinkingConfig: {
+                thinkingLevel: "minimal",
+              },
             },
           }),
         },
@@ -185,9 +188,37 @@ Deno.serve(async (req: Request) => {
       "Não invente palavras. Se ouvir a fruta poncã/poncan/ponkan/pocan ou variante equivalente, responda poncan. " +
       "Se não houver fala inteligível, responda vazio.";
 
-    const attempts = MODELS.map((model) =>
-      createModelAttempt(model, apiKey, prompt, mimeType, audioBase64)
+    const primaryAttempt = createModelAttempt(
+      PRIMARY_MODEL,
+      PRIMARY_TIMEOUT_MS,
+      apiKey,
+      prompt,
+      mimeType,
+      audioBase64,
     );
+
+    let fallbackAttempt:
+      | ReturnType<typeof createModelAttempt>
+      | null = null;
+    let fallbackTimer: number | null = null;
+
+    const fallbackPromise = new Promise<{
+      transcript: string;
+      model: string;
+      model_ms: number;
+    }>((resolve, reject) => {
+      fallbackTimer = setTimeout(() => {
+        fallbackAttempt = createModelAttempt(
+          FALLBACK_MODEL,
+          FALLBACK_TIMEOUT_MS,
+          apiKey,
+          prompt,
+          mimeType,
+          audioBase64,
+        );
+        fallbackAttempt.promise.then(resolve, reject);
+      }, FALLBACK_DELAY_MS);
+    });
 
     let winner: {
       transcript: string;
@@ -196,7 +227,10 @@ Deno.serve(async (req: Request) => {
     };
 
     try {
-      winner = await Promise.any(attempts.map((attempt) => attempt.promise));
+      winner = await Promise.any([
+        primaryAttempt.promise,
+        fallbackPromise,
+      ]);
     } catch (error) {
       const totalMs = Math.round(performance.now() - startedAt);
       const errors =
@@ -216,18 +250,23 @@ Deno.serve(async (req: Request) => {
 
       return json(504, {
         error: "VOICE_TRANSCRIPTION_TIMEOUT",
-        attempted_models: MODELS,
+        attempted_models: [PRIMARY_MODEL, FALLBACK_MODEL],
         timing: {
           audio_read_ms: audioReadMs,
           total_ms: totalMs,
         },
       });
+    } finally {
+      if (fallbackTimer !== null) {
+        clearTimeout(fallbackTimer);
+      }
     }
 
-    for (const attempt of attempts) {
-      if (attempt.model !== winner.model) {
-        attempt.controller.abort();
-      }
+    if (winner.model !== PRIMARY_MODEL) {
+      primaryAttempt.controller.abort();
+    }
+    if (fallbackAttempt && winner.model !== FALLBACK_MODEL) {
+      fallbackAttempt.controller.abort();
     }
 
     const totalMs = Math.round(performance.now() - startedAt);
