@@ -13,7 +13,7 @@ const MODELS = [
   "gemini-3.1-flash-lite",
 ] as const;
 
-const MODEL_TIMEOUT_MS = 3400;
+const MODEL_TIMEOUT_MS = 2600;
 
 const PONCAN_ALIASES = new Set([
   "ponca",
