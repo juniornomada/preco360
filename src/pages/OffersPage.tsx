@@ -3104,7 +3104,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                     </p>
                   )}
 
-                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-1 sm:gap-x-3">
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 sm:gap-x-3">
                     <ProductVisual
                       name={item.raw_name}
                       category={entry.product?.category}
@@ -3113,191 +3113,196 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                     />
 
                     <div className="min-w-0">
-                      <div className="flex min-w-0 items-center gap-1.5">
+                      <div className="flex min-w-0 items-baseline gap-2">
                         <div className="min-w-0 flex-1">
                           <AdaptiveProductName
-                            text={displayTitle}
+                            text={
+                              packLabel
+                                ? `${displayTitle} (${packLabel.replace(/\s+/g, "")})`
+                                : displayTitle
+                            }
                             className="font-bold"
                             minPx={11}
                             maxPx={15}
                             desktopMaxPx={16}
                           />
                         </div>
-                        {packLabel && (
-                          <span className="shrink-0 rounded-md border border-white/10 bg-muted/55 px-1.5 py-0.5 text-[10px] font-extrabold leading-none text-foreground/90 sm:text-[11px]">
-                            {packLabel}
-                          </span>
+
+                        {clubPrice && (
+                          <p className="shrink-0 text-[9px] font-bold uppercase tracking-[0.12em] text-primary">
+                            Clube
+                          </p>
                         )}
                       </div>
 
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                        <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-bold">
-                          <Store className="h-3.5 w-3.5 shrink-0 text-primary" />
-                          <span className="truncate">
-                            {canonicalRetailerName(flyer?.retailer) || "Supermercado"}
-                          </span>
-                        </span>
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${ui.className}`}
-                        >
-                          <VerdictIcon className="h-3.5 w-3.5" />
-                          {ui.label}
-                        </span>
-                        <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground">
-                          <Clock3 className="h-3.5 w-3.5" />
-                          {expiryLabel(flyer?.valid_to, today)}
-                        </span>
-                      </div>
-                    </div>
+                      <div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-bold">
+                              <Store className="h-3.5 w-3.5 shrink-0 text-primary" />
+                              <span className="truncate">
+                                {canonicalRetailerName(flyer?.retailer) || "Supermercado"}
+                              </span>
+                            </span>
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${ui.className}`}
+                            >
+                              <VerdictIcon className="h-3.5 w-3.5" />
+                              {ui.label}
+                            </span>
+                            <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground">
+                              <Clock3 className="h-3.5 w-3.5" />
+                              {expiryLabel(flyer?.valid_to, today)}
+                            </span>
+                          </div>
+                        </div>
 
-                    <div className="min-w-[80px] max-w-[142px] shrink-0 text-right sm:min-w-[88px] sm:max-w-[150px]">
-                      {clubPrice ? (
-                        <>
-                          <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-primary">
-                            Clube
-                          </p>
-                          {appActivationRequired && (
-                            <p className="mb-0.5 text-[8px] font-bold uppercase leading-tight text-amber-500">
-                              * ativar desconto APP
-                            </p>
-                          )}
-                          <p className="text-lg font-extrabold leading-tight sm:text-xl text-primary">
-                            {prioritizeUnitPrice
-                              ? formatNormalizedPrice(
-                                  candidate.normalizedPrice,
-                                  candidate.baseUnit,
+                        <div className="min-w-[80px] max-w-[142px] shrink-0 text-right sm:min-w-[88px] sm:max-w-[150px]">
+                          {clubPrice ? (
+                            <>
+                              {appActivationRequired && (
+                                <p className="mb-0.5 text-[8px] font-bold uppercase leading-tight text-amber-500">
+                                  * ativar desconto APP
+                                </p>
+                              )}
+                              <p className="text-lg font-extrabold leading-tight text-primary sm:text-xl">
+                                {prioritizeUnitPrice
+                                  ? formatNormalizedPrice(
+                                      candidate.normalizedPrice,
+                                      candidate.baseUnit,
+                                    )
+                                  : brl(candidate.price)}
+                              </p>
+                              {prioritizeUnitPrice ? (
+                                showEffectivePackageTotal && (
+                                  <p className="mt-0.5 text-[10px] font-semibold text-primary/85">
+                                    Embalagem {brl(candidate.price)}
+                                  </p>
                                 )
-                              : brl(candidate.price)}
-                          </p>
-                          {prioritizeUnitPrice ? (
-                            showEffectivePackageTotal && (
-                              <p className="mt-0.5 text-[10px] font-semibold text-primary/85">
-                                Embalagem {brl(candidate.price)}
-                              </p>
-                            )
-                          ) : (
-                            candidate.baseUnit !== "un" && (
-                              <p className="mt-0.5 text-[10px] font-semibold text-primary">
-                                {formatNormalizedPrice(
-                                  candidate.normalizedPrice,
-                                  candidate.baseUnit,
-                                )}
-                              </p>
-                            )
-                          )}
-                          <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground/80">
-                            {prioritizeUnitPrice &&
-                            regularNormalized.baseUnit === "kg" ? (
-                              <>
-                                Normal{" "}
-                                {formatNormalizedPrice(
-                                  regularNormalized.normalizedPrice,
-                                  regularNormalized.baseUnit,
-                                )}
-                                {showRegularPackageTotal
-                                  ? " · embalagem " + brl(regularPrice)
-                                  : ""}
-                              </>
-                            ) : (
-                              <>
-                                Normal {brl(regularPrice)}
-                                {regularNormalized.baseUnit !== "un"
-                                  ? " · " +
-                                    formatNormalizedPrice(
+                              ) : (
+                                candidate.baseUnit !== "un" && (
+                                  <p className="mt-0.5 text-[10px] font-semibold text-primary">
+                                    {formatNormalizedPrice(
+                                      candidate.normalizedPrice,
+                                      candidate.baseUnit,
+                                    )}
+                                  </p>
+                                )
+                              )}
+                              <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground/80">
+                                {prioritizeUnitPrice &&
+                                regularNormalized.baseUnit === "kg" ? (
+                                  <>
+                                    Normal{" "}
+                                    {formatNormalizedPrice(
                                       regularNormalized.normalizedPrice,
                                       regularNormalized.baseUnit,
-                                    )
-                                  : ""}
-                              </>
-                            )}
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <p className="text-lg font-extrabold leading-tight sm:text-xl">
-                            {prioritizeUnitPrice
-                              ? formatNormalizedPrice(
-                                  candidate.normalizedPrice,
-                                  candidate.baseUnit,
-                                )
-                              : brl(candidate.price)}
-                          </p>
-                          {prioritizeUnitPrice ? (
-                            showEffectivePackageTotal && (
-                              <p className="mt-0.5 text-[10px] text-muted-foreground">
-                                Embalagem {brl(candidate.price)}
-                              </p>
-                            )
-                          ) : (
-                            candidate.baseUnit !== "un" && (
-                              <p className="mt-0.5 text-[10px] text-muted-foreground">
-                                {formatNormalizedPrice(
-                                  candidate.normalizedPrice,
-                                  candidate.baseUnit,
+                                    )}
+                                    {showRegularPackageTotal
+                                      ? " · embalagem " + brl(regularPrice)
+                                      : ""}
+                                  </>
+                                ) : (
+                                  <>
+                                    Normal {brl(regularPrice)}
+                                    {regularNormalized.baseUnit !== "un"
+                                      ? " · " +
+                                        formatNormalizedPrice(
+                                          regularNormalized.normalizedPrice,
+                                          regularNormalized.baseUnit,
+                                        )
+                                      : ""}
+                                  </>
                                 )}
                               </p>
-                            )
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-lg font-extrabold leading-tight sm:text-xl">
+                                {prioritizeUnitPrice
+                                  ? formatNormalizedPrice(
+                                      candidate.normalizedPrice,
+                                      candidate.baseUnit,
+                                    )
+                                  : brl(candidate.price)}
+                              </p>
+                              {prioritizeUnitPrice ? (
+                                showEffectivePackageTotal && (
+                                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                    Embalagem {brl(candidate.price)}
+                                  </p>
+                                )
+                              ) : (
+                                candidate.baseUnit !== "un" && (
+                                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                    {formatNormalizedPrice(
+                                      candidate.normalizedPrice,
+                                      candidate.baseUnit,
+                                    )}
+                                  </p>
+                                )
+                              )}
+                            </>
                           )}
-                        </>
-                      )}
 
-                      {(verdict.deltaPct !== null ||
-                        verdict.referencePrice ||
-                        productId) && (
-                        <div className="mt-1 flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 text-[9px] leading-tight">
-                          {verdict.deltaPct !== null && (
-                            <span
-                              className={`font-extrabold ${
-                                verdict.deltaPct < 0
-                                  ? "text-green-500"
-                                  : verdict.deltaPct > 0
-                                    ? "text-red-500"
-                                    : "text-muted-foreground"
-                              }`}
-                            >
-                              {verdict.deltaPct < 0
-                                ? `↓${Math.abs(verdict.deltaPct).toFixed(0)}%`
-                                : verdict.deltaPct > 0
-                                  ? `↑${Math.abs(verdict.deltaPct).toFixed(0)}%`
-                                  : "0%"}
-                            </span>
-                          )}
+                          {(verdict.deltaPct !== null ||
+                            verdict.referencePrice ||
+                            productId) && (
+                            <div className="mt-1 flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 text-[9px] leading-tight">
+                              {verdict.deltaPct !== null && (
+                                <span
+                                  className={`font-extrabold ${
+                                    verdict.deltaPct < 0
+                                      ? "text-green-500"
+                                      : verdict.deltaPct > 0
+                                        ? "text-red-500"
+                                        : "text-muted-foreground"
+                                  }`}
+                                >
+                                  {verdict.deltaPct < 0
+                                    ? `↓${Math.abs(verdict.deltaPct).toFixed(0)}%`
+                                    : verdict.deltaPct > 0
+                                      ? `↑${Math.abs(verdict.deltaPct).toFixed(0)}%`
+                                      : "0%"}
+                                </span>
+                              )}
 
-                          {verdict.referencePrice &&
-                            (productId ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  navigate(`/product/${productId}`)
-                                }
-                                className="inline-flex items-center gap-0.5 font-semibold text-muted-foreground transition-colors hover:text-primary"
-                                aria-label="Ver histórico do produto"
-                              >
-                                {verdict.purchaseCount > 0 ? "Pago " : "Ref. "}
-                                {referenceLabel}
-                                <ChevronRight className="h-3 w-3" />
-                              </button>
-                            ) : (
-                              <span className="font-semibold text-muted-foreground">
-                                {verdict.purchaseCount > 0 ? "Pago " : "Ref. "}
-                                {referenceLabel}
-                              </span>
-                            ))}
+                              {verdict.referencePrice &&
+                                (productId ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      navigate(`/product/${productId}`)
+                                    }
+                                    className="inline-flex items-center gap-0.5 font-semibold text-muted-foreground transition-colors hover:text-primary"
+                                    aria-label="Ver histórico do produto"
+                                  >
+                                    {verdict.purchaseCount > 0 ? "Pago " : "Ref. "}
+                                    {referenceLabel}
+                                    <ChevronRight className="h-3 w-3" />
+                                  </button>
+                                ) : (
+                                  <span className="font-semibold text-muted-foreground">
+                                    {verdict.purchaseCount > 0 ? "Pago " : "Ref. "}
+                                    {referenceLabel}
+                                  </span>
+                                ))}
 
-                          {!verdict.referencePrice && productId && (
-                            <button
-                              type="button"
-                              onClick={() => navigate(`/product/${productId}`)}
-                              className="inline-flex items-center gap-0.5 font-semibold text-muted-foreground transition-colors hover:text-primary"
-                            >
-                              Histórico
-                              <ChevronRight className="h-3 w-3" />
-                            </button>
+                              {!verdict.referencePrice && productId && (
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/product/${productId}`)}
+                                  className="inline-flex items-center gap-0.5 font-semibold text-muted-foreground transition-colors hover:text-primary"
+                                >
+                                  Histórico
+                                  <ChevronRight className="h-3 w-3" />
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
-                      )}
+                      </div>
                     </div>
-                  </div>
                 </CardContent>
               </Card>
             );
