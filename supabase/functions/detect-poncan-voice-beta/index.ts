@@ -13,7 +13,8 @@ const MODELS = [
   "gemini-3.1-flash-lite",
 ] as const;
 
-const MODEL_TIMEOUT_MS = 2600;
+const PRIMARY_MODEL_TIMEOUT_MS = 2800;
+const SECONDARY_MODEL_TIMEOUT_MS = 4200;
 
 const PONCAN_ALIASES = new Set([
   "ponca",
@@ -72,12 +73,13 @@ function createAttempt(
   apiKey: string,
   mimeType: string,
   audioBase64: string,
+  timeoutMs: number,
 ) {
   const controller = new AbortController();
 
   const promise = (async () => {
     const startedAt = performance.now();
-    const timeout = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(
@@ -186,8 +188,14 @@ Deno.serve(async (req: Request) => {
       new Uint8Array(await file.arrayBuffer()),
     );
 
-    const attempts = MODELS.map((model) =>
-      createAttempt(model, apiKey, mimeType, audioBase64)
+    const attempts = MODELS.map((model, index) =>
+      createAttempt(
+        model,
+        apiKey,
+        mimeType,
+        audioBase64,
+        index === 0 ? PRIMARY_MODEL_TIMEOUT_MS : SECONDARY_MODEL_TIMEOUT_MS,
+      )
     );
 
     type AttemptResult = {
