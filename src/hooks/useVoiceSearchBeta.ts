@@ -55,9 +55,10 @@ type SpeechWindow = Window & {
   SpeechRecognitionPhrase?: SpeechRecognitionPhraseConstructor;
 };
 
-const SILENCE_COMMIT_MS = 900;
-const SPEECH_END_STOP_MS = 250;
-const MAX_LISTENING_MS = 6000;
+const SILENCE_COMMIT_MS = 500;
+const SHORT_TERM_COMMIT_MS = 650;
+const SPEECH_END_STOP_MS = 180;
+const MAX_LISTENING_MS = 4500;
 const PONCAN_FALLBACK_RECORDING_MS = 1500;
 
 const PONCAN_CONTEXT_PHRASES = [
@@ -100,6 +101,7 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
   const words = key.split(/[\s-]+/).filter(Boolean);
 
   if (key === "sau") return "sal";
+  if (key === "sao refinado") return "sal refinado";
 
   // Android/Chrome often recognizes the difficult short term when the user
   // supplies a harmless second word ("poncan fruta") or repeats it
@@ -504,7 +506,14 @@ export function useVoiceSearchBeta() {
         );
       };
 
-      const scheduleSilenceCommit = () => {
+      const commitDelayFor = (transcript: string) => {
+        const wordCount = transcript.trim().split(/\\s+/).filter(Boolean).length;
+        // A short single word gets a little more time to become e.g.
+        // "pão francês" / "sal refinado"; longer phrases can commit sooner.
+        return wordCount <= 1 ? SHORT_TERM_COMMIT_MS : SILENCE_COMMIT_MS;
+      };
+
+      const scheduleSilenceCommit = (transcript: string) => {
         if (silenceTimerRef.current !== null) {
           window.clearTimeout(silenceTimerRef.current);
         }
@@ -512,7 +521,7 @@ export function useVoiceSearchBeta() {
         silenceTimerRef.current = window.setTimeout(() => {
           deliverPending();
           recognition.stop();
-        }, SILENCE_COMMIT_MS);
+        }, commitDelayFor(transcript));
       };
 
       recognition.onstart = () => {
@@ -574,7 +583,7 @@ export function useVoiceSearchBeta() {
           return;
         }
 
-        scheduleSilenceCommit();
+        scheduleSilenceCommit(transcript);
       };
 
       recognition.onerror = (event) => {
@@ -606,9 +615,12 @@ export function useVoiceSearchBeta() {
       recognition.onend = () => {
         clearTimers();
 
+        // If onresult already produced usable text, deliverPending marks this
+        // session before onend can classify it as an empty recognition.
+        const hadPendingText = Boolean(pendingTranscriptRef.current.trim());
         const delivered = deliverPending();
 
-        if (!delivered && speechStartedRef.current) {
+        if (!delivered && !hadPendingText && !deliveredRef.current && speechStartedRef.current) {
           logNativeVoiceBeta({
             event: "end_no_text",
             session_id: nativeSessionId,
