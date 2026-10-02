@@ -59,7 +59,6 @@ const SILENCE_COMMIT_MS = 500;
 const SHORT_TERM_COMMIT_MS = 650;
 const SPEECH_END_STOP_MS = 180;
 const MAX_LISTENING_MS = 4500;
-const PONCAN_FALLBACK_RECORDING_MS = 1100;
 
 const PONCAN_CONTEXT_PHRASES = [
   "poncã",
@@ -134,27 +133,6 @@ function getSpeechRecognitionConstructor() {
   );
 }
 
-function canRecordAudio() {
-  return (
-    typeof window !== "undefined" &&
-    typeof MediaRecorder !== "undefined" &&
-    !!navigator.mediaDevices?.getUserMedia
-  );
-}
-
-function preferredAudioMimeType() {
-  if (typeof MediaRecorder === "undefined") return "";
-
-  const candidates = [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/mp4",
-    "audio/ogg;codecs=opus",
-  ];
-
-  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? "";
-}
-
 type NativeVoiceTelemetry = {
   event: "start" | "result" | "error" | "end_no_text";
   session_id: string;
@@ -202,21 +180,13 @@ function voiceErrorMessage(error?: string) {
 
 export function useVoiceSearchBeta() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const silenceTimerRef = useRef<number | null>(null);
-  const maxTimerRef = useRef<number | null>(null);
-  const recordingTimerRef = useRef<number | null>(null);
   const pendingTranscriptRef = useRef("");
   const deliveredRef = useRef(false);
   const speechStartedRef = useRef(false);
-  const poncanFallbackArmedRef = useRef(false);
 
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastTimingMs, setLastTimingMs] = useState<number | null>(null);
-  const [poncanFallbackArmed, setPoncanFallbackArmed] = useState(false);
 
   const isSupported = getSpeechRecognitionConstructor() !== null;
 
@@ -231,182 +201,7 @@ export function useVoiceSearchBeta() {
       maxTimerRef.current = null;
     }
 
-    if (recordingTimerRef.current !== null) {
-      window.clearTimeout(recordingTimerRef.current);
-      recordingTimerRef.current = null;
-    }
   }, []);
-
-  const releaseStream = useCallback(() => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-  }, []);
-
-  const setFallbackArmed = useCallback((armed: boolean) => {
-    poncanFallbackArmedRef.current = armed;
-    setPoncanFallbackArmed(armed);
-  }, []);
-
-  const stopListening = useCallback(() => {
-    clearTimers();
-
-    const recorder = recorderRef.current;
-    if (recorder && recorder.state !== "inactive") {
-      recorder.stop();
-      return;
-    }
-
-    recognitionRef.current?.stop();
-  }, [clearTimers]);
-
-  const startPoncanFallback = useCallback(
-    (onTranscript: (transcript: string) => void) => {
-      if (!canRecordAudio()) {
-        setFallbackArmed(false);
-        setError("O modo especial de poncã não está disponível neste navegador.");
-        return false;
-      }
-
-      clearTimers();
-      recognitionRef.current?.abort();
-      recognitionRef.current = null;
-      setFallbackArmed(false);
-      setError(null);
-      setLastTimingMs(null);
-      chunksRef.current = [];
-
-      const startedAt = performance.now();
-      const sessionPromise = supabase.auth.getSession();
-
-      void navigator.mediaDevices
-        .getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        })
-        .then((stream) => {
-          streamRef.current = stream;
-
-          const mimeType = preferredAudioMimeType();
-          const recorder = mimeType
-            ? new MediaRecorder(stream, { mimeType })
-            : new MediaRecorder(stream);
-
-          recorderRef.current = recorder;
-
-          recorder.ondataavailable = (event) => {
-            if (event.data.size > 0) chunksRef.current.push(event.data);
-          };
-
-          recorder.onerror = () => {
-            clearTimers();
-            recorderRef.current = null;
-            releaseStream();
-            setIsListening(false);
-            setError("Não foi possível gravar a tentativa de poncã.");
-          };
-
-          recorder.onstop = async () => {
-            clearTimers();
-            recorderRef.current = null;
-            setIsListening(false);
-
-            const chunks = chunksRef.current;
-            chunksRef.current = [];
-
-            const recordedType =
-              recorder.mimeType || chunks[0]?.type || "audio/webm";
-            const blob = new Blob(chunks, { type: recordedType });
-            releaseStream();
-
-            if (!blob.size) {
-              setError("Não consegui ouvir a tentativa de poncã.");
-              return;
-            }
-
-            try {
-              const {
-                data: { session },
-              } = await sessionPromise;
-
-              if (!session?.access_token) {
-                setError("Sua sessão expirou. Entre novamente para usar a busca por voz.");
-                return;
-              }
-
-              const extension = recordedType.includes("mp4")
-                ? "m4a"
-                : recordedType.includes("ogg")
-                  ? "ogg"
-                  : "webm";
-
-              const form = new FormData();
-              form.append(
-                "file",
-                new File([blob], `poncan-beta.${extension}`, {
-                  type: recordedType,
-                }),
-              );
-
-              const response = await fetch(
-                `${SUPABASE_URL}/functions/v1/detect-poncan-voice-beta`,
-                {
-                  method: "POST",
-                  headers: {
-                    Authorization: `Bearer ${session.access_token}`,
-                    apikey: SUPABASE_PUBLISHABLE_KEY,
-                  },
-                  body: form,
-                },
-              );
-
-              const data = await response.json().catch(() => ({}));
-
-              if (!response.ok) {
-                throw new Error(
-                  String(data?.error ?? `Falha no modo poncã (${response.status})`),
-                );
-              }
-
-              setLastTimingMs(Math.round(performance.now() - startedAt));
-
-              if (data?.is_poncan === true) {
-                setError(null);
-                onTranscript("poncan");
-                return;
-              }
-
-              setError(
-                "Não confirmei poncã nessa tentativa. O próximo toque volta ao reconhecimento normal.",
-              );
-            } catch (fallbackError) {
-              console.error("Poncan beta fallback failed", fallbackError);
-              setError(
-                "O modo especial de poncã falhou. O próximo toque volta ao reconhecimento normal.",
-              );
-            }
-          };
-
-          recorder.start(100);
-          setIsListening(true);
-
-          recordingTimerRef.current = window.setTimeout(() => {
-            if (recorder.state !== "inactive") recorder.stop();
-          }, PONCAN_FALLBACK_RECORDING_MS);
-        })
-        .catch((captureError) => {
-          console.error("Poncan beta microphone capture failed", captureError);
-          releaseStream();
-          setIsListening(false);
-          setError("Não foi possível acessar o microfone para a tentativa de poncã.");
-        });
-
-      return true;
-    },
-    [clearTimers, releaseStream, setFallbackArmed],
-  );
 
   const startNativeRecognition = useCallback(
     (onTranscript: (transcript: string) => void) => {
@@ -423,7 +218,6 @@ export function useVoiceSearchBeta() {
       pendingTranscriptRef.current = "";
       deliveredRef.current = false;
       speechStartedRef.current = false;
-      setFallbackArmed(false);
       setError(null);
       setLastTimingMs(null);
 
@@ -490,20 +284,15 @@ export function useVoiceSearchBeta() {
         if (!transcript || deliveredRef.current) return false;
 
         deliveredRef.current = true;
-        setFallbackArmed(false);
         setError(null);
         setLastTimingMs(Math.round(performance.now() - startedAt));
         onTranscript(transcript);
         return true;
       };
 
-      const armPoncanFallback = () => {
+      const reportNoText = () => {
         if (deliveredRef.current) return;
-
-        setFallbackArmed(true);
-        setError(
-          "O reconhecimento nativo não gerou texto. Toque novamente e fale “poncã” normalmente.",
-        );
+        setError("Não consegui reconhecer o produto. Toque novamente e tente outra vez.");
       };
 
       const commitDelayFor = (transcript: string) => {
@@ -531,7 +320,7 @@ export function useVoiceSearchBeta() {
         maxTimerRef.current = window.setTimeout(() => {
           const delivered = deliverPending();
           if (!delivered) {
-            armPoncanFallback();
+            reportNoText();
           }
           recognition.stop();
         }, MAX_LISTENING_MS);
@@ -603,7 +392,7 @@ export function useVoiceSearchBeta() {
 
         if (!delivered && event.error !== "aborted") {
           if (event.error === "no-speech" || speechStartedRef.current) {
-            armPoncanFallback();
+            reportNoText();
           } else {
             setError(voiceErrorMessage(event.error));
           }
@@ -628,7 +417,7 @@ export function useVoiceSearchBeta() {
             elapsed_ms: Math.round(performance.now() - startedAt),
             phrase_bias_supported: phraseBiasSupported,
           });
-          armPoncanFallback();
+          reportNoText();
         }
 
         if (recognitionRef.current === recognition) {
@@ -648,18 +437,13 @@ export function useVoiceSearchBeta() {
         return false;
       }
     },
-    [clearTimers, setFallbackArmed],
+    [clearTimers],
   );
 
   const startListening = useCallback(
-    (onTranscript: (transcript: string) => void) => {
-      if (poncanFallbackArmedRef.current) {
-        return startPoncanFallback(onTranscript);
-      }
-
-      return startNativeRecognition(onTranscript);
-    },
-    [startNativeRecognition, startPoncanFallback],
+    (onTranscript: (transcript: string) => void) =>
+      startNativeRecognition(onTranscript),
+    [startNativeRecognition],
   );
 
   useEffect(() => {
@@ -669,25 +453,18 @@ export function useVoiceSearchBeta() {
       recognitionRef.current?.abort();
       recognitionRef.current = null;
 
-      const recorder = recorderRef.current;
-      if (recorder && recorder.state !== "inactive") recorder.stop();
-      recorderRef.current = null;
-
-      releaseStream();
     };
-  }, [clearTimers, releaseStream]);
+  }, [clearTimers]);
 
   const clearError = useCallback(() => {
     setError(null);
-    setFallbackArmed(false);
-  }, [setFallbackArmed]);
+  }, []);
 
   return {
     isSupported,
     isListening,
     error,
     lastTimingMs,
-    poncanFallbackArmed,
     clearError,
     startListening,
     stopListening,
