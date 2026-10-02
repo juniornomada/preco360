@@ -180,6 +180,8 @@ function voiceErrorMessage(error?: string) {
 
 export function useVoiceSearchBeta() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const silenceTimerRef = useRef<number | null>(null);
+  const maxTimerRef = useRef<number | null>(null);
   const pendingTranscriptRef = useRef("");
   const deliveredRef = useRef(false);
   const speechStartedRef = useRef(false);
