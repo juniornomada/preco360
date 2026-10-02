@@ -203,6 +203,11 @@ export function useVoiceSearchBeta() {
 
   }, []);
 
+  const stopListening = useCallback(() => {
+    clearTimers();
+    recognitionRef.current?.stop();
+  }, [clearTimers]);
+
   const startNativeRecognition = useCallback(
     (onTranscript: (transcript: string) => void) => {
       const Recognition = getSpeechRecognitionConstructor();
