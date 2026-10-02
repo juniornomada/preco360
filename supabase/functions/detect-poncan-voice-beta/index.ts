@@ -100,9 +100,10 @@ function createAttempt(
                 parts: [
                   {
                     text:
-                      "Transcreva literalmente esta fala curta em português do Brasil. " +
-                      "Responda somente com a palavra ou expressão falada, sem explicações, sem JSON e sem pontuação. " +
-                      "Não corrija e não complete a fala.",
+                      "Esta é uma verificação fonética binária de uma fala curta em português do Brasil. " +
+                      "Decida se a pessoa pronunciou a fruta poncã/poncan (incluindo pronúncias naturais muito próximas, mesmo que uma transcrição genérica pudesse soar como pocã, pocan, pokan, poncam ou ponto). " +
+                      "Não presuma poncã apenas porque o áudio é curto: se a fala for claramente outra palavra ou estiver insuficiente para decidir, responda NAO. " +
+                      "Responda exclusivamente PONCAN ou NAO, sem explicações e sem pontuação.",
                   },
                   {
                     inlineData: {
@@ -115,7 +116,7 @@ function createAttempt(
             ],
             generationConfig: {
               temperature: 0,
-              maxOutputTokens: 12,
+              maxOutputTokens: 4,
               thinkingConfig: {
                 thinkingLevel: "minimal",
               },
@@ -138,10 +139,16 @@ function createAttempt(
         throw new Error(`${model}:EMPTY:${elapsedMs}`);
       }
 
+      const isPoncan = key === "poncan";
+      const isNegative = key === "nao";
+      if (!isPoncan && !isNegative) {
+        throw new Error(`${model}:INVALID_DECISION:${elapsedMs}`);
+      }
+
       return {
         raw,
         key,
-        isPoncan: PONCAN_ALIASES.has(key),
+        isPoncan,
         model,
         model_ms: elapsedMs,
       };
