@@ -60,6 +60,7 @@ const SHORT_TERM_COMMIT_MS = 650;
 const SPEECH_END_STOP_MS = 180;
 const EMPTY_SPEECH_END_GRACE_MS = 900;
 const MAX_LISTENING_MS = 4500;
+const GROQ_CAPTURE_MS = 3200;
 
 const PONCAN_CONTEXT_PHRASES = [
   "poncã",
@@ -181,6 +182,8 @@ function voiceErrorMessage(error?: string) {
 
 export function useVoiceSearchBeta() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const silenceTimerRef = useRef<number | null>(null);
   const maxTimerRef = useRef<number | null>(null);
   const pendingTranscriptRef = useRef("");
@@ -191,7 +194,9 @@ export function useVoiceSearchBeta() {
   const [error, setError] = useState<string | null>(null);
   const [lastTimingMs, setLastTimingMs] = useState<number | null>(null);
 
-  const isSupported = getSpeechRecognitionConstructor() !== null;
+  const isSupported =
+    getSpeechRecognitionConstructor() !== null ||
+    (typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia) && typeof MediaRecorder !== "undefined");
 
   const clearTimers = useCallback(() => {
     if (silenceTimerRef.current !== null) {
@@ -209,7 +214,102 @@ export function useVoiceSearchBeta() {
   const stopListening = useCallback(() => {
     clearTimers();
     recognitionRef.current?.stop();
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
   }, [clearTimers]);
+
+  const startGroqCapture = useCallback(
+    async (onTranscript: (transcript: string) => void) => {
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") return false;
+
+      setError(null);
+      setLastTimingMs(null);
+      const startedAt = performance.now();
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm";
+        const recorder = new MediaRecorder(stream, { mimeType });
+        recorderRef.current = recorder;
+        const chunks: BlobPart[] = [];
+
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) chunks.push(event.data);
+        };
+
+        recorder.onerror = () => {
+          setError("Não foi possível gravar o áudio. Tente novamente.");
+          setIsListening(false);
+          stream.getTracks().forEach((track) => track.stop());
+        };
+
+        recorder.onstop = async () => {
+          setIsListening(false);
+          stream.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+          recorderRef.current = null;
+
+          const blob = new Blob(chunks, { type: mimeType });
+          if (!blob.size) {
+            setError("Não consegui capturar o áudio. Tente novamente.");
+            return;
+          }
+
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.access_token) {
+              setError("Sua sessão expirou. Entre novamente para usar a busca por voz.");
+              return;
+            }
+
+            const form = new FormData();
+            form.append("file", blob, "voice-search.webm");
+            const response = await fetch(
+              `${SUPABASE_URL}/functions/v1/transcribe-beta-voice-groq`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${session.access_token}`,
+                  apikey: SUPABASE_PUBLISHABLE_KEY,
+                },
+                body: form,
+              },
+            );
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload?.error ?? "TRANSCRIPTION_FAILED");
+
+            const transcript = normalizeVoiceSearchBetaTranscript(String(payload?.transcript ?? ""));
+            if (!transcript) {
+              setError("Não consegui reconhecer o produto. Toque novamente e tente outra vez.");
+              return;
+            }
+
+            setLastTimingMs(Math.round(performance.now() - startedAt));
+            onTranscript(transcript);
+          } catch (captureError) {
+            console.error("Beta Groq transcription error", captureError);
+            setError("Não consegui reconhecer o produto. Tente novamente.");
+          }
+        };
+
+        recorder.start();
+        setIsListening(true);
+        window.setTimeout(() => {
+          if (recorder.state === "recording") recorder.stop();
+        }, GROQ_CAPTURE_MS);
+        return true;
+      } catch (captureError) {
+        console.debug("Groq beta capture unavailable", captureError);
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        recorderRef.current = null;
+        return false;
+      }
+    },
+    [],
+  );
 
   const startNativeRecognition = useCallback(
     (onTranscript: (transcript: string) => void) => {
@@ -465,9 +565,16 @@ export function useVoiceSearchBeta() {
   );
 
   const startListening = useCallback(
-    (onTranscript: (transcript: string) => void) =>
-      startNativeRecognition(onTranscript),
-    [startNativeRecognition],
+    (onTranscript: (transcript: string) => void) => {
+      if (navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined") {
+        void startGroqCapture(onTranscript).then((started) => {
+          if (!started) startNativeRecognition(onTranscript);
+        });
+        return true;
+      }
+      return startNativeRecognition(onTranscript);
+    },
+    [startGroqCapture, startNativeRecognition],
   );
 
   useEffect(() => {
@@ -476,6 +583,10 @@ export function useVoiceSearchBeta() {
 
       recognitionRef.current?.abort();
       recognitionRef.current = null;
+      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      recorderRef.current = null;
+      streamRef.current = null;
 
     };
   }, [clearTimers]);
