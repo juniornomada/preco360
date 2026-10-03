@@ -86,7 +86,7 @@ export default function ProfilePage() {
   const { data: retailerMap = [] } = useQuery<any[]>({
     queryKey: ["profile-retailer-city-map-v1", selectedCityId],
     queryFn: async () => {
-      const { data, error } = await db.from("retailer_city_availability").select("retailer,status,source_count,notes").eq("city_id", selectedCityId).order("retailer");
+      const { data, error } = await db.from("retailer_city_availability").select("retailer,status,source_count,notes,discovery_source").eq("city_id", selectedCityId).eq("discovery_source", "tiendeo").order("retailer");
       if (error) throw error;
       return data ?? [];
     },
