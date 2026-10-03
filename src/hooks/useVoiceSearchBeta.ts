@@ -108,6 +108,7 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
   // similar phrases. Keep this correction intentionally narrow so a genuine
   // search for "colchão" by itself is not rewritten.
   if (key === "colchao duro" || key === "cochao duro" || key === "poxao duro") return "coxão duro";
+  if (key === "colchao mole" || key === "cochao mole" || key === "poxao mole") return "coxão mole";
 
   // Android/Chrome often recognizes the difficult short term when the user
   // supplies a harmless second word ("poncan fruta") or repeats it
