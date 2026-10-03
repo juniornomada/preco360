@@ -113,6 +113,7 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     ["entrecô", "Entrecot"],
     ["entreco", "Entrecot"],
     ["novax", "Noix"],
+    ["noax", "Noix"],
   ]);
 
   const knownCorrection = knownAsrCorrections.get(key);
