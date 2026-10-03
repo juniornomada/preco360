@@ -115,95 +115,183 @@ async function fetchJsonWithTimeout(
   }
 }
 
+const brazilStateNames: Record<string, string> = {
+  AC: "Acre",
+  AL: "Alagoas",
+  AP: "Amapá",
+  AM: "Amazonas",
+  BA: "Bahia",
+  CE: "Ceará",
+  DF: "Distrito Federal",
+  ES: "Espírito Santo",
+  GO: "Goiás",
+  MA: "Maranhão",
+  MT: "Mato Grosso",
+  MS: "Mato Grosso do Sul",
+  MG: "Minas Gerais",
+  PA: "Pará",
+  PB: "Paraíba",
+  PR: "Paraná",
+  PE: "Pernambuco",
+  PI: "Piauí",
+  RJ: "Rio de Janeiro",
+  RN: "Rio Grande do Norte",
+  RS: "Rio Grande do Sul",
+  RO: "Rondônia",
+  RR: "Roraima",
+  SC: "Santa Catarina",
+  SP: "São Paulo",
+  SE: "Sergipe",
+  TO: "Tocantins",
+};
+
 async function cityCenter(city: any) {
-  const query = encodeURIComponent(`${city.name}, ${city.state}, Brasil`);
+  const query = encodeURIComponent(String(city?.name ?? ""));
+  const url =
+    `https://geocoding-api.open-meteo.com/v1/search?name=${query}&count=10&language=pt&format=json&countryCode=BR`;
+
   const payload = await fetchJsonWithTimeout(
-    `https://nominatim.openstreetmap.org/search?q=${query}&format=jsonv2&limit=1&countrycodes=br`,
+    url,
     {
       headers: {
         accept: "application/json",
-        "user-agent": "Preco360/1.0 retailer-discovery",
       },
     },
     3500,
   );
 
-  const first = Array.isArray(payload) ? payload[0] : null;
-  const lat = Number(first?.lat);
-  const lon = Number(first?.lon);
+  const results = Array.isArray(payload?.results) ? payload.results : [];
+  const expectedState = normalize(brazilStateNames[String(city?.state ?? "").toUpperCase()] ?? "");
+  const expectedCity = normalize(city?.name);
+
+  const match =
+    results.find((row: any) =>
+      normalize(row?.name) === expectedCity &&
+      (!expectedState || normalize(row?.admin1) === expectedState)
+    ) ??
+    results.find((row: any) => normalize(row?.name) === expectedCity) ??
+    results[0];
+
+  const lat = Number(match?.latitude);
+  const lon = Number(match?.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     throw new Error("CITY_CENTER_NOT_FOUND");
   }
-  return { lat, lon };
+
+  return {
+    lat,
+    lon,
+    population: Number(match?.population) || null,
+  };
 }
 
-async function openStreetMapSearch(city: any) {
-  try {
-    const { lat, lon } = await cityCenter(city);
-    const population = Number(city?.population ?? 0);
-    const radius =
-      population > 1_500_000 ? 35000 :
-      population > 700_000 ? 28000 :
-      population > 300_000 ? 22000 :
-      population > 100_000 ? 17000 :
-      12000;
+function osmElementsToPlaces(elements: any[]) {
+  return elements
+    .map((element: any) => {
+      const tags = element?.tags ?? {};
+      const displayName = String(tags.brand ?? tags.name ?? "").trim();
+      if (!displayName) return null;
 
-    const overpassQuery = `
+      return {
+        id: `osm:${element.type}:${element.id}`,
+        displayName: { text: displayName },
+        formattedAddress: String(tags["addr:street"] ?? ""),
+        types: [tags.shop === "wholesale" ? "wholesaler" : "supermarket"],
+        businessStatus: "OPERATIONAL",
+        _rankScore: 1,
+      };
+    })
+    .filter(Boolean);
+}
+
+async function runOverpass(query: string) {
+  const endpoints = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+  ];
+
+  const attempts = endpoints.map(async (endpoint) => {
+    const payload = await fetchJsonWithTimeout(
+      endpoint,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+          "user-agent": "Preco360/1.0 retailer-discovery",
+        },
+        body: "data=" + encodeURIComponent(query),
+      },
+      7000,
+    );
+
+    const elements = Array.isArray(payload?.elements) ? payload.elements : [];
+    const places = osmElementsToPlaces(elements);
+    if (!places.length) throw new Error("NO_OSM_RESULTS");
+    return places;
+  });
+
+  return await Promise.any(attempts);
+}
+
+async function openStreetMapAreaSearch(city: any) {
+  const ibgeCode = String(city?.ibge_code ?? "").trim();
+  if (!/^\d{7}$/.test(ibgeCode)) throw new Error("IBGE_CODE_MISSING");
+
+  const query = `
+[out:json][timeout:7];
+(
+  area["IBGE:GEOCODIGO"="${ibgeCode}"];
+  area["ref:IBGE"="${ibgeCode}"];
+)->.searchArea;
+(
+  nwr["shop"="supermarket"](area.searchArea);
+  nwr["shop"="wholesale"](area.searchArea);
+);
+out center tags 120;
+`.trim();
+
+  return await runOverpass(query);
+}
+
+async function openStreetMapRadiusSearch(city: any) {
+  const center = await cityCenter(city);
+  const { lat, lon } = center;
+  const population = Number(city?.population ?? center.population ?? 0);
+  const radius =
+    population > 1_500_000 ? 35000 :
+    population > 700_000 ? 28000 :
+    population > 300_000 ? 22000 :
+    population > 100_000 ? 17000 :
+    12000;
+
+  const query = `
 [out:json][timeout:7];
 (
   nwr["shop"="supermarket"](around:${radius},${lat},${lon});
   nwr["shop"="wholesale"](around:${radius},${lat},${lon});
 );
-out center tags 100;
+out center tags 120;
 `.trim();
 
-    const endpoints = [
-      "https://overpass-api.de/api/interpreter",
-      "https://overpass.kumi.systems/api/interpreter",
-    ];
+  return await runOverpass(query);
+}
 
-    const attempts = endpoints.map(async (endpoint) => {
-      const payload = await fetchJsonWithTimeout(
-        endpoint,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
-            "user-agent": "Preco360/1.0 retailer-discovery",
-          },
-          body: "data=" + encodeURIComponent(overpassQuery),
-        },
-        7000,
-      );
-
-      const elements = Array.isArray(payload?.elements) ? payload.elements : [];
-      if (!elements.length) throw new Error("NO_OSM_RESULTS");
-
-      return elements
-        .map((element: any, index: number) => {
-          const tags = element?.tags ?? {};
-          const displayName = String(tags.brand ?? tags.name ?? "").trim();
-          if (!displayName) return null;
-          const placeId = `osm:${element.type}:${element.id}`;
-          return {
-            id: placeId,
-            displayName: { text: displayName },
-            formattedAddress: String(tags["addr:street"] ?? ""),
-            types: [tags.shop === "wholesale" ? "wholesaler" : "supermarket"],
-            businessStatus: "OPERATIONAL",
-            _rankScore: 1,
-          };
-        })
-        .filter(Boolean);
-    });
-
-    return await Promise.any(attempts);
+async function openStreetMapSearch(city: any) {
+  try {
+    return await Promise.any([
+      openStreetMapAreaSearch(city),
+      openStreetMapRadiusSearch(city),
+    ]);
   } catch (error) {
-    console.warn("OpenStreetMap retailer discovery failed quickly", error);
+    console.warn("OpenStreetMap retailer discovery failed", {
+      city: city?.name,
+      state: city?.state,
+      ibge_code: city?.ibge_code,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return [];
   }
 }
-
 
 function extractInteractionText(payload: any) {
   if (typeof payload?.output_text === "string" && payload.output_text.trim()) {
@@ -398,23 +486,6 @@ Deno.serve(async (req: Request) => {
     const seenPlaces = new Map<string, any>();
     let discoverySource = "openstreetmap";
 
-    if (!apiKey) {
-      const groundedNames = await geminiGroundedRetailerSearch(city, target);
-      if (groundedNames.length) {
-        groundedNames.forEach((name, index) => {
-          seenPlaces.set(`gemini:${normalize(name)}`, {
-            id: `gemini:${normalize(name)}`,
-            displayName: { text: name },
-            formattedAddress: "",
-            types: ["supermarket"],
-            businessStatus: "OPERATIONAL",
-            _rankScore: Math.max(1, target - index),
-          });
-        });
-        discoverySource = "google_search";
-      }
-    }
-
     if (apiKey && !seenPlaces.size) {
       const queries = [
         `supermercados e atacarejos em ${city.name} ${city.state}, Brasil`,
@@ -453,6 +524,14 @@ Deno.serve(async (req: Request) => {
       }
       discoverySource = "openstreetmap";
     }
+
+    console.log("city_retailer_discovery_result", {
+      city: city.name,
+      state: city.state,
+      target,
+      provider: discoverySource,
+      raw_places: seenPlaces.size,
+    });
 
     if (!seenPlaces.size) {
       return json(200, {
