@@ -71,7 +71,7 @@ export default function ProfilePage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("cities")
-        .select("id,name,state,ibge_code")
+        .select("id,name,state")
         .eq("active", true)
         .ilike("search_name", `${normalizedCitySearch}%`)
         .order("name")
