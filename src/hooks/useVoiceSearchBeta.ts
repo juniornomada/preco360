@@ -61,6 +61,7 @@ const SPEECH_END_STOP_MS = 180;
 const EMPTY_SPEECH_END_GRACE_MS = 900;
 const MAX_LISTENING_MS = 4500;
 const GROQ_CAPTURE_MS = 3200;
+const MIN_GROQ_AUDIO_BYTES = 4_000;
 
 const PONCAN_CONTEXT_PHRASES = [
   "poncã",
@@ -101,8 +102,21 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
   const compactKey = key.replace(/[\s-]+/g, "");
   const words = key.split(/[\s-]+/).filter(Boolean);
 
-  if (key === "sau") return "sal";
-  if (key === "sao refinado") return "sal refinado";
+  const knownAsrCorrections = new Map<string, string>([
+    ["sa", "sal"],
+    ["sau", "sal"],
+    ["so", "sal"],
+    ["sao refinado", "sal refinado"],
+    ["a horse", "arroz"],
+    ["pao ca", "poncan"],
+    ["pao can", "poncan"],
+    ["entrecô", "Entrecot"],
+    ["entreco", "Entrecot"],
+    ["novax", "Noix"],
+  ]);
+
+  const knownCorrection = knownAsrCorrections.get(key);
+  if (knownCorrection) return knownCorrection;
 
   // Whisper can confuse the supermarket cut "coxão duro" with acoustically
   // similar phrases. Keep this correction intentionally narrow so a genuine
@@ -195,6 +209,7 @@ export function useVoiceSearchBeta() {
   const pendingTranscriptRef = useRef("");
   const deliveredRef = useRef(false);
   const speechStartedRef = useRef(false);
+  const groqCaptureInFlightRef = useRef(false);
 
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -226,6 +241,10 @@ export function useVoiceSearchBeta() {
   const startGroqCapture = useCallback(
     async (onTranscript: (transcript: string) => void) => {
       if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") return false;
+      // Synchronous guard: React state updates are not immediate, so rapid taps
+      // could otherwise start multiple MediaRecorders before isListening renders.
+      if (groqCaptureInFlightRef.current) return true;
+      groqCaptureInFlightRef.current = true;
 
       setError(null);
       setLastTimingMs(null);
@@ -246,6 +265,7 @@ export function useVoiceSearchBeta() {
         };
 
         recorder.onerror = () => {
+          groqCaptureInFlightRef.current = false;
           setError("Não foi possível gravar o áudio. Tente novamente.");
           setIsListening(false);
           stream.getTracks().forEach((track) => track.stop());
@@ -258,8 +278,9 @@ export function useVoiceSearchBeta() {
           recorderRef.current = null;
 
           const blob = new Blob(chunks, { type: mimeType });
-          if (!blob.size) {
-            setError("Não consegui capturar o áudio. Tente novamente.");
+          if (blob.size < MIN_GROQ_AUDIO_BYTES) {
+            groqCaptureInFlightRef.current = false;
+            setError("Não consegui capturar fala suficiente. Toque novamente e tente outra vez.");
             return;
           }
 
@@ -297,6 +318,8 @@ export function useVoiceSearchBeta() {
           } catch (captureError) {
             console.error("Beta Groq transcription error", captureError);
             setError("Não consegui reconhecer o produto. Tente novamente.");
+          } finally {
+            groqCaptureInFlightRef.current = false;
           }
         };
 
@@ -311,6 +334,7 @@ export function useVoiceSearchBeta() {
         streamRef.current?.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
         recorderRef.current = null;
+        groqCaptureInFlightRef.current = false;
         return false;
       }
     },
@@ -593,6 +617,7 @@ export function useVoiceSearchBeta() {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       recorderRef.current = null;
       streamRef.current = null;
+      groqCaptureInFlightRef.current = false;
 
     };
   }, [clearTimers]);
