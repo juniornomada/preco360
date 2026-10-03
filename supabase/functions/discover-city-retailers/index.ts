@@ -54,6 +54,12 @@ const knownNetworks: Array<[RegExp, string]> = [
   [/\bsavegnago\b/i, "Savegnago"],
   [/\bpao de acucar\b/i, "Pão de Açúcar"],
   [/\bpague menos\b/i, "Supermercados Pague Menos"],
+  [/\bhiga\b/i, "Higa Atacado"],
+  [/\bcoop\b/i, "Coop"],
+  [/\bsao vicente\b/i, "São Vicente"],
+  [/\bbarbosa\b/i, "Barbosa Supermercados"],
+  [/\bbom lugar\b/i, "Bom Lugar Supermercados"],
+  [/\bcomercial esperanca\b|\besperanca\b/i, "Comercial Esperança"],
 ];
 
 function canonicalRetailer(displayName: string, cityName: string) {
@@ -185,7 +191,7 @@ out center tags 100;
             formattedAddress: String(tags["addr:street"] ?? ""),
             types: [tags.shop === "wholesale" ? "wholesaler" : "supermarket"],
             businessStatus: "OPERATIONAL",
-            _rankScore: Math.max(1, 12 - Math.floor(index / 4)),
+            _rankScore: 1,
           };
         })
         .filter(Boolean);
