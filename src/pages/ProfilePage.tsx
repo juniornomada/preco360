@@ -70,12 +70,29 @@ export default function ProfilePage() {
     let cancelled = false;
 
     const ensureBrazilCities = async () => {
-      const { count, error } = await db
-        .from("cities")
-        .select("id", { count: "exact", head: true })
-        .eq("active", true);
+      const [cityCountResult, populationCountResult] = await Promise.all([
+        db
+          .from("cities")
+          .select("id", { count: "exact", head: true })
+          .eq("active", true),
+        db
+          .from("cities")
+          .select("id", { count: "exact", head: true })
+          .eq("active", true)
+          .not("population", "is", null),
+      ]);
 
-      if (cancelled || error || Number(count ?? 0) >= 5000) return;
+      const cityCount = Number(cityCountResult.count ?? 0);
+      const populationCount = Number(populationCountResult.count ?? 0);
+
+      if (
+        cancelled ||
+        cityCountResult.error ||
+        populationCountResult.error ||
+        (cityCount >= 5000 && populationCount >= 5000)
+      ) {
+        return;
+      }
 
       setSyncingCities(true);
       const { error: syncError } = await supabase.functions.invoke("sync-brazil-cities", {
@@ -85,7 +102,10 @@ export default function ProfilePage() {
       if (!cancelled) {
         setSyncingCities(false);
         if (!syncError) {
-          await queryClient.invalidateQueries({ queryKey: ["profile-city-search-v2"] });
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["profile-city-search-v2"] }),
+            queryClient.invalidateQueries({ queryKey: ["profile-city-preference-v1"] }),
+          ]);
         }
         if (syncError) {
           toast({
