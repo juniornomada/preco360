@@ -36,6 +36,9 @@ export default function ProfilePage() {
   const [cityPickerOpen, setCityPickerOpen] = useState(false);
   const [savingCity, setSavingCity] = useState(false);
   const [syncingCities, setSyncingCities] = useState(false);
+  const [searchingRetailers, setSearchingRetailers] = useState(false);
+  const [retailerSearchDone, setRetailerSearchDone] = useState(false);
+  const [retailerSearchMessage, setRetailerSearchMessage] = useState("");
 
   const { data: cityPreference } = useQuery<any>({
     queryKey: ["profile-city-preference-v1", user?.id],
@@ -134,14 +137,37 @@ export default function ProfilePage() {
     let active = true;
 
     const refreshRetailers = async () => {
-      await supabase.functions.invoke("discover-city-retailers", {
+      setSearchingRetailers(true);
+      setRetailerSearchDone(false);
+      setRetailerSearchMessage("");
+
+      const { data, error } = await supabase.functions.invoke("discover-city-retailers", {
         body: { city_id: selectedCityId },
       });
-      if (active) {
-        await queryClient.invalidateQueries({
-          queryKey: ["profile-retailer-city-map-v1", selectedCityId],
-        });
+
+      if (!active) return;
+
+      await queryClient.invalidateQueries({
+        queryKey: ["profile-retailer-city-map-v1", selectedCityId],
+      });
+
+      if (!active) return;
+
+      const found = Array.isArray(data?.networks) ? data.networks.length : 0;
+
+      if (error) {
+        setRetailerSearchMessage("Não foi possível consultar as redes desta cidade agora. Tente novamente mais tarde.");
+      } else if (found === 0) {
+        setRetailerSearchMessage(
+          data?.warning ||
+            "Nenhuma rede principal de supermercado foi encontrada para esta cidade.",
+        );
+      } else {
+        setRetailerSearchMessage("");
       }
+
+      setSearchingRetailers(false);
+      setRetailerSearchDone(true);
     };
 
     void refreshRetailers();
@@ -161,6 +187,9 @@ export default function ProfilePage() {
 
       setSelectedCityId(city.id);
       setSelectedCity(city);
+      setSearchingRetailers(false);
+      setRetailerSearchDone(false);
+      setRetailerSearchMessage("");
       setCitySearch(`${city.name} - ${city.state}`);
       setCityPickerOpen(false);
       toast({
@@ -292,7 +321,18 @@ export default function ProfilePage() {
               <p className="mt-3 text-xs font-semibold">Principais redes em {selectedCity.name} - {selectedCity.state}</p>
               <div className="mt-2 space-y-1">
                 {retailerMap.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Buscando supermercados desta cidade...</p>
+                  searchingRetailers ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Buscando supermercados desta cidade...
+                    </div>
+                  ) : retailerSearchDone ? (
+                    <p className="text-xs text-muted-foreground">
+                      {retailerSearchMessage || "Nenhuma rede principal de supermercado foi encontrada para esta cidade."}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Preparando busca de supermercados...</p>
+                  )
                 ) : retailerMap
                     .slice(0, Number(selectedCity.retailer_target_count ?? 5))
                     .map((entry: any) => (
