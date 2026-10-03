@@ -93,40 +93,87 @@ function relevantPlace(place: any) {
   return types.some((type: string) => allowed.has(type));
 }
 
-async function openStreetMapSearch(city: any) {
-  const ibgeCode = String(city?.ibge_code ?? "").trim();
-  if (!/^\d{7}$/.test(ibgeCode)) return [];
+async function fetchJsonWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
-  const overpassQuery = `
-[out:json][timeout:25];
-area["boundary"="administrative"]["ref:IBGE"="${ibgeCode}"]->.searchArea;
+async function cityCenter(city: any) {
+  const query = encodeURIComponent(`${city.name}, ${city.state}, Brasil`);
+  const payload = await fetchJsonWithTimeout(
+    `https://nominatim.openstreetmap.org/search?q=${query}&format=jsonv2&limit=1&countrycodes=br`,
+    {
+      headers: {
+        accept: "application/json",
+        "user-agent": "Preco360/1.0 retailer-discovery",
+      },
+    },
+    3500,
+  );
+
+  const first = Array.isArray(payload) ? payload[0] : null;
+  const lat = Number(first?.lat);
+  const lon = Number(first?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    throw new Error("CITY_CENTER_NOT_FOUND");
+  }
+  return { lat, lon };
+}
+
+async function openStreetMapSearch(city: any) {
+  try {
+    const { lat, lon } = await cityCenter(city);
+    const population = Number(city?.population ?? 0);
+    const radius =
+      population > 1_500_000 ? 35000 :
+      population > 700_000 ? 28000 :
+      population > 300_000 ? 22000 :
+      population > 100_000 ? 17000 :
+      12000;
+
+    const overpassQuery = `
+[out:json][timeout:7];
 (
-  nwr["shop"="supermarket"](area.searchArea);
-  nwr["shop"="wholesale"](area.searchArea);
+  nwr["shop"="supermarket"](around:${radius},${lat},${lon});
+  nwr["shop"="wholesale"](around:${radius},${lat},${lon});
 );
-out center tags;
+out center tags 100;
 `.trim();
 
-  const endpoints = [
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
-  ];
+    const endpoints = [
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass.kumi.systems/api/interpreter",
+    ];
 
-  for (const endpoint of endpoints) {
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
-          "user-agent": "Preco360/1.0 retailer-discovery",
+    const attempts = endpoints.map(async (endpoint) => {
+      const payload = await fetchJsonWithTimeout(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+            "user-agent": "Preco360/1.0 retailer-discovery",
+          },
+          body: "data=" + encodeURIComponent(overpassQuery),
         },
-        body: "data=" + encodeURIComponent(overpassQuery),
-      });
-      if (!response.ok) continue;
+        7000,
+      );
 
-      const payload = await response.json();
       const elements = Array.isArray(payload?.elements) ? payload.elements : [];
-      const places = elements
+      if (!elements.length) throw new Error("NO_OSM_RESULTS");
+
+      return elements
         .map((element: any, index: number) => {
           const tags = element?.tags ?? {};
           const displayName = String(tags.brand ?? tags.name ?? "").trim();
@@ -138,18 +185,17 @@ out center tags;
             formattedAddress: String(tags["addr:street"] ?? ""),
             types: [tags.shop === "wholesale" ? "wholesaler" : "supermarket"],
             businessStatus: "OPERATIONAL",
-            _rankScore: Math.max(1, 10 - Math.floor(index / 3)),
+            _rankScore: Math.max(1, 12 - Math.floor(index / 4)),
           };
         })
         .filter(Boolean);
+    });
 
-      if (places.length) return places;
-    } catch (error) {
-      console.warn("OpenStreetMap retailer discovery failed", endpoint, error);
-    }
+    return await Promise.any(attempts);
+  } catch (error) {
+    console.warn("OpenStreetMap retailer discovery failed quickly", error);
+    return [];
   }
-
-  return [];
 }
 
 async function googleSearch(apiKey: string, query: string, pageToken?: string | null) {
@@ -162,23 +208,20 @@ async function googleSearch(apiKey: string, query: string, pageToken?: string | 
   };
   if (pageToken) body.pageToken = pageToken;
 
-  const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask":
-        "places.id,places.displayName,places.formattedAddress,places.types,places.businessStatus,nextPageToken",
+  const payload = await fetchJsonWithTimeout(
+    "https://places.googleapis.com/v1/places:searchText",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask":
+          "places.id,places.displayName,places.formattedAddress,places.types,places.businessStatus,nextPageToken",
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
-
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(
-      String(payload?.error?.message || payload?.message || `Google Places HTTP ${response.status}`),
-    );
-  }
+    6000,
+  );
   return payload;
 }
 
