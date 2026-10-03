@@ -35,7 +35,6 @@ export default function ProfilePage() {
   const [debouncedCitySearch, setDebouncedCitySearch] = useState("");
   const [cityPickerOpen, setCityPickerOpen] = useState(false);
   const [savingCity, setSavingCity] = useState(false);
-  const [syncingCities, setSyncingCities] = useState(false);
   const [searchingRetailers, setSearchingRetailers] = useState(false);
   const [retailerSearchDone, setRetailerSearchDone] = useState(false);
   const [retailerSearchMessage, setRetailerSearchMessage] = useState("");
@@ -43,7 +42,7 @@ export default function ProfilePage() {
   const { data: cityPreference } = useQuery<any>({
     queryKey: ["profile-city-preference-v1", user?.id],
     queryFn: async () => {
-      const { data, error } = await db.from("user_city_preferences").select("user_id,city_id,cities(id,name,state,population,population_reference_year,retailer_target_count)").eq("user_id", user!.id).maybeSingle();
+      const { data, error } = await db.from("user_city_preferences").select("user_id,city_id,cities(id,name,state)").eq("user_id", user!.id).maybeSingle();
       if (error) throw error;
       return data;
     },
@@ -65,64 +64,6 @@ export default function ProfilePage() {
     return () => window.clearTimeout(timeout);
   }, [citySearch]);
 
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-
-    const ensureBrazilCities = async () => {
-      const [cityCountResult, populationCountResult] = await Promise.all([
-        db
-          .from("cities")
-          .select("id", { count: "exact", head: true })
-          .eq("active", true),
-        db
-          .from("cities")
-          .select("id", { count: "exact", head: true })
-          .eq("active", true)
-          .not("population", "is", null),
-      ]);
-
-      const cityCount = Number(cityCountResult.count ?? 0);
-      const populationCount = Number(populationCountResult.count ?? 0);
-
-      if (
-        cancelled ||
-        cityCountResult.error ||
-        populationCountResult.error ||
-        (cityCount >= 5000 && populationCount >= 5000)
-      ) {
-        return;
-      }
-
-      setSyncingCities(true);
-      const { error: syncError } = await supabase.functions.invoke("sync-brazil-cities", {
-        body: {},
-      });
-
-      if (!cancelled) {
-        setSyncingCities(false);
-        if (!syncError) {
-          await Promise.all([
-            queryClient.invalidateQueries({ queryKey: ["profile-city-search-v2"] }),
-            queryClient.invalidateQueries({ queryKey: ["profile-city-preference-v1"] }),
-          ]);
-        }
-        if (syncError) {
-          toast({
-            title: "Não consegui atualizar as cidades",
-            description: "A lista nacional do IBGE será tentada novamente depois.",
-            variant: "destructive",
-          });
-        }
-      }
-    };
-
-    void ensureBrazilCities();
-    return () => {
-      cancelled = true;
-    };
-  }, [user, toast, queryClient]);
-
   const normalizedCitySearch = normalizeCitySearch(debouncedCitySearch.replace(/\s*-\s*[A-Z]{2}$/i, ""));
 
   const { data: cityResults = [], isFetching: searchingCities } = useQuery<any[]>({
@@ -130,7 +71,7 @@ export default function ProfilePage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("cities")
-        .select("id,name,state,ibge_code,population,population_reference_year,retailer_target_count")
+        .select("id,name,state,ibge_code")
         .eq("active", true)
         .ilike("search_name", `${normalizedCitySearch}%`)
         .order("name")
@@ -278,7 +219,7 @@ export default function ProfilePage() {
       <Card className="mb-6"><CardContent className="p-4">
         <div className="mb-3">
           <p className="font-medium">Tabloides</p>
-          <p className="text-xs text-muted-foreground">Digite sua cidade e selecione o município correto. A busca usa a base nacional de municípios do IBGE.</p>
+          <p className="text-xs text-muted-foreground">Digite sua cidade e selecione o município correto. As redes serão descobertas automaticamente pelo Tiendeo.</p>
 
           <div className="relative mt-3">
             <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -298,10 +239,10 @@ export default function ProfilePage() {
 
             {cityPickerOpen && normalizedCitySearch.length >= 2 && (
               <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-md border bg-popover p-1 shadow-lg">
-                {(searchingCities || syncingCities) && cityResults.length === 0 ? (
+                {searchingCities && cityResults.length === 0 ? (
                   <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    {syncingCities ? "Carregando municípios do IBGE..." : "Buscando cidade..."}
+                    Buscando cidade...
                   </div>
                 ) : cityResults.length === 0 ? (
                   <p className="px-3 py-3 text-xs text-muted-foreground">Nenhum município encontrado.</p>
@@ -329,15 +270,7 @@ export default function ProfilePage() {
                 <MapPin className="h-4 w-4 text-primary" />
                 <p className="text-xs font-semibold">Cidade selecionada: {selectedCity.name} - {selectedCity.state}</p>
               </div>
-              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
-                {Number(selectedCity.population) > 0 && (
-                  <span>
-                    População: {Number(selectedCity.population).toLocaleString("pt-BR")}
-                    {selectedCity.population_reference_year ? ` (${selectedCity.population_reference_year})` : ""}
-                  </span>
-                )}
-                <span>até {Number(selectedCity.retailer_target_count ?? 5)} redes principais</span>
-              </div>
+
               <p className="mt-3 text-xs font-semibold">Principais redes em {selectedCity.name} - {selectedCity.state}</p>
               <div className="mt-2 space-y-1">
                 {retailerMap.length === 0 ? (
@@ -354,7 +287,6 @@ export default function ProfilePage() {
                     <p className="text-xs text-muted-foreground">Preparando busca de supermercados...</p>
                   )
                 ) : retailerMap
-                    .slice(0, Number(selectedCity.retailer_target_count ?? 5))
                     .map((entry: any) => (
                       <div key={entry.retailer} className="flex items-center justify-between gap-2 text-xs">
                         <span>{entry.retailer}</span>
