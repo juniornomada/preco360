@@ -485,6 +485,7 @@ Deno.serve(async (req: Request) => {
     const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY") || "";
     const seenPlaces = new Map<string, any>();
     let discoverySource = "openstreetmap";
+    let providerFailure: string | null = null;
 
     if (apiKey && !seenPlaces.size) {
       const queries = [
@@ -513,6 +514,7 @@ Deno.serve(async (req: Request) => {
         }
         if (seenPlaces.size) discoverySource = "google_places";
       } catch (error) {
+        providerFailure = "google_places_unavailable";
         console.warn("Google Places retailer discovery failed; using OpenStreetMap fallback", error);
       }
     }
@@ -523,6 +525,9 @@ Deno.serve(async (req: Request) => {
         seenPlaces.set(place.id, place);
       }
       discoverySource = "openstreetmap";
+      if (!osmPlaces.length) {
+        providerFailure = providerFailure || "openstreetmap_unavailable";
+      }
     }
 
     console.log("city_retailer_discovery_result", {
@@ -534,15 +539,20 @@ Deno.serve(async (req: Request) => {
     });
 
     if (!seenPlaces.size) {
+      const existingNetworks = (cachedRows ?? []).slice(0, target);
       return json(200, {
         ok: true,
         cached: false,
         city,
         target,
         provider: discoverySource,
+        provider_available: false,
+        provider_failure: providerFailure || "retailer_discovery_unavailable",
         raw_places: 0,
-        networks: (cachedRows ?? []).slice(0, target),
-        warning: "Nenhum supermercado pôde ser descoberto automaticamente agora.",
+        networks: existingNetworks,
+        warning: existingNetworks.length
+          ? "Não foi possível atualizar as redes agora. Exibindo as redes já conhecidas."
+          : "Não foi possível consultar as redes desta cidade agora. A fonte de descoberta está indisponível.",
       });
     }
 
@@ -647,6 +657,7 @@ Deno.serve(async (req: Request) => {
       city,
       target,
       provider: discoverySource,
+      provider_available: true,
       raw_places: seenPlaces.size,
       networks: finalRows ?? [],
     });
