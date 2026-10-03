@@ -36,11 +36,14 @@ export default function ProfilePage() {
   const [cityPickerOpen, setCityPickerOpen] = useState(false);
   const [savingCity, setSavingCity] = useState(false);
   const [syncingCities, setSyncingCities] = useState(false);
+  const [discoveringRetailers, setDiscoveringRetailers] = useState(false);
+  const [discoveryMessage, setDiscoveryMessage] = useState<string | null>(null);
+  const [discoveryAttemptedCityId, setDiscoveryAttemptedCityId] = useState("");
 
   const { data: cityPreference } = useQuery<any>({
     queryKey: ["profile-city-preference-v1", user?.id],
     queryFn: async () => {
-      const { data, error } = await db.from("user_city_preferences").select("user_id,city_id,cities(id,name,state)").eq("user_id", user!.id).maybeSingle();
+      const { data, error } = await db.from("user_city_preferences").select("user_id,city_id,cities(id,name,state,ibge_code,population,population_reference_year,retailer_target_count)").eq("user_id", user!.id).maybeSingle();
       if (error) throw error;
       return data;
     },
@@ -67,12 +70,28 @@ export default function ProfilePage() {
     let cancelled = false;
 
     const ensureBrazilCities = async () => {
-      const { count, error } = await db
-        .from("cities")
-        .select("id", { count: "exact", head: true })
-        .eq("active", true);
+      const [cityCountResult, populationCountResult] = await Promise.all([
+        db
+          .from("cities")
+          .select("id", { count: "exact", head: true })
+          .eq("active", true),
+        db
+          .from("cities")
+          .select("id", { count: "exact", head: true })
+          .eq("active", true)
+          .not("population", "is", null),
+      ]);
 
-      if (cancelled || error || Number(count ?? 0) >= 5000) return;
+      const cityCount = Number(cityCountResult.count ?? 0);
+      const populationCount = Number(populationCountResult.count ?? 0);
+      if (
+        cancelled ||
+        cityCountResult.error ||
+        populationCountResult.error ||
+        (cityCount >= 5000 && populationCount >= 5000)
+      ) {
+        return;
+      }
 
       setSyncingCities(true);
       const { error: syncError } = await supabase.functions.invoke("sync-brazil-cities", {
@@ -82,7 +101,10 @@ export default function ProfilePage() {
       if (!cancelled) {
         setSyncingCities(false);
         if (!syncError) {
-          await queryClient.invalidateQueries({ queryKey: ["profile-city-search-v2"] });
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["profile-city-search-v2"] }),
+            queryClient.invalidateQueries({ queryKey: ["profile-city-preference-v1"] }),
+          ]);
         }
         if (syncError) {
           toast({
@@ -107,7 +129,7 @@ export default function ProfilePage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("cities")
-        .select("id,name,state,ibge_code")
+        .select("id,name,state,ibge_code,population,population_reference_year,retailer_target_count")
         .eq("active", true)
         .ilike("search_name", `${normalizedCitySearch}%`)
         .order("name")
@@ -120,14 +142,61 @@ export default function ProfilePage() {
   });
 
   const { data: retailerMap = [] } = useQuery<any[]>({
-    queryKey: ["profile-retailer-city-map-v1", selectedCityId],
+    queryKey: ["profile-retailer-city-map-v2", selectedCityId],
     queryFn: async () => {
-      const { data, error } = await db.from("retailer_city_availability").select("retailer,status,source_count,notes").eq("city_id", selectedCityId).order("retailer");
+      const { data, error } = await db
+        .from("retailer_city_availability")
+        .select("retailer,status,source_count,location_count,relevance_score,discovery_source,last_checked_at,notes")
+        .eq("city_id", selectedCityId)
+        .order("relevance_score", { ascending: false, nullsFirst: false })
+        .order("retailer");
       if (error) throw error;
       return data ?? [];
     },
     enabled: !!selectedCityId,
   });
+
+  useEffect(() => {
+    if (!user || !selectedCityId || discoveryAttemptedCityId === selectedCityId) return;
+    let cancelled = false;
+
+    const discoverRetailers = async () => {
+      setDiscoveryAttemptedCityId(selectedCityId);
+      setDiscoveringRetailers(true);
+      setDiscoveryMessage(null);
+
+      const { data, error } = await supabase.functions.invoke("discover-city-retailers", {
+        body: { city_id: selectedCityId },
+      });
+
+      if (cancelled) return;
+      setDiscoveringRetailers(false);
+
+      if (error) {
+        setDiscoveryMessage(
+          "A descoberta automática das redes está preparada, mas ainda precisa da conexão com o Google Places.",
+        );
+        return;
+      }
+
+      if (data?.ok) {
+        await queryClient.invalidateQueries({
+          queryKey: ["profile-retailer-city-map-v2", selectedCityId],
+        });
+        const found = Array.isArray(data?.networks) ? data.networks.length : 0;
+        if (found > 0) {
+          setDiscoveryMessage(
+            `${found} rede${found === 1 ? "" : "s"} principal${found === 1 ? "" : "is"} encontrada${found === 1 ? "" : "s"} para esta cidade.`,
+          );
+        }
+      }
+    };
+
+    void discoverRetailers();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, selectedCityId, discoveryAttemptedCityId, queryClient]);
 
   const saveCity = async (city: any) => {
     if (!user || !city?.id) return;
@@ -140,6 +209,8 @@ export default function ProfilePage() {
 
       setSelectedCityId(city.id);
       setSelectedCity(city);
+      setDiscoveryAttemptedCityId("");
+      setDiscoveryMessage(null);
       setCitySearch(`${city.name} - ${city.state}`);
       setCityPickerOpen(false);
       toast({
@@ -259,18 +330,66 @@ export default function ProfilePage() {
                 <MapPin className="h-4 w-4 text-primary" />
                 <p className="text-xs font-semibold">Cidade selecionada: {selectedCity.name} - {selectedCity.state}</p>
               </div>
-              <p className="mt-3 text-xs font-semibold">Redes mapeadas em {selectedCity.name} - {selectedCity.state}</p>
+
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                {Number(selectedCity.population) > 0 && (
+                  <span>
+                    População de referência: {Number(selectedCity.population).toLocaleString("pt-BR")}
+                    {selectedCity.population_reference_year ? ` (${selectedCity.population_reference_year})` : ""}
+                  </span>
+                )}
+                <span>
+                  Meta: até {Number(selectedCity.retailer_target_count ?? 5)} redes principais
+                </span>
+              </div>
+
+              <p className="mt-3 text-xs font-semibold">Principais redes em {selectedCity.name} - {selectedCity.state}</p>
+
+              {discoveringRetailers && (
+                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Buscando e consolidando supermercados da cidade...
+                </div>
+              )}
+
+              {!discoveringRetailers && discoveryMessage && (
+                <p className="mt-2 text-[11px] text-muted-foreground">{discoveryMessage}</p>
+              )}
+
               <div className="mt-2 space-y-1">
                 {retailerMap.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Ainda não há redes cadastradas para esta cidade. A descoberta automática de supermercados será conectada na próxima etapa.</p>
-                ) : retailerMap.map((entry: any) => (
-                  <div key={entry.retailer} className="flex items-center justify-between gap-2 text-xs">
-                    <span>{entry.retailer}</span>
-                    <span className={entry.status === "available" ? "font-semibold text-emerald-600" : "text-muted-foreground"}>
-                      {entry.status === "available" ? "disponível" : "em validação"}
-                    </span>
-                  </div>
-                ))}
+                  !discoveringRetailers && (
+                    <p className="text-xs text-muted-foreground">Nenhuma rede foi descoberta para esta cidade ainda.</p>
+                  )
+                ) : retailerMap
+                    .slice(0, Number(selectedCity.retailer_target_count ?? 5))
+                    .map((entry: any) => (
+                      <div key={entry.retailer} className="flex items-center justify-between gap-2 text-xs">
+                        <div className="min-w-0">
+                          <span className="font-medium">{entry.retailer}</span>
+                          {Number(entry.location_count) > 1 && (
+                            <span className="ml-1 text-[10px] text-muted-foreground">
+                              · {entry.location_count} unidades encontradas
+                            </span>
+                          )}
+                        </div>
+                        <span
+                          className={
+                            entry.status === "available"
+                              ? "shrink-0 font-semibold text-emerald-600"
+                              : entry.status === "discovered"
+                                ? "shrink-0 font-semibold text-primary"
+                                : "shrink-0 text-muted-foreground"
+                          }
+                        >
+                          {entry.status === "available"
+                            ? "tabloide conectado"
+                            : entry.status === "discovered"
+                              ? "encontrada"
+                              : "em validação"}
+                        </span>
+                      </div>
+                    ))}
               </div>
             </div>
           )}
