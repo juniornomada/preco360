@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -26,6 +26,7 @@ export default function ProfilePage() {
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [collecting, setCollecting] = useState(false);
   const [collectionReport, setCollectionReport] = useState<any[] | null>(null);
   const [selectedCityId, setSelectedCityId] = useState("");
@@ -80,6 +81,9 @@ export default function ProfilePage() {
 
       if (!cancelled) {
         setSyncingCities(false);
+        if (!syncError) {
+          await queryClient.invalidateQueries({ queryKey: ["profile-city-search-v2"] });
+        }
         if (syncError) {
           toast({
             title: "Não consegui atualizar as cidades",
@@ -94,7 +98,7 @@ export default function ProfilePage() {
     return () => {
       cancelled = true;
     };
-  }, [user, toast]);
+  }, [user, toast, queryClient]);
 
   const normalizedCitySearch = normalizeCitySearch(debouncedCitySearch.replace(/\s*-\s*[A-Z]{2}$/i, ""));
 
