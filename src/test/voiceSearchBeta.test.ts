@@ -25,5 +25,6 @@ describe("normalizeVoiceSearchBetaTranscript", () => {
   it("normalizes specialty butcher names from observed ASR output", () => {
     expect(normalizeVoiceSearchBetaTranscript("Entrecô.")).toBe("Entrecot");
     expect(normalizeVoiceSearchBetaTranscript("Novax.")).toBe("Noix");
+    expect(normalizeVoiceSearchBetaTranscript("Noax.")).toBe("Noix");
   });
 });
