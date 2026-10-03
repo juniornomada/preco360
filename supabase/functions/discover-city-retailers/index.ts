@@ -167,7 +167,7 @@ function tiendeoRetailerFromLine(line: string, cityName: string) {
   return canonicalRetailer(candidate, cityName).name;
 }
 
-function parseTiendeoNearbyStores(markdown: string, city: any, target: number) {
+function parseTiendeoNearbyStores(markdown: string, city: any) {
   const lines = String(markdown ?? "").split(/\r?\n/);
   const headingIndex = lines.findIndex((line) =>
     /As lojas mais próximas de Supermercados em/i.test(line),
@@ -200,14 +200,14 @@ function parseTiendeoNearbyStores(markdown: string, city: any, target: number) {
       formattedAddress: line.replace(/^\s*[-*•]+\s*/, "").trim(),
       types: ["supermarket"],
       businessStatus: "OPERATIONAL",
-      _rankScore: Math.max(1, target + 2 - places.length),
+      _rankScore: Math.max(1, 100 - places.length),
     });
   }
 
   return places;
 }
 
-async function tiendeoSearch(city: any, target: number) {
+async function tiendeoSearch(city: any) {
   const slug = slugifyCity(city?.name);
   if (!slug) return { available: false, places: [] as any[], url: null };
 
@@ -235,7 +235,7 @@ async function tiendeoSearch(city: any, target: number) {
       throw new Error("TIENDEO_PAGE_INVALID");
     }
 
-    const places = parseTiendeoNearbyStores(markdown, city, target);
+    const places = parseTiendeoNearbyStores(markdown, city);
     console.log("tiendeo_retailer_discovery", {
       city: city?.name,
       state: city?.state,
@@ -589,14 +589,12 @@ Deno.serve(async (req: Request) => {
   try {
     const { data: city, error: cityError } = await db
       .from("cities")
-      .select("id,name,state,ibge_code,population,population_reference_year,retailer_target_count")
+      .select("id,name,state,ibge_code")
       .eq("id", cityId)
       .eq("active", true)
       .single();
 
     if (cityError || !city) return json(404, { error: "CITY_NOT_FOUND" });
-
-    const target = Math.max(4, Math.min(8, Number(city.retailer_target_count ?? 5)));
 
     const { data: cachedRows, error: cacheError } = await db
       .from("retailer_city_availability")
@@ -607,111 +605,51 @@ Deno.serve(async (req: Request) => {
     if (cacheError) throw cacheError;
 
     const discoveryCached = (cachedRows ?? []).filter((row: any) => {
-      if (!["google_places", "tiendeo", "google_search", "openstreetmap"].includes(row.discovery_source) || !row.last_checked_at) return false;
+      if (row.discovery_source !== "tiendeo" || !row.last_checked_at) return false;
       const age = Date.now() - new Date(row.last_checked_at).getTime();
       return Number.isFinite(age) && age >= 0 && age < CACHE_MS;
     });
 
-    if (!force && discoveryCached.length >= Math.min(4, target)) {
+    if (!force && discoveryCached.length > 0) {
       return json(200, {
         ok: true,
         cached: true,
         city,
-        target,
-        networks: (cachedRows ?? []).slice(0, target),
+        provider: "tiendeo",
+        networks: discoveryCached,
       });
     }
 
-    const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY") || "";
     const seenPlaces = new Map<string, any>();
-    let discoverySource = "openstreetmap";
-    let providerFailure: string | null = null;
+    const tiendeo = await tiendeoSearch(city);
 
-    if (apiKey && !seenPlaces.size) {
-      const queries = [
-        `supermercados e atacarejos em ${city.name} ${city.state}, Brasil`,
-        `atacadistas e hipermercados em ${city.name} ${city.state}, Brasil`,
-      ];
-
-      try {
-        for (let qIndex = 0; qIndex < queries.length; qIndex += 1) {
-          const payload = await googleSearch(apiKey, queries[qIndex]);
-          const places = Array.isArray(payload?.places) ? payload.places : [];
-
-          for (let rank = 0; rank < places.length; rank += 1) {
-            const place = places[rank];
-            if (!place?.id || place?.businessStatus === "CLOSED_PERMANENTLY") continue;
-            if (!relevantPlace(place)) continue;
-
-            const previous = seenPlaces.get(place.id);
-            const score = Math.max(0, 20 - rank) + (qIndex === 0 ? 2 : 0);
-            if (!previous || score > previous._rankScore) {
-              seenPlaces.set(place.id, { ...place, _rankScore: score });
-            }
-          }
-
-          if (seenPlaces.size >= target * 2) break;
-        }
-        if (seenPlaces.size) discoverySource = "google_places";
-      } catch (error) {
-        providerFailure = "google_places_unavailable";
-        console.warn("Google Places retailer discovery failed; using OpenStreetMap fallback", error);
-      }
+    for (const place of tiendeo.places) {
+      seenPlaces.set(place.id, place);
     }
 
-    let tiendeoAvailable = false;
-
-    if (!seenPlaces.size) {
-      const tiendeo = await tiendeoSearch(city, target);
-      tiendeoAvailable = tiendeo.available;
-      for (const place of tiendeo.places) {
-        seenPlaces.set(place.id, place);
-      }
-      if (tiendeo.places.length) {
-        discoverySource = "tiendeo";
-      } else if (!tiendeo.available) {
-        providerFailure = providerFailure || "tiendeo_unavailable";
-      }
-    }
-
-    if (!seenPlaces.size && !tiendeoAvailable) {
-      const osmPlaces = await openStreetMapSearch(city);
-      for (const place of osmPlaces) {
-        seenPlaces.set(place.id, place);
-      }
-      discoverySource = "openstreetmap";
-      if (!osmPlaces.length) {
-        providerFailure = providerFailure || "openstreetmap_unavailable";
-      }
-    }
+    const discoverySource = "tiendeo";
+    const providerFailure = tiendeo.available ? null : "tiendeo_unavailable";
 
     console.log("city_retailer_discovery_result", {
       city: city.name,
       state: city.state,
-      target,
       provider: discoverySource,
       raw_places: seenPlaces.size,
     });
 
     if (!seenPlaces.size) {
-      const existingNetworks = (cachedRows ?? []).slice(0, target);
       return json(200, {
         ok: true,
         cached: false,
         city,
-        target,
         provider: discoverySource,
-        provider_available: tiendeoAvailable,
-        provider_failure: tiendeoAvailable
-          ? null
-          : providerFailure || "retailer_discovery_unavailable",
+        provider_available: tiendeo.available,
+        provider_failure: providerFailure,
         raw_places: 0,
-        networks: existingNetworks,
-        warning: existingNetworks.length
-          ? "Não foi possível atualizar as redes agora. Exibindo as redes já conhecidas."
-          : tiendeoAvailable
-            ? "O Tiendeo não listou nenhuma rede com loja física nesta cidade."
-            : "Não foi possível consultar as redes desta cidade agora. A fonte de descoberta está indisponível.",
+        networks: [],
+        warning: tiendeo.available
+          ? "O Tiendeo não listou nenhuma rede de supermercado para esta cidade."
+          : "Não foi possível consultar o Tiendeo para esta cidade agora.",
       });
     }
 
@@ -753,8 +691,7 @@ Deno.serve(async (req: Request) => {
         if (Math.abs(b.score - a.score) > 0.0001) return b.score - a.score;
         if (b.places.length !== a.places.length) return b.places.length - a.places.length;
         return a.retailer.localeCompare(b.retailer, "pt-BR");
-      })
-      .slice(0, target);
+      });
 
     const now = new Date().toISOString();
     const existing = new Map(
@@ -778,7 +715,7 @@ Deno.serve(async (req: Request) => {
           notes:
             old?.status === "available"
               ? old?.notes ?? null
-              : `Descoberta automática via ${discoverySource === "google_places" ? "Google Places" : discoverySource === "tiendeo" ? "Tiendeo" : discoverySource === "google_search" ? "Pesquisa Google" : "OpenStreetMap"} em ${city.name} - ${city.state}.`,
+              : `Descoberta automática via Tiendeo em ${city.name} - ${city.state}.`,
         },
         { onConflict: "retailer,city_id" },
       );
@@ -788,8 +725,8 @@ Deno.serve(async (req: Request) => {
     const selectedKeys = new Set(ranked.map((group) => normalize(group.retailer)));
     for (const row of cachedRows ?? []) {
       if (
-        ["google_places", "tiendeo", "google_search", "openstreetmap"].includes(row.discovery_source) &&
         row.status === "discovered" &&
+        row.discovery_source !== "manual" &&
         !selectedKeys.has(normalize(row.retailer))
       ) {
         await db
@@ -805,8 +742,8 @@ Deno.serve(async (req: Request) => {
       .from("retailer_city_availability")
       .select("retailer,status,source_count,location_count,relevance_score,discovery_source,last_checked_at")
       .eq("city_id", cityId)
-      .order("relevance_score", { ascending: false, nullsFirst: false })
-      .limit(target);
+      .eq("discovery_source", "tiendeo")
+      .order("relevance_score", { ascending: false, nullsFirst: false });
 
     if (finalError) throw finalError;
 
@@ -814,7 +751,6 @@ Deno.serve(async (req: Request) => {
       ok: true,
       cached: false,
       city,
-      target,
       provider: discoverySource,
       provider_available: true,
       raw_places: seenPlaces.size,
