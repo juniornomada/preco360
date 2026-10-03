@@ -104,6 +104,11 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
   if (key === "sau") return "sal";
   if (key === "sao refinado") return "sal refinado";
 
+  // Whisper can confuse the supermarket cut "coxão duro" with acoustically
+  // similar phrases. Keep this correction intentionally narrow so a genuine
+  // search for "colchão" by itself is not rewritten.
+  if (key === "colchao duro" || key === "poxao duro") return "coxão duro";
+
   // Android/Chrome often recognizes the difficult short term when the user
   // supplies a harmless second word ("poncan fruta") or repeats it
   // ("poncan poncan"). Only collapse combinations whose parts are already
