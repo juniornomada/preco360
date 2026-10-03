@@ -115,6 +115,146 @@ async function fetchJsonWithTimeout(
   }
 }
 
+
+function slugifyCity(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+async function fetchTextWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.text();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function tiendeoRetailerFromLine(line: string, cityName: string) {
+  const compact = line
+    .replace(/^\s*[-*•]+\s*/, "")
+    .replace(/\[(.*?)\]\([^)]*\)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!compact) return null;
+
+  const known = canonicalRetailer(compact, cityName);
+  if (known.known) return known.name;
+
+  const addressStart = compact.search(
+    /(?:Avenida|Av\.?|Rua|R\.?|Rodovia|Rod\.?|Estrada|Praça|Pç\.?|Alameda|Travessa|BR[-\s]?\d|R:)/i,
+  );
+
+  let candidate = addressStart > 0 ? compact.slice(0, addressStart).trim() : "";
+  candidate = candidate
+    .replace(/\s+(?:loja|unidade|filial)\s*\d*$/i, "")
+    .replace(/[,:;\-]+$/g, "")
+    .trim();
+
+  if (candidate.length < 3 || candidate.length > 80) return null;
+  return canonicalRetailer(candidate, cityName).name;
+}
+
+function parseTiendeoNearbyStores(markdown: string, city: any, target: number) {
+  const lines = String(markdown ?? "").split(/\r?\n/);
+  const headingIndex = lines.findIndex((line) =>
+    /As lojas mais próximas de Supermercados em/i.test(line),
+  );
+
+  if (headingIndex < 0) return [];
+
+  const cityNorm = normalize(city?.name);
+  const places: any[] = [];
+  const seenNames = new Map<string, number>();
+
+  for (let i = headingIndex + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\s*##\s+/.test(line)) break;
+    if (!/^\s*[-*•]\s+/.test(line)) continue;
+
+    const lineNorm = normalize(line);
+    if (!cityNorm || !lineNorm.includes(cityNorm)) continue;
+
+    const retailer = tiendeoRetailerFromLine(line, city?.name ?? "");
+    if (!retailer) continue;
+
+    const key = normalize(retailer);
+    const count = (seenNames.get(key) ?? 0) + 1;
+    seenNames.set(key, count);
+
+    places.push({
+      id: `tiendeo:${slugifyCity(city?.name)}:${key}:${count}`,
+      displayName: { text: retailer },
+      formattedAddress: line.replace(/^\s*[-*•]+\s*/, "").trim(),
+      types: ["supermarket"],
+      businessStatus: "OPERATIONAL",
+      _rankScore: Math.max(1, target + 2 - places.length),
+    });
+  }
+
+  return places;
+}
+
+async function tiendeoSearch(city: any, target: number) {
+  const slug = slugifyCity(city?.name);
+  if (!slug) return { available: false, places: [] as any[], url: null };
+
+  const tiendeoUrl = `https://www.tiendeo.com.br/${slug}/supermercados`;
+  const readerUrl = `https://r.jina.ai/${tiendeoUrl}`;
+
+  try {
+    const markdown = await fetchTextWithTimeout(
+      readerUrl,
+      {
+        headers: {
+          accept: "text/plain",
+          "x-return-format": "markdown",
+        },
+      },
+      10000,
+    );
+
+    const pageLooksValid =
+      /Tiendeo/i.test(markdown) ||
+      /Supermercados em/i.test(markdown) ||
+      /As lojas mais próximas de Supermercados em/i.test(markdown);
+
+    if (!pageLooksValid) {
+      throw new Error("TIENDEO_PAGE_INVALID");
+    }
+
+    const places = parseTiendeoNearbyStores(markdown, city, target);
+    console.log("tiendeo_retailer_discovery", {
+      city: city?.name,
+      state: city?.state,
+      url: tiendeoUrl,
+      places: places.length,
+    });
+
+    return { available: true, places, url: tiendeoUrl };
+  } catch (error) {
+    console.warn("Tiendeo retailer discovery failed", {
+      city: city?.name,
+      state: city?.state,
+      url: tiendeoUrl,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { available: false, places: [] as any[], url: tiendeoUrl };
+  }
+}
+
 const brazilStateNames: Record<string, string> = {
   AC: "Acre",
   AL: "Alagoas",
@@ -467,7 +607,7 @@ Deno.serve(async (req: Request) => {
     if (cacheError) throw cacheError;
 
     const discoveryCached = (cachedRows ?? []).filter((row: any) => {
-      if (!["google_places", "google_search", "openstreetmap"].includes(row.discovery_source) || !row.last_checked_at) return false;
+      if (!["google_places", "tiendeo", "google_search", "openstreetmap"].includes(row.discovery_source) || !row.last_checked_at) return false;
       const age = Date.now() - new Date(row.last_checked_at).getTime();
       return Number.isFinite(age) && age >= 0 && age < CACHE_MS;
     });
@@ -519,7 +659,22 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    let tiendeoAvailable = false;
+
     if (!seenPlaces.size) {
+      const tiendeo = await tiendeoSearch(city, target);
+      tiendeoAvailable = tiendeo.available;
+      for (const place of tiendeo.places) {
+        seenPlaces.set(place.id, place);
+      }
+      if (tiendeo.places.length) {
+        discoverySource = "tiendeo";
+      } else if (!tiendeo.available) {
+        providerFailure = providerFailure || "tiendeo_unavailable";
+      }
+    }
+
+    if (!seenPlaces.size && !tiendeoAvailable) {
       const osmPlaces = await openStreetMapSearch(city);
       for (const place of osmPlaces) {
         seenPlaces.set(place.id, place);
@@ -546,13 +701,17 @@ Deno.serve(async (req: Request) => {
         city,
         target,
         provider: discoverySource,
-        provider_available: false,
-        provider_failure: providerFailure || "retailer_discovery_unavailable",
+        provider_available: tiendeoAvailable,
+        provider_failure: tiendeoAvailable
+          ? null
+          : providerFailure || "retailer_discovery_unavailable",
         raw_places: 0,
         networks: existingNetworks,
         warning: existingNetworks.length
           ? "Não foi possível atualizar as redes agora. Exibindo as redes já conhecidas."
-          : "Não foi possível consultar as redes desta cidade agora. A fonte de descoberta está indisponível.",
+          : tiendeoAvailable
+            ? "O Tiendeo não listou nenhuma rede com loja física nesta cidade."
+            : "Não foi possível consultar as redes desta cidade agora. A fonte de descoberta está indisponível.",
       });
     }
 
@@ -619,7 +778,7 @@ Deno.serve(async (req: Request) => {
           notes:
             old?.status === "available"
               ? old?.notes ?? null
-              : `Descoberta automática via ${discoverySource === "google_places" ? "Google Places" : discoverySource === "google_search" ? "Pesquisa Google" : "OpenStreetMap"} em ${city.name} - ${city.state}.`,
+              : `Descoberta automática via ${discoverySource === "google_places" ? "Google Places" : discoverySource === "tiendeo" ? "Tiendeo" : discoverySource === "google_search" ? "Pesquisa Google" : "OpenStreetMap"} em ${city.name} - ${city.state}.`,
         },
         { onConflict: "retailer,city_id" },
       );
@@ -629,7 +788,7 @@ Deno.serve(async (req: Request) => {
     const selectedKeys = new Set(ranked.map((group) => normalize(group.retailer)));
     for (const row of cachedRows ?? []) {
       if (
-        ["google_places", "google_search", "openstreetmap"].includes(row.discovery_source) &&
+        ["google_places", "tiendeo", "google_search", "openstreetmap"].includes(row.discovery_source) &&
         row.status === "discovered" &&
         !selectedKeys.has(normalize(row.retailer))
       ) {
