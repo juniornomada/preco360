@@ -46,6 +46,31 @@ function positive(value:unknown) {
   return Number.isFinite(n)&&n>0?n:null;
 }
 
+function paymentConditionText(notes:unknown) {
+  return (Array.isArray(notes)?notes:[])
+    .map((note)=>String(note??""))
+    .join(" ");
+}
+
+function isPaymentRestrictedPrice(notes:unknown) {
+  const text=paymentConditionText(notes);
+  return /(taustepay|pagando.{0,40}cart[aã]o|cart[aã]o.{0,40}pagando|cart[aã]o\s+elo|credifatto|cart[aã]o.{0,30}muffato|muffato.{0,30}cart[aã]o)/i.test(text);
+}
+
+function hasExplicitAlternativePaymentPrice(notes:unknown, advertisedPrice:unknown) {
+  const advertised=positive(advertisedPrice);
+  if (advertised===null) return false;
+
+  const amounts=[...paymentConditionText(notes).matchAll(/R\$\s*(\d{1,4}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)/gi)]
+    .map((match)=>{
+      const raw=String(match[1]??"").replace(/\./g,"").replace(",",".");
+      return Number(raw);
+    })
+    .filter((value)=>Number.isFinite(value)&&value>0);
+
+  return amounts.some((value)=>Math.abs(value-advertised)>0.005);
+}
+
 function packageInfo(quantityValue:unknown, unitValue:unknown) {
   const q=Number(quantityValue);
   const unit=normalize(unitValue);
@@ -166,9 +191,29 @@ Deno.serve(async(req:Request)=>{
     }
 
     const rows=offers.map((offer:any)=>{
+      const paymentRestricted=isPaymentRestrictedPrice(offer?.notes);
+      const extractedClub=positive(offer?.club_price);
+
+      // If the only captured price is explicitly tied to a store payment method,
+      // we do not know the user's eligible regular price and must not save it.
+      if (
+        paymentRestricted &&
+        extractedClub===null &&
+        !hasExplicitAlternativePaymentPrice(offer?.notes,offer?.price)
+      ) {
+        console.warn("Skipping payment-restricted offer without verified regular price", {
+          product_name: offer?.product_name,
+          retailer,
+          notes: offer?.notes,
+        });
+        return null;
+      }
+
       const name=displayName(offer);
       const pricing=normalizedPricing(offer);
-      const club=positive(offer?.club_price);
+      // Payment-method discounts are never treated as club/member prices.
+      const club=paymentRestricted?null:extractedClub;
+
       return {
         flyer_id:flyerId,
         user_id:job.user_id,
@@ -197,7 +242,14 @@ Deno.serve(async(req:Request)=>{
         match_type:"unmatched",
         source_page:Math.max(1,Math.trunc(Number(offer?.source_page)||1)),
       };
-    });
+    }).filter((row:any)=>row!==null);
+
+    if (!rows.length) {
+      return json(422,{
+        error:"NO_ELIGIBLE_OFFERS",
+        message:"Nenhuma oferta elegível sem exigência de meio de pagamento foi encontrada.",
+      });
+    }
 
     const {error:itemsError}=await supabase.from("flyer_items").insert(rows);
     if (itemsError) throw itemsError;
