@@ -361,16 +361,25 @@ export function useVoiceSearchBeta() {
       };
 
       recognition.onresult = (event) => {
-        const lastResult = event.results[event.results.length - 1];
-        const transcript = bestTranscript(lastResult);
-        const alternatives = rawAlternatives(lastResult);
+        // Android/Chrome can append an empty result while an earlier entry in
+        // the same event still contains the usable hypothesis. Walk backwards
+        // instead of trusting only the last slot.
+        const results = Array.from(
+          { length: event.results.length },
+          (_, index) => event.results[index],
+        );
+        const usableResult =
+          [...results].reverse().find((result) => rawAlternatives(result).length > 0) ??
+          results[results.length - 1];
+        const alternatives = rawAlternatives(usableResult);
+        const transcript = bestTranscript(usableResult);
 
         logNativeVoiceBeta({
           event: "result",
           session_id: nativeSessionId,
           alternatives,
           normalized: transcript,
-          is_final: Boolean(lastResult?.isFinal),
+          is_final: Boolean(usableResult?.isFinal),
           speech_started: speechStartedRef.current,
           elapsed_ms: Math.round(performance.now() - startedAt),
           phrase_bias_supported: phraseBiasSupported,
@@ -380,7 +389,7 @@ export function useVoiceSearchBeta() {
 
         pendingTranscriptRef.current = transcript;
 
-        if (lastResult?.isFinal) {
+        if (usableResult?.isFinal) {
           deliverPending();
           clearTimers();
           recognition.stop();
