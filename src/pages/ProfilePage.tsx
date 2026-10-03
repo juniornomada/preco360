@@ -40,7 +40,7 @@ export default function ProfilePage() {
   const { data: cityPreference } = useQuery<any>({
     queryKey: ["profile-city-preference-v1", user?.id],
     queryFn: async () => {
-      const { data, error } = await db.from("user_city_preferences").select("user_id,city_id,cities(id,name,state,population,population_reference_year,retailer_target_count)").eq("user_id", user!.id).maybeSingle();
+      const { data, error } = await db.from("user_city_preferences").select("user_id,city_id,cities(id,name,state)").eq("user_id", user!.id).maybeSingle();
       if (error) throw error;
       return data;
     },
@@ -107,7 +107,7 @@ export default function ProfilePage() {
     queryFn: async () => {
       const { data, error } = await db
         .from("cities")
-        .select("id,name,state,ibge_code,population,population_reference_year,retailer_target_count")
+        .select("id,name,state,ibge_code")
         .eq("active", true)
         .ilike("search_name", `${normalizedCitySearch}%`)
         .order("name")
@@ -128,27 +128,6 @@ export default function ProfilePage() {
     },
     enabled: !!selectedCityId,
   });
-
-  useEffect(() => {
-    if (!selectedCityId) return;
-    let active = true;
-
-    const refreshRetailers = async () => {
-      await supabase.functions.invoke("discover-city-retailers", {
-        body: { city_id: selectedCityId },
-      });
-      if (active) {
-        await queryClient.invalidateQueries({
-          queryKey: ["profile-retailer-city-map-v1", selectedCityId],
-        });
-      }
-    };
-
-    void refreshRetailers();
-    return () => {
-      active = false;
-    };
-  }, [selectedCityId, queryClient]);
 
   const saveCity = async (city: any) => {
     if (!user || !city?.id) return;
@@ -280,29 +259,18 @@ export default function ProfilePage() {
                 <MapPin className="h-4 w-4 text-primary" />
                 <p className="text-xs font-semibold">Cidade selecionada: {selectedCity.name} - {selectedCity.state}</p>
               </div>
-              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
-                {Number(selectedCity.population) > 0 && (
-                  <span>
-                    População: {Number(selectedCity.population).toLocaleString("pt-BR")}
-                    {selectedCity.population_reference_year ? ` (${selectedCity.population_reference_year})` : ""}
-                  </span>
-                )}
-                <span>até {Number(selectedCity.retailer_target_count ?? 5)} redes principais</span>
-              </div>
-              <p className="mt-3 text-xs font-semibold">Principais redes em {selectedCity.name} - {selectedCity.state}</p>
+              <p className="mt-3 text-xs font-semibold">Redes mapeadas em {selectedCity.name} - {selectedCity.state}</p>
               <div className="mt-2 space-y-1">
                 {retailerMap.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Buscando supermercados desta cidade...</p>
-                ) : retailerMap
-                    .slice(0, Number(selectedCity.retailer_target_count ?? 5))
-                    .map((entry: any) => (
-                      <div key={entry.retailer} className="flex items-center justify-between gap-2 text-xs">
-                        <span>{entry.retailer}</span>
-                        <span className={entry.status === "available" ? "font-semibold text-emerald-600" : entry.status === "discovered" ? "font-semibold text-primary" : "text-muted-foreground"}>
-                          {entry.status === "available" ? "tabloide conectado" : entry.status === "discovered" ? "encontrada" : "em validação"}
-                        </span>
-                      </div>
-                    ))}
+                  <p className="text-xs text-muted-foreground">Ainda não há redes cadastradas para esta cidade. A descoberta automática de supermercados será conectada na próxima etapa.</p>
+                ) : retailerMap.map((entry: any) => (
+                  <div key={entry.retailer} className="flex items-center justify-between gap-2 text-xs">
+                    <span>{entry.retailer}</span>
+                    <span className={entry.status === "available" ? "font-semibold text-emerald-600" : "text-muted-foreground"}>
+                      {entry.status === "available" ? "disponível" : "em validação"}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
