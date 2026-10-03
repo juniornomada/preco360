@@ -62,6 +62,11 @@ const EMPTY_SPEECH_END_GRACE_MS = 900;
 const MAX_LISTENING_MS = 4500;
 const GROQ_CAPTURE_MS = 3200;
 const MIN_GROQ_AUDIO_BYTES = 4_000;
+const GROQ_VAD_MIN_CAPTURE_MS = 1_000;
+const GROQ_VAD_SILENCE_MS = 700;
+const GROQ_VAD_SAMPLE_MS = 50;
+const GROQ_VAD_MIN_RMS = 0.008;
+const GROQ_VAD_SPEECH_FRAMES = 3;
 
 const PONCAN_CONTEXT_PHRASES = [
   "poncã",
@@ -326,7 +331,88 @@ export function useVoiceSearchBeta() {
 
         recorder.start();
         setIsListening(true);
-        window.setTimeout(() => {
+
+        // Keep the proven 3.2 s window as a hard fallback, but finish sooner
+        // after confidently detected speech followed by sustained silence.
+        // This deliberately uses a more conservative VAD than the previous
+        // experiment: speech must persist across multiple samples and silence
+        // must remain stable for 700 ms before the recorder is stopped.
+        let audioContext: AudioContext | null = null;
+        let vadTimer: number | null = null;
+        let hardStopTimer: number | null = null;
+
+        const cleanupVad = () => {
+          if (vadTimer !== null) window.clearInterval(vadTimer);
+          if (hardStopTimer !== null) window.clearTimeout(hardStopTimer);
+          vadTimer = null;
+          hardStopTimer = null;
+          void audioContext?.close().catch(() => undefined);
+          audioContext = null;
+        };
+
+        recorder.addEventListener("stop", cleanupVad, { once: true });
+
+        try {
+          const AudioContextCtor = window.AudioContext;
+          if (AudioContextCtor) {
+            audioContext = new AudioContextCtor();
+            const source = audioContext.createMediaStreamSource(stream);
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 1024;
+            source.connect(analyser);
+
+            const samples = new Float32Array(analyser.fftSize);
+            let noiseFloor = 0.01;
+            let speechFrames = 0;
+            let speechDetected = false;
+            let lastSpeechAt = startedAt;
+
+            vadTimer = window.setInterval(() => {
+              if (recorder.state !== "recording") return;
+
+              analyser.getFloatTimeDomainData(samples);
+              let sumSquares = 0;
+              for (const sample of samples) sumSquares += sample * sample;
+              const rms = Math.sqrt(sumSquares / samples.length);
+
+              // Learn only quieter observations as ambient noise. This avoids
+              // treating the user's first syllable as the noise baseline.
+              if (rms < noiseFloor) {
+                noiseFloor = noiseFloor * 0.8 + rms * 0.2;
+              }
+
+              const speechThreshold = Math.max(
+                GROQ_VAD_MIN_RMS,
+                noiseFloor * 2.8,
+              );
+
+              if (rms >= speechThreshold) {
+                speechFrames += 1;
+                if (speechFrames >= GROQ_VAD_SPEECH_FRAMES) {
+                  speechDetected = true;
+                  lastSpeechAt = performance.now();
+                }
+              } else {
+                speechFrames = 0;
+              }
+
+              const now = performance.now();
+              if (
+                speechDetected &&
+                now - startedAt >= GROQ_VAD_MIN_CAPTURE_MS &&
+                now - lastSpeechAt >= GROQ_VAD_SILENCE_MS
+              ) {
+                recorder.stop();
+              }
+            }, GROQ_VAD_SAMPLE_MS);
+          }
+        } catch (vadError) {
+          // VAD is only a latency optimization. Any unsupported/failed Web
+          // Audio path falls back to the exact reliable 3.2 s capture.
+          console.debug("Beta voice VAD unavailable; using fixed capture", vadError);
+        }
+
+        hardStopTimer = window.setTimeout(() => {
           if (recorder.state === "recording") recorder.stop();
         }, GROQ_CAPTURE_MS);
         return true;
