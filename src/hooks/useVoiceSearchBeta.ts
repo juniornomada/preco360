@@ -60,7 +60,10 @@ const SHORT_TERM_COMMIT_MS = 650;
 const SPEECH_END_STOP_MS = 180;
 const EMPTY_SPEECH_END_GRACE_MS = 900;
 const MAX_LISTENING_MS = 4500;
-const GROQ_CAPTURE_MS = 3200;
+const GROQ_CAPTURE_MS = 2800;
+const GROQ_MIN_CAPTURE_MS = 450;
+const GROQ_SILENCE_MS = 420;
+const GROQ_SPEECH_RMS = 0.018;
 
 const PONCAN_CONTEXT_PHRASES = [
   "poncã",
@@ -296,9 +299,50 @@ export function useVoiceSearchBeta() {
 
         recorder.start();
         setIsListening(true);
-        window.setTimeout(() => {
+
+        // Stop as soon as the user finishes speaking instead of always waiting
+        // for the maximum recording window. This keeps short product searches
+        // fast while the hard cap still protects longer phrases.
+        const audioContext = new AudioContext();
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 1024;
+        source.connect(analyser);
+        const samples = new Float32Array(analyser.fftSize);
+        let speechSeen = false;
+        let silenceStartedAt: number | null = null;
+        let rafId = 0;
+
+        const finishCapture = () => {
+          if (rafId) cancelAnimationFrame(rafId);
+          void audioContext.close().catch(() => undefined);
           if (recorder.state === "recording") recorder.stop();
-        }, GROQ_CAPTURE_MS);
+        };
+
+        const detectSilence = () => {
+          if (recorder.state !== "recording") return;
+          analyser.getFloatTimeDomainData(samples);
+          let sumSquares = 0;
+          for (const sample of samples) sumSquares += sample * sample;
+          const rms = Math.sqrt(sumSquares / samples.length);
+          const elapsed = performance.now() - startedAt;
+
+          if (rms >= GROQ_SPEECH_RMS) {
+            speechSeen = true;
+            silenceStartedAt = null;
+          } else if (speechSeen && elapsed >= GROQ_MIN_CAPTURE_MS) {
+            silenceStartedAt ??= performance.now();
+            if (performance.now() - silenceStartedAt >= GROQ_SILENCE_MS) {
+              finishCapture();
+              return;
+            }
+          }
+
+          rafId = requestAnimationFrame(detectSilence);
+        };
+
+        rafId = requestAnimationFrame(detectSilence);
+        window.setTimeout(finishCapture, GROQ_CAPTURE_MS);
         return true;
       } catch (captureError) {
         console.debug("Groq beta capture unavailable", captureError);
