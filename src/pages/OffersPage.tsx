@@ -2786,7 +2786,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                 </span>
               </div>
 
-              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+              <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3">
                 <ProductVisual
                   name={quickItem.raw_name}
                   category={bestCurrentOffer.product?.category}
@@ -2795,55 +2795,55 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                 />
 
                 <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <div className="min-w-0 flex-1">
-                      <AdaptiveProductName
-                        text={standardizedOfferName(quickItem, bestCurrentOffer.family)}
-                        className="font-extrabold"
-                        minPx={12}
-                        maxPx={16}
-                        desktopMaxPx={17}
-                      />
+                  <AdaptiveProductName
+                    text={
+                      quickPack
+                        ? `${standardizedOfferName(quickItem, bestCurrentOffer.family)} (${quickPack.replace(/\s+/g, "")})`
+                        : standardizedOfferName(quickItem, bestCurrentOffer.family)
+                    }
+                    className="font-extrabold"
+                    minPx={12}
+                    maxPx={16}
+                    desktopMaxPx={17}
+                  />
+
+                  <div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-background/30 px-2 py-0.5 font-bold">
+                          <Store className="h-3.5 w-3.5 text-primary" />
+                          {quickRetailer}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-background/25 px-2 py-0.5 text-muted-foreground">
+                          <Clock3 className="h-3.5 w-3.5" />
+                          {expiryLabel(bestCurrentOffer.flyer?.valid_to, today)}
+                        </span>
+                      </div>
+
+                      {quickUnit && (
+                        <p className="mt-1 text-[10px] font-semibold text-muted-foreground">
+                          menor preço por {quickCandidate.baseUnit === "l" ? "litro" : quickCandidate.baseUnit === "kg" ? "kg" : "unidade"}
+                        </p>
+                      )}
+
+                      {currentVsStore?.currentIsBetter && (
+                        <p className="mt-1.5 text-[10px] font-bold text-primary">
+                          {Math.abs(currentVsStore.diffPct).toFixed(0)}% mais barato que o preço de gôndola registrado
+                        </p>
+                      )}
                     </div>
-                    {quickPack && (
-                      <span className="shrink-0 rounded-md border border-primary/20 bg-background/35 px-1.5 py-0.5 text-[10px] font-extrabold">
-                        {quickPack}
-                      </span>
-                    )}
+
+                    <div className="shrink-0 text-right">
+                      <p className="text-xl font-black leading-none text-primary">
+                        {brl(quickCandidate.price)}
+                      </p>
+                      {quickUnit && (
+                        <p className="mt-1 text-[11px] font-extrabold text-primary/90">
+                          {quickUnit}
+                        </p>
+                      )}
+                    </div>
                   </div>
-
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
-                    <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-background/30 px-2 py-0.5 font-bold">
-                      <Store className="h-3.5 w-3.5 text-primary" />
-                      {quickRetailer}
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-background/25 px-2 py-0.5 text-muted-foreground">
-                      <Clock3 className="h-3.5 w-3.5" />
-                      {expiryLabel(bestCurrentOffer.flyer?.valid_to, today)}
-                    </span>
-                    {quickUnit && (
-                      <span className="font-semibold text-muted-foreground">
-                        menor preço por {quickCandidate.baseUnit === "l" ? "litro" : quickCandidate.baseUnit === "kg" ? "kg" : "unidade"}
-                      </span>
-                    )}
-                  </div>
-
-                  {currentVsStore?.currentIsBetter && (
-                    <p className="mt-1.5 text-[10px] font-bold text-primary">
-                      {Math.abs(currentVsStore.diffPct).toFixed(0)}% mais barato que o preço de gôndola registrado
-                    </p>
-                  )}
-                </div>
-
-                <div className="shrink-0 text-right">
-                  <p className="text-xl font-black leading-none text-primary">
-                    {brl(quickCandidate.price)}
-                  </p>
-                  {quickUnit && (
-                    <p className="mt-1 text-[11px] font-extrabold text-primary/90">
-                      {quickUnit}
-                    </p>
-                  )}
                 </div>
               </div>
             </section>
