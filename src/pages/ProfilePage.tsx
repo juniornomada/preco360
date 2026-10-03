@@ -174,7 +174,7 @@ export default function ProfilePage() {
 
       if (error) {
         setDiscoveryMessage(
-          "A descoberta automática das redes está preparada, mas ainda precisa da conexão com o Google Places.",
+          "Não foi possível atualizar as redes automaticamente agora. O Preço 360 continuará usando as redes já salvas para esta cidade.",
         );
         return;
       }
@@ -188,6 +188,8 @@ export default function ProfilePage() {
           setDiscoveryMessage(
             `${found} rede${found === 1 ? "" : "s"} principal${found === 1 ? "" : "is"} encontrada${found === 1 ? "" : "s"} para esta cidade.`,
           );
+        } else if (data?.warning) {
+          setDiscoveryMessage(String(data.warning));
         }
       }
     };
@@ -343,7 +345,18 @@ export default function ProfilePage() {
                 </span>
               </div>
 
-              <p className="mt-3 text-xs font-semibold">Principais redes em {selectedCity.name} - {selectedCity.state}</p>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold">Principais redes em {selectedCity.name} - {selectedCity.state}</p>
+                <button
+                  type="button"
+                  onClick={() => setDiscoveryAttemptedCityId("")}
+                  disabled={discoveringRetailers}
+                  className="inline-flex shrink-0 items-center gap-1 text-[10px] font-semibold text-primary disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3 w-3 ${discoveringRetailers ? "animate-spin" : ""}`} />
+                  Atualizar redes
+                </button>
+              </div>
 
               {discoveringRetailers && (
                 <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
