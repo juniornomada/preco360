@@ -62,11 +62,11 @@ const EMPTY_SPEECH_END_GRACE_MS = 900;
 const MAX_LISTENING_MS = 4500;
 const GROQ_CAPTURE_MS = 3200;
 const MIN_GROQ_AUDIO_BYTES = 4_000;
-const GROQ_VAD_MIN_CAPTURE_MS = 1_000;
-const GROQ_VAD_SILENCE_MS = 700;
+const GROQ_VAD_MIN_CAPTURE_MS = 1_300;
+const GROQ_VAD_SILENCE_MS = 900;
 const GROQ_VAD_SAMPLE_MS = 50;
 const GROQ_VAD_MIN_RMS = 0.008;
-const GROQ_VAD_SPEECH_FRAMES = 3;
+const GROQ_VAD_SPEECH_FRAMES = 3;\nconst GROQ_VAD_MIN_AUDIO_BYTES = 16_000;
 
 const PONCAN_CONTEXT_PHRASES = [
   "poncã",
@@ -402,7 +402,19 @@ export function useVoiceSearchBeta() {
                 now - startedAt >= GROQ_VAD_MIN_CAPTURE_MS &&
                 now - lastSpeechAt >= GROQ_VAD_SILENCE_MS
               ) {
-                recorder.stop();
+                // Flush the current MediaRecorder segment before deciding.
+                // Very short captures (~13 KB) correlated with clipped short
+                // words such as "peixe" -> "beijo" in real beta logs.
+                recorder.requestData();
+                window.setTimeout(() => {
+                  if (recorder.state !== "recording") return;
+                  const capturedBytes = chunks.reduce(
+                    (total, chunk) =>
+                      total + (chunk instanceof Blob ? chunk.size : 0),
+                    0,
+                  );
+                  if (capturedBytes >= GROQ_VAD_MIN_AUDIO_BYTES) recorder.stop();
+                }, 80);
               }
             }, GROQ_VAD_SAMPLE_MS);
           }
