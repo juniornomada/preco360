@@ -204,6 +204,106 @@ out center tags 100;
   }
 }
 
+
+function extractInteractionText(payload: any) {
+  if (typeof payload?.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text.trim();
+  }
+
+  const parts: string[] = [];
+  for (const step of Array.isArray(payload?.steps) ? payload.steps : []) {
+    if (step?.type !== "model_output") continue;
+    for (const block of Array.isArray(step?.content) ? step.content : []) {
+      if (block?.type === "text" && typeof block?.text === "string") {
+        parts.push(block.text);
+      }
+    }
+  }
+  return parts.join("\n").trim();
+}
+
+function parseGroundedRetailerNames(text: string, target: number) {
+  if (!text || /^NENHUMA\b/i.test(text.trim())) return [];
+
+  const ignored = /^(nenhuma|não encontrei|nao encontrei|observação|observacao|fonte|fontes)$/i;
+  const seen = new Set<string>();
+  const names: string[] = [];
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    let line = rawLine
+      .replace(/^\s*[-*•]+\s*/, "")
+      .replace(/^\s*\d+[.)-]\s*/, "")
+      .replace(/\s*[—–-]\s*(?:possui|tem|loja|lojas|unidade|unidades).*/i, "")
+      .replace(/^["'“”]+|["'“”]+$/g, "")
+      .trim();
+
+    if (!line || ignored.test(line)) continue;
+    if (line.length > 80) continue;
+
+    const canonical = canonicalRetailer(line, "");
+    const name = canonical.name.trim();
+    const key = normalize(name);
+    if (!key || seen.has(key)) continue;
+
+    seen.add(key);
+    names.push(name);
+    if (names.length >= target) break;
+  }
+
+  return names;
+}
+
+async function geminiGroundedRetailerSearch(city: any, target: number) {
+  const apiKey = Deno.env.get("GEMINI_API_KEY") || "";
+  if (!apiKey) return [];
+
+  const prompt = [
+    `Pesquise na web quais são as principais redes de supermercados, hipermercados e atacarejos com LOJA FÍSICA em ${city.name} - ${city.state}, Brasil.`,
+    `Retorne no máximo ${target} redes distintas.`,
+    "Priorize redes com presença relevante na cidade, grandes redes nacionais e redes regionais importantes.",
+    "Não inclua restaurantes, shoppings, lojas de conveniência, mercearias pequenas, distribuidores sem varejo, serviços de entrega ou empresas sem loja física comprovada na cidade.",
+    "Se houver várias unidades da mesma rede, liste a rede apenas uma vez.",
+    "Só inclua uma rede quando a pesquisa na web sustentar que existe loja física nessa cidade.",
+    "Responda SOMENTE com os nomes das redes, um por linha, sem numeração, sem explicações e sem URLs.",
+    "Se nenhuma rede puder ser confirmada, responda exatamente: NENHUMA",
+  ].join("\n");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 9000);
+  try {
+    const response = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/interactions",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          model: "gemini-3.5-flash-lite",
+          input: prompt,
+          tools: [{ type: "google_search" }],
+        }),
+        signal: controller.signal,
+      },
+    );
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(
+        String(payload?.error?.message || payload?.message || `Gemini HTTP ${response.status}`),
+      );
+    }
+
+    return parseGroundedRetailerNames(extractInteractionText(payload), target);
+  } catch (error) {
+    console.warn("Gemini grounded retailer discovery failed", error);
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function googleSearch(apiKey: string, query: string, pageToken?: string | null) {
   const body: Record<string, unknown> = {
     textQuery: query,
@@ -279,7 +379,7 @@ Deno.serve(async (req: Request) => {
     if (cacheError) throw cacheError;
 
     const discoveryCached = (cachedRows ?? []).filter((row: any) => {
-      if (!["google_places", "openstreetmap"].includes(row.discovery_source) || !row.last_checked_at) return false;
+      if (!["google_places", "google_search", "openstreetmap"].includes(row.discovery_source) || !row.last_checked_at) return false;
       const age = Date.now() - new Date(row.last_checked_at).getTime();
       return Number.isFinite(age) && age >= 0 && age < CACHE_MS;
     });
@@ -298,7 +398,24 @@ Deno.serve(async (req: Request) => {
     const seenPlaces = new Map<string, any>();
     let discoverySource = "openstreetmap";
 
-    if (apiKey) {
+    if (!apiKey) {
+      const groundedNames = await geminiGroundedRetailerSearch(city, target);
+      if (groundedNames.length) {
+        groundedNames.forEach((name, index) => {
+          seenPlaces.set(`gemini:${normalize(name)}`, {
+            id: `gemini:${normalize(name)}`,
+            displayName: { text: name },
+            formattedAddress: "",
+            types: ["supermarket"],
+            businessStatus: "OPERATIONAL",
+            _rankScore: Math.max(1, target - index),
+          });
+        });
+        discoverySource = "google_search";
+      }
+    }
+
+    if (apiKey && !seenPlaces.size) {
       const queries = [
         `supermercados e atacarejos em ${city.name} ${city.state}, Brasil`,
         `atacadistas e hipermercados em ${city.name} ${city.state}, Brasil`,
@@ -413,7 +530,7 @@ Deno.serve(async (req: Request) => {
           notes:
             old?.status === "available"
               ? old?.notes ?? null
-              : `Descoberta automática via ${discoverySource === "google_places" ? "Google Places" : "OpenStreetMap"} em ${city.name} - ${city.state}.`,
+              : `Descoberta automática via ${discoverySource === "google_places" ? "Google Places" : discoverySource === "google_search" ? "Pesquisa Google" : "OpenStreetMap"} em ${city.name} - ${city.state}.`,
         },
         { onConflict: "retailer,city_id" },
       );
@@ -423,7 +540,7 @@ Deno.serve(async (req: Request) => {
     const selectedKeys = new Set(ranked.map((group) => normalize(group.retailer)));
     for (const row of cachedRows ?? []) {
       if (
-        ["google_places", "openstreetmap"].includes(row.discovery_source) &&
+        ["google_places", "google_search", "openstreetmap"].includes(row.discovery_source) &&
         row.status === "discovered" &&
         !selectedKeys.has(normalize(row.retailer))
       ) {
