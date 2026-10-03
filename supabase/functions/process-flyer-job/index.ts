@@ -1,6 +1,13 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { canonicalRetailerName } from "../_shared/retailer-name.ts";
+function canonicalRetailerName(value?: string | null) {
+  const original = String(value ?? "").trim();
+  if (!original) return original || null;
+  const normalized = original.normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase().replace(/\\s+/g, " ").trim();
+  if (normalized === "supermercados kawakami" || normalized === "supermercado kawakami" || normalized === "kawakami") return "Kawakami";
+  if (normalized === "confianca supermercados" || normalized === "supermercados confianca" || normalized === "supermercado confianca" || normalized === "confianca") return "Confiança";
+  return original;
+}
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -33,7 +40,9 @@ REGRAS OBRIGATÓRIAS
 5A. NUNCA coloque em club_price valores meramente equivalentes de quantidade, como "nesta embalagem 350g saem por R$ 7,67", "1 unidade sai por R$ 1,25", "cada 100g sai por..." ou divisão de pack/fardo. Esses valores vão apenas em notes; club_price deve ser null se não houver selo/texto explícito de Clube/Vantagens/CPF/app associado ao preço.
 5B. Mecânicas de quantidade como "a partir de 2 unidades", "20% na segunda unidade", "leve X pague Y" também NÃO são club_price, salvo se o encarte identificar explicitamente aquele valor como Clube/Vantagens.
 5C. No Kawakami, promoção identificada como Cartão Elo não é preço-clube. Mantenha o preço cheio em price, use club_price=null e preserve o valor alternativo apenas em notes.
-5D. Qualquer preço que exija cartão de pagamento próprio da rede (ex.: Cartão Muffato/Credifatto, Cartão Elo ou semelhante) NÃO é preço Clube/Vantagens. Mantenha o preço normal em price, use club_price=null e registre o valor condicionado e a exigência do cartão em notes. Se o anúncio mostrar preço normal e preço especial do cartão, nunca substitua o preço normal pelo valor condicionado.
+5D. Qualquer preço que exija um MEIO DE PAGAMENTO específico da rede NÃO é preço Clube/Vantagens. Isso inclui cartão próprio, carteira/pay da rede ou condição equivalente (ex.: TaustePay, Cartão Atacadão, Cartão Carrefour, Sam's Club, Cartão Muffato/Credifatto, Cartão Elo ou semelhante).
+5E. Quando houver preço normal + preço condicionado ao meio de pagamento, grave SOMENTE o preço normal em price, use club_price=null e registre o preço condicionado e a exigência em notes. Cadastro/CPF/clube sem exigência de pagamento específico continua podendo usar club_price.
+5F. Se o anúncio mostrar SOMENTE um preço condicionado a cartão/Pay/meio de pagamento e o preço normal não estiver legível, IGNORE a oferta inteira. Nunca grave o preço condicionado em price só porque é o único número visível.
 6. Preserve a base original do anúncio em price_basis_quantity e price_basis_unit. Exemplos:
    - R$ 1,85/kg => 1 + kg
    - R$ 2,75 a cada 100g => 100 + g
@@ -975,17 +984,74 @@ async function triggerPage(jobId: string, pageNo: number) {
   }
 }
 
+async function auditPhysicalPageDetails(
+  file: File, pageNo: number, total: number, firstPassOffers: any[], preferredModel?: string,
+) {
+  if (!firstPassOffers.length) return firstPassOffers;
+  const prompt = `
+AUDITORIA DE COMPLETUDE DA OFERTA — PÁGINA ${pageNo}/${total}
+
+A leitura principal desta página já produziu as ofertas abaixo. Releia VISUALMENTE a imagem inteira, especialmente textos pequenos dentro e abaixo de cada quadrinho.
+
+PRIMEIRA LEITURA:
+${JSON.stringify(firstPassOffers)}
+
+OBJETIVO: garantir que NENHUMA informação comercial vinculada a uma oferta seja perdida.
+
+Para CADA oferta confira: categoria/produto, marca, linha/modelo, sabor/tipo/cor/variedade, peso/volume/quantidade, preço e base do preço, Clube/Vantagens, exceções, restrições, limite e demais textos pequenos do MESMO quadrinho.
+
+REGRAS:
+- Nunca invente e nunca copie informação de outro quadrinho.
+- Não remova oferta da primeira leitura apenas porque não conseguiu relê-la.
+- Não altere preço, peso ou condição sem evidência visual clara.
+- Complete campos usando somente o que estiver legível.
+- Sabores/tipos legíveis são informação importante: preserve em included_types e, quando fizerem parte da identidade comercial, também em product_name.
+- Textos como "Chocolate, Petit Gâteau, Chocomousse ou Brownie" NÃO podem ser descartados.
+- Se houver oferta visível ausente na primeira leitura, inclua-a somente com nome e preço legíveis.
+- Mantenha source_page=${pageNo}.
+- Retorne a lista COMPLETA, enriquecida, usando exatamente o schema principal.
+Retorne SOMENTE JSON válido.
+`;
+  const { parsed } = await runGemini(file, prompt, preferredModel, { maxAttempts: 1, requestTimeoutMs: 45000 });
+  return validOffers(parsed);
+}
+
+function mergeAuditedOffers(firstPassOffers: any[], auditedOffers: any[]) {
+  const merged = [...firstPassOffers];
+  for (const audited of auditedOffers) {
+    const index = merged.findIndex((existing) => {
+      if (!packageCompatible(existing, audited) || !brandCompatible(existing, audited)) return false;
+      const left = normalizeOfferIdentity(existing?.product_name);
+      const right = normalizeOfferIdentity(audited?.product_name);
+      if (!left || !right) return false;
+      return left === right || identityDice(left, right) >= 0.86;
+    });
+    if (index < 0) { merged.push(audited); continue; }
+
+    const existing = merged[index];
+    const existingPrice = positiveMoney(existing?.price);
+    const auditedPrice = positiveMoney(audited?.price);
+    const existingClub = positiveMoney(existing?.club_price);
+    const auditedClub = positiveMoney(audited?.club_price);
+    const compatiblePrice =
+      sameMoney(existingPrice, auditedPrice) ||
+      (existingClub !== null && sameMoney(existingClub, auditedPrice)) ||
+      (auditedClub !== null && sameMoney(auditedClub, existingPrice));
+    if (!compatiblePrice) continue;
+
+    const preferred = offerRichness(audited) > offerRichness(existing) ? audited : existing;
+    const other = preferred === existing ? audited : existing;
+    merged[index] = mergeDuplicateDetails(preferred, other);
+  }
+  return merged;
+}
+
 async function extractPhysicalPage(
-  job: JobRow,
-  total: number,
-  pageNo: number,
-  knownRetailers: string[] = [],
-  preferredModel?: string,
+  job: JobRow, total: number, pageNo: number, knownRetailers: string[] = [], preferredModel?: string,
 ) {
   const startedAt = Date.now();
   const file = await downloadJobFile(job, pageNo);
-  const multiImagePages =
-    Array.isArray(job.source_files) && job.source_files.length > 1;
+  const multiImagePages = Array.isArray(job.source_files) && job.source_files.length > 1;
   const prompt =
     EXTRACTION_PROMPT +
     "\n\nEXECUÇÃO EM ETAPAS — PÁGINA ALVO " + pageNo + "/" + total +
@@ -999,40 +1065,37 @@ async function extractPhysicalPage(
     "\nNÃO localize imagens nesta etapa: use image_box zerado e image_box_confidence=0. As miniaturas serão resolvidas depois pelo nome do produto." +
     "\nDefina source_page=" + pageNo + " em todos os registros retornados." +
     "\nNão omita ofertas só porque o mesmo produto pode aparecer em outra página." +
+    "\nDê prioridade máxima a textos pequenos vinculados ao mesmo quadrinho: sabores, tipos, exceções, limites, condições e base do preço." +
     (knownRetailers.length
-      ? "\nREDES JÁ CONHECIDAS NO HISTÓRICO DESTE USUÁRIO: " +
-        knownRetailers.join(", ") +
+      ? "\nREDES JÁ CONHECIDAS NO HISTÓRICO DESTE USUÁRIO: " + knownRetailers.join(", ") +
         ". Use estes nomes apenas como referência quando a identidade visual/logotipo da página for compatível. Não force uma rede conhecida se o tabloide for de uma rede nova."
       : "") +
     "\nRetorne o mesmo formato JSON do schema principal.";
 
-  const { parsed, model } = await runGemini(
-    file,
-    prompt,
-    preferredModel ?? job.result?.model,
-    {
-      // One provider attempt per Edge invocation. If it times out, processPage
-      // persists the retry counter and starts a fresh invocation with another model.
-      maxAttempts: 1,
-      requestTimeoutMs: 70000,
-    },
-  );
+  const { parsed, model } = await runGemini(file, prompt, preferredModel ?? job.result?.model, {
+    maxAttempts: 1, requestTimeoutMs: 70000,
+  });
 
-  const pageOffers = validOffers(parsed).map((offer: any) => ({
-    ...offer,
-    source_page: pageNo,
-    image_box: { x: 0, y: 0, width: 0, height: 0 },
-    image_box_confidence: 0,
+  const firstPassOffers = validOffers(parsed).map((offer: any) => ({
+    ...offer, source_page: pageNo,
+    image_box: { x: 0, y: 0, width: 0, height: 0 }, image_box_confidence: 0,
   }));
 
+  let pageOffers = firstPassOffers;
+  try {
+    const audited = await auditPhysicalPageDetails(file, pageNo, total, firstPassOffers, model);
+    pageOffers = mergeAuditedOffers(firstPassOffers, audited).map((offer: any) => ({
+      ...offer, source_page: pageNo,
+      image_box: { x: 0, y: 0, width: 0, height: 0 }, image_box_confidence: 0,
+    }));
+  } catch (auditError) {
+    console.warn("Offer completeness audit failed", pageNo, auditError);
+  }
+
   return {
-    pageNo,
-    parsed,
-    model,
-    pageOffers,
-    durationMs: Date.now() - startedAt,
-    inputBytes: file.size,
-    inputType: file.type,
+    pageNo, parsed, model, pageOffers,
+    auditApplied: true,
+    durationMs: Date.now() - startedAt, inputBytes: file.size, inputType: file.type,
   };
 }
 
