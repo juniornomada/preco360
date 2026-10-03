@@ -58,6 +58,7 @@ type SpeechWindow = Window & {
 const SILENCE_COMMIT_MS = 500;
 const SHORT_TERM_COMMIT_MS = 650;
 const SPEECH_END_STOP_MS = 180;
+const EMPTY_SPEECH_END_GRACE_MS = 900;
 const MAX_LISTENING_MS = 4500;
 
 const PONCAN_CONTEXT_PHRASES = [
@@ -347,9 +348,16 @@ export function useVoiceSearchBeta() {
           window.clearTimeout(silenceTimerRef.current);
         }
 
+        // Short terms such as "poncã" can trigger speechend before Android/Chrome
+        // emits its first transcript. Keep the fast path when text already exists,
+        // but give detected speech with no text a brief grace period.
+        const stopDelay = pendingTranscriptRef.current.trim()
+          ? SPEECH_END_STOP_MS
+          : EMPTY_SPEECH_END_GRACE_MS;
+
         silenceTimerRef.current = window.setTimeout(() => {
           recognition.stop();
-        }, SPEECH_END_STOP_MS);
+        }, stopDelay);
       };
 
       recognition.onresult = (event) => {
