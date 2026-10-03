@@ -271,7 +271,7 @@ export default function ProfilePage() {
                 <p className="text-xs font-semibold">Cidade selecionada: {selectedCity.name} - {selectedCity.state}</p>
               </div>
 
-              <p className="mt-3 text-xs font-semibold">Principais redes em {selectedCity.name} - {selectedCity.state}</p>
+              <p className="mt-3 text-xs font-semibold">Redes encontradas no Tiendeo em {selectedCity.name} - {selectedCity.state}</p>
               <div className="mt-2 space-y-1">
                 {retailerMap.length === 0 ? (
                   searchingRetailers ? (
