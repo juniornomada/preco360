@@ -52,6 +52,7 @@ const knownNetworks: Array<[RegExp, string]> = [
   [/\bsupernosso\b/i, "Supernosso"],
   [/\bepa supermercado\b|\bepa supermercados\b/i, "EPA"],
   [/\bsavegnago\b/i, "Savegnago"],
+  [/\bpao de acucar\b/i, "Pão de Açúcar"],
   [/\bpague menos\b/i, "Supermercados Pague Menos"],
 ];
 
@@ -90,6 +91,65 @@ function relevantPlace(place: any) {
     "wholesaler",
   ]);
   return types.some((type: string) => allowed.has(type));
+}
+
+async function openStreetMapSearch(city: any) {
+  const ibgeCode = String(city?.ibge_code ?? "").trim();
+  if (!/^\d{7}$/.test(ibgeCode)) return [];
+
+  const overpassQuery = `
+[out:json][timeout:25];
+area["boundary"="administrative"]["ref:IBGE"="${ibgeCode}"]->.searchArea;
+(
+  nwr["shop"="supermarket"](area.searchArea);
+  nwr["shop"="wholesale"](area.searchArea);
+);
+out center tags;
+`.trim();
+
+  const endpoints = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+          "user-agent": "Preco360/1.0 retailer-discovery",
+        },
+        body: "data=" + encodeURIComponent(overpassQuery),
+      });
+      if (!response.ok) continue;
+
+      const payload = await response.json();
+      const elements = Array.isArray(payload?.elements) ? payload.elements : [];
+      const places = elements
+        .map((element: any, index: number) => {
+          const tags = element?.tags ?? {};
+          const displayName = String(tags.brand ?? tags.name ?? "").trim();
+          if (!displayName) return null;
+          const placeId = `osm:${element.type}:${element.id}`;
+          return {
+            id: placeId,
+            displayName: { text: displayName },
+            formattedAddress: String(tags["addr:street"] ?? ""),
+            types: [tags.shop === "wholesale" ? "wholesaler" : "supermarket"],
+            businessStatus: "OPERATIONAL",
+            _rankScore: Math.max(1, 10 - Math.floor(index / 3)),
+          };
+        })
+        .filter(Boolean);
+
+      if (places.length) return places;
+    } catch (error) {
+      console.warn("OpenStreetMap retailer discovery failed", endpoint, error);
+    }
+  }
+
+  return [];
 }
 
 async function googleSearch(apiKey: string, query: string, pageToken?: string | null) {
@@ -152,7 +212,7 @@ Deno.serve(async (req: Request) => {
   try {
     const { data: city, error: cityError } = await db
       .from("cities")
-      .select("id,name,state,population,population_reference_year,retailer_target_count")
+      .select("id,name,state,ibge_code,population,population_reference_year,retailer_target_count")
       .eq("id", cityId)
       .eq("active", true)
       .single();
@@ -169,13 +229,13 @@ Deno.serve(async (req: Request) => {
 
     if (cacheError) throw cacheError;
 
-    const googleCached = (cachedRows ?? []).filter((row: any) => {
-      if (row.discovery_source !== "google_places" || !row.last_checked_at) return false;
+    const discoveryCached = (cachedRows ?? []).filter((row: any) => {
+      if (!["google_places", "openstreetmap"].includes(row.discovery_source) || !row.last_checked_at) return false;
       const age = Date.now() - new Date(row.last_checked_at).getTime();
       return Number.isFinite(age) && age >= 0 && age < CACHE_MS;
     });
 
-    if (!force && googleCached.length >= Math.min(4, target)) {
+    if (!force && discoveryCached.length >= Math.min(4, target)) {
       return json(200, {
         ok: true,
         cached: true,
@@ -186,39 +246,59 @@ Deno.serve(async (req: Request) => {
     }
 
     const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY") || "";
-    if (!apiKey) {
-      return json(503, {
-        error: "GOOGLE_PLACES_API_KEY_MISSING",
-        message: "Configure GOOGLE_PLACES_API_KEY no Supabase para ativar a descoberta automática.",
-        city,
-        target,
-        networks: (cachedRows ?? []).slice(0, target),
-      });
+    const seenPlaces = new Map<string, any>();
+    let discoverySource = "openstreetmap";
+
+    if (apiKey) {
+      const queries = [
+        `supermercados e atacarejos em ${city.name} ${city.state}, Brasil`,
+        `atacadistas e hipermercados em ${city.name} ${city.state}, Brasil`,
+      ];
+
+      try {
+        for (let qIndex = 0; qIndex < queries.length; qIndex += 1) {
+          const payload = await googleSearch(apiKey, queries[qIndex]);
+          const places = Array.isArray(payload?.places) ? payload.places : [];
+
+          for (let rank = 0; rank < places.length; rank += 1) {
+            const place = places[rank];
+            if (!place?.id || place?.businessStatus === "CLOSED_PERMANENTLY") continue;
+            if (!relevantPlace(place)) continue;
+
+            const previous = seenPlaces.get(place.id);
+            const score = Math.max(0, 20 - rank) + (qIndex === 0 ? 2 : 0);
+            if (!previous || score > previous._rankScore) {
+              seenPlaces.set(place.id, { ...place, _rankScore: score });
+            }
+          }
+
+          if (seenPlaces.size >= target * 2) break;
+        }
+        if (seenPlaces.size) discoverySource = "google_places";
+      } catch (error) {
+        console.warn("Google Places retailer discovery failed; using OpenStreetMap fallback", error);
+      }
     }
 
-    const queries = [
-      `supermercados e atacarejos em ${city.name} ${city.state}, Brasil`,
-      `atacadistas e hipermercados em ${city.name} ${city.state}, Brasil`,
-    ];
-
-    const seenPlaces = new Map<string, any>();
-    for (let qIndex = 0; qIndex < queries.length; qIndex += 1) {
-      const payload = await googleSearch(apiKey, queries[qIndex]);
-      const places = Array.isArray(payload?.places) ? payload.places : [];
-
-      for (let rank = 0; rank < places.length; rank += 1) {
-        const place = places[rank];
-        if (!place?.id || place?.businessStatus === "CLOSED_PERMANENTLY") continue;
-        if (!relevantPlace(place)) continue;
-
-        const previous = seenPlaces.get(place.id);
-        const score = Math.max(0, 20 - rank) + (qIndex === 0 ? 2 : 0);
-        if (!previous || score > previous._rankScore) {
-          seenPlaces.set(place.id, { ...place, _rankScore: score });
-        }
+    if (!seenPlaces.size) {
+      const osmPlaces = await openStreetMapSearch(city);
+      for (const place of osmPlaces) {
+        seenPlaces.set(place.id, place);
       }
+      discoverySource = "openstreetmap";
+    }
 
-      if (seenPlaces.size >= target * 2) break;
+    if (!seenPlaces.size) {
+      return json(200, {
+        ok: true,
+        cached: false,
+        city,
+        target,
+        provider: discoverySource,
+        raw_places: 0,
+        networks: (cachedRows ?? []).slice(0, target),
+        warning: "Nenhum supermercado pôde ser descoberto automaticamente agora.",
+      });
     }
 
     const grouped = new Map<string, {
@@ -277,14 +357,14 @@ Deno.serve(async (req: Request) => {
           source_count: Number(old?.source_count ?? 0),
           location_count: group.places.length,
           relevance_score: group.score,
-          discovery_source: "google_places",
+          discovery_source: discoverySource,
           external_place_ids: group.places.map((place) => place.id),
           last_checked_at: now,
           discovered_at: old?.discovered_at ?? now,
           notes:
             old?.status === "available"
               ? old?.notes ?? null
-              : `Descoberta automática via Google Places em ${city.name} - ${city.state}.`,
+              : `Descoberta automática via ${discoverySource === "google_places" ? "Google Places" : "OpenStreetMap"} em ${city.name} - ${city.state}.`,
         },
         { onConflict: "retailer,city_id" },
       );
@@ -294,7 +374,7 @@ Deno.serve(async (req: Request) => {
     const selectedKeys = new Set(ranked.map((group) => normalize(group.retailer)));
     for (const row of cachedRows ?? []) {
       if (
-        row.discovery_source === "google_places" &&
+        ["google_places", "openstreetmap"].includes(row.discovery_source) &&
         row.status === "discovered" &&
         !selectedKeys.has(normalize(row.retailer))
       ) {
@@ -321,6 +401,7 @@ Deno.serve(async (req: Request) => {
       cached: false,
       city,
       target,
+      provider: discoverySource,
       raw_places: seenPlaces.size,
       networks: finalRows ?? [],
     });
