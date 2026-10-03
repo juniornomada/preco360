@@ -3303,6 +3303,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                         </div>
                       </div>
                     </div>
+                  </div>
                 </CardContent>
               </Card>
             );
