@@ -7,9 +7,19 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
 const db = supabase as any;
+
+function normalizeCitySearch(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { DollarSign, Laptop, Loader2, LogOut, Moon, Package, RefreshCw, Store, Sun, Upload } from "lucide-react";
+import { DollarSign, Laptop, Loader2, LogOut, MapPin, Moon, Package, RefreshCw, Search, Store, Sun, Upload } from "lucide-react";
 
 export default function ProfilePage() {
   const { user, signOut } = useAuth();
@@ -19,16 +29,12 @@ export default function ProfilePage() {
   const [collecting, setCollecting] = useState(false);
   const [collectionReport, setCollectionReport] = useState<any[] | null>(null);
   const [selectedCityId, setSelectedCityId] = useState("");
+  const [selectedCity, setSelectedCity] = useState<any | null>(null);
+  const [citySearch, setCitySearch] = useState("");
+  const [debouncedCitySearch, setDebouncedCitySearch] = useState("");
+  const [cityPickerOpen, setCityPickerOpen] = useState(false);
   const [savingCity, setSavingCity] = useState(false);
-
-  const { data: cities = [] } = useQuery<any[]>({
-    queryKey: ["profile-cities-v1"],
-    queryFn: async () => {
-      const { data, error } = await db.from("cities").select("id,name,state").eq("active", true).order("state").order("name");
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
+  const [syncingCities, setSyncingCities] = useState(false);
 
   const { data: cityPreference } = useQuery<any>({
     queryKey: ["profile-city-preference-v1", user?.id],
@@ -41,14 +47,73 @@ export default function ProfilePage() {
   });
 
   useEffect(() => {
-    if (cityPreference?.city_id) setSelectedCityId(cityPreference.city_id);
-    else if (cities.length) {
-      const marilia = cities.find((city: any) => city.name === "Marília" && city.state === "SP");
-      if (marilia) setSelectedCityId(marilia.id);
-    }
-  }, [cityPreference?.city_id, cities]);
+    const preferredCity = cityPreference?.cities ?? null;
+    if (!cityPreference?.city_id || !preferredCity) return;
+    setSelectedCityId(cityPreference.city_id);
+    setSelectedCity(preferredCity);
+    setCitySearch(`${preferredCity.name} - ${preferredCity.state}`);
+  }, [cityPreference?.city_id, cityPreference?.cities]);
 
-  const selectedCity = cities.find((city: any) => city.id === selectedCityId) ?? null;
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedCitySearch(citySearch);
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [citySearch]);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+
+    const ensureBrazilCities = async () => {
+      const { count, error } = await db
+        .from("cities")
+        .select("id", { count: "exact", head: true })
+        .eq("active", true);
+
+      if (cancelled || error || Number(count ?? 0) >= 5000) return;
+
+      setSyncingCities(true);
+      const { error: syncError } = await supabase.functions.invoke("sync-brazil-cities", {
+        body: {},
+      });
+
+      if (!cancelled) {
+        setSyncingCities(false);
+        if (syncError) {
+          toast({
+            title: "Não consegui atualizar as cidades",
+            description: "A lista nacional do IBGE será tentada novamente depois.",
+            variant: "destructive",
+          });
+        }
+      }
+    };
+
+    void ensureBrazilCities();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, toast]);
+
+  const normalizedCitySearch = normalizeCitySearch(debouncedCitySearch.replace(/\s*-\s*[A-Z]{2}$/i, ""));
+
+  const { data: cityResults = [], isFetching: searchingCities } = useQuery<any[]>({
+    queryKey: ["profile-city-search-v2", normalizedCitySearch],
+    queryFn: async () => {
+      const { data, error } = await db
+        .from("cities")
+        .select("id,name,state,ibge_code")
+        .eq("active", true)
+        .ilike("search_name", `${normalizedCitySearch}%`)
+        .order("name")
+        .order("state")
+        .limit(12);
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: normalizedCitySearch.length >= 2,
+  });
 
   const { data: retailerMap = [] } = useQuery<any[]>({
     queryKey: ["profile-retailer-city-map-v1", selectedCityId],
@@ -60,14 +125,23 @@ export default function ProfilePage() {
     enabled: !!selectedCityId,
   });
 
-  const saveCity = async (cityId: string) => {
-    if (!user || !cityId) return;
+  const saveCity = async (city: any) => {
+    if (!user || !city?.id) return;
     setSavingCity(true);
     try {
-      const { error } = await db.from("user_city_preferences").upsert({ user_id: user.id, city_id: cityId }, { onConflict: "user_id" });
+      const { error } = await db
+        .from("user_city_preferences")
+        .upsert({ user_id: user.id, city_id: city.id }, { onConflict: "user_id" });
       if (error) throw error;
-      setSelectedCityId(cityId);
-      toast({ title: "Cidade atualizada", description: "O Radar agora usa esta cidade como referência." });
+
+      setSelectedCityId(city.id);
+      setSelectedCity(city);
+      setCitySearch(`${city.name} - ${city.state}`);
+      setCityPickerOpen(false);
+      toast({
+        title: "Cidade atualizada",
+        description: `${city.name} - ${city.state} agora é a referência do seu perfil.`,
+      });
     } catch (err: any) {
       toast({ title: "Não consegui salvar a cidade", description: err?.message || "Tente novamente.", variant: "destructive" });
     } finally {
@@ -130,13 +204,72 @@ export default function ProfilePage() {
       <Card className="mb-6"><CardContent className="p-4">
         <div className="mb-3">
           <p className="font-medium">Tabloides</p>
-          <p className="text-xs text-muted-foreground">Escolha sua cidade. O Radar mostra as redes mapeadas para essa localidade e usa as fontes oficiais cadastradas.</p>
-          <select className="mt-3 h-10 w-full rounded-md border bg-background px-3 text-sm" value={selectedCityId} onChange={(event) => void saveCity(event.target.value)} disabled={savingCity || cities.length === 0}>
-            {cities.map((city: any) => <option key={city.id} value={city.id}>{city.name} - {city.state}</option>)}
-          </select>
-          {selectedCity && <div className="mt-3 rounded-md border p-3"><p className="text-xs font-semibold">Redes mapeadas em {selectedCity.name} - {selectedCity.state}</p><div className="mt-2 space-y-1">
-            {retailerMap.length === 0 ? <p className="text-xs text-muted-foreground">Ainda não há redes cadastradas para esta cidade.</p> : retailerMap.map((entry: any) => <div key={entry.retailer} className="flex items-center justify-between gap-2 text-xs"><span>{entry.retailer}</span><span className={entry.status === "available" ? "font-semibold text-emerald-600" : "text-muted-foreground"}>{entry.status === "available" ? "disponível" : "em validação"}</span></div>)}
-          </div></div>}
+          <p className="text-xs text-muted-foreground">Digite sua cidade e selecione o município correto. A busca usa a base nacional de municípios do IBGE.</p>
+
+          <div className="relative mt-3">
+            <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              value={citySearch}
+              onFocus={() => setCityPickerOpen(true)}
+              onChange={(event) => {
+                setCitySearch(event.target.value);
+                setCityPickerOpen(true);
+              }}
+              placeholder="Ex.: Bauru"
+              autoComplete="off"
+              className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              disabled={savingCity}
+            />
+
+            {cityPickerOpen && normalizedCitySearch.length >= 2 && (
+              <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-md border bg-popover p-1 shadow-lg">
+                {(searchingCities || syncingCities) && cityResults.length === 0 ? (
+                  <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    {syncingCities ? "Carregando municípios do IBGE..." : "Buscando cidade..."}
+                  </div>
+                ) : cityResults.length === 0 ? (
+                  <p className="px-3 py-3 text-xs text-muted-foreground">Nenhum município encontrado.</p>
+                ) : (
+                  cityResults.map((city: any) => (
+                    <button
+                      key={city.id}
+                      type="button"
+                      onClick={() => void saveCity(city)}
+                      className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                    >
+                      <MapPin className="h-4 w-4 shrink-0 text-primary" />
+                      <span className="font-medium">{city.name}</span>
+                      <span className="text-muted-foreground">- {city.state}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          {selectedCity && (
+            <div className="mt-3 rounded-md border p-3">
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-primary" />
+                <p className="text-xs font-semibold">Cidade selecionada: {selectedCity.name} - {selectedCity.state}</p>
+              </div>
+              <p className="mt-3 text-xs font-semibold">Redes mapeadas em {selectedCity.name} - {selectedCity.state}</p>
+              <div className="mt-2 space-y-1">
+                {retailerMap.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Ainda não há redes cadastradas para esta cidade. A descoberta automática de supermercados será conectada na próxima etapa.</p>
+                ) : retailerMap.map((entry: any) => (
+                  <div key={entry.retailer} className="flex items-center justify-between gap-2 text-xs">
+                    <span>{entry.retailer}</span>
+                    <span className={entry.status === "available" ? "font-semibold text-emerald-600" : "text-muted-foreground"}>
+                      {entry.status === "available" ? "disponível" : "em validação"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <Button type="button" className="w-full gap-2" onClick={runFlyerCollection} disabled={collecting}>
           {collecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
