@@ -159,46 +159,45 @@ function tiendeoRetailerFromLine(line: string, cityName: string) {
     .trim();
 
   if (!compact) return null;
-  if (/^(?:Title|URL Source|Published Time|Markdown Content)\\s*:/i.test(compact)) return null;
+  if (/^(?:Title|URL Source|Published Time|Markdown Content)\s*:/i.test(compact)) {
+    return null;
+  }
 
   const known = canonicalRetailer(compact, cityName);
   if (known.known) return known.name;
 
-  const addressStart = compact.search(
-    /(?:Avenida|Av\.?|Rua|R\.?|Rodovia|Rod\.?|Estrada|Praça|Pç\.?|Alameda|Travessa|BR[-\s]?\d|R:)/i,
-  );
+  const addressPattern =
+    /(?:Avenida|Rua|Rodovia|Estrada|Praça|Alameda|Travessa|Av\.|Rod\.|Pç\.|R\.|R:|BR[-\s]?\d)/i;
+  const addressStart = compact.search(addressPattern);
+  if (addressStart <= 0) return null;
 
-  let candidate = addressStart > 0 ? compact.slice(0, addressStart).trim() : "";
-
-  if (!candidate) {
-    const cityIndex = normalize(compact).indexOf(normalize(cityName));
-    const distanceMatch = compact.match(/\b\d+(?:[.,]\d+)?\s*(?:m|km)\b/i);
-    const cutoff = distanceMatch?.index ?? (cityIndex > 0 ? cityIndex : -1);
-    if (cutoff > 0) {
-      const beforeLocation = compact.slice(0, cutoff).trim();
-      const commaIndex = beforeLocation.indexOf(",");
-      if (commaIndex > 2) candidate = beforeLocation.slice(0, commaIndex).trim();
-    }
-  }
-
-  candidate = candidate
+  const candidate = compact
+    .slice(0, addressStart)
     .replace(/\b(?:Aberto|Fechado|Fecha em breve)\b.*$/i, "")
     .replace(/\s+(?:loja|unidade|filial)\s*\d*$/i, "")
     .replace(/[,:;\-]+$/g, "")
     .trim();
 
   if (candidate.length < 2 || candidate.length > 80) return null;
-  if (/^(?:Avenida|Av\\.?|Rua|R\\.?|Rodovia|Rod\\.?|Estrada|Praça|Pç\\.?|Alameda|Travessa|BR[-\\s]?\\d)\\b/i.test(candidate)) {
+  if (
+    /\d{1,2}[\s/.-]\d{1,2}|\b(?:title|url source|markdown content|publicidade|catalogos?|catálogos?|folhetos?|ofertas?|valido|válido|vence|novo|ver mais|tiendeo|esta aqui)\b/i.test(
+      candidate,
+    )
+  ) {
     return null;
   }
 
-  const genericNoise =
-    /^(?:publicidade|ver mais|mapa|supermercados|catálogos?|folhetos?|ofertas?|promoções?)$/i;
-  if (genericNoise.test(candidate)) return null;
+  const normalizedCandidate = normalize(candidate);
+  if (
+    !normalizedCandidate ||
+    /^(?:mapa|supermercados?|supe|promocoes?)$/i.test(normalizedCandidate) ||
+    /^\d/.test(normalizedCandidate)
+  ) {
+    return null;
+  }
 
   return canonicalRetailer(candidate, cityName).name;
 }
-
 
 function findTiendeoSection(lines: string[]) {
   let start = -1;
@@ -303,13 +302,6 @@ async function tiendeoSearch(city: any) {
   if (!slug) return { available: false, places: [] as any[], url: null };
 
   const tiendeoUrl = `https://www.tiendeo.com.br/${slug}/supermercados`;
-  const browserHeaders = {
-    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "accept-language": "pt-BR,pt;q=0.9,en;q=0.7",
-    "user-agent":
-      "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36",
-  };
-
   const browserHeaders = {
     accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "accept-language": "pt-BR,pt;q=0.9,en;q=0.7",
