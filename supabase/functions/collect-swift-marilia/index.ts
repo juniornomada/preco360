@@ -601,13 +601,24 @@ Deno.serve(async (req: Request) => {
     }
 
     const sourceKey = "swift-online:marilia:" + today;
+    const fingerprintKey = regionId + "|" + fingerprint + "|v1";
+    const { data: previousRegistry } = await client
+      .from("flyer_source_registry")
+      .select("metadata_fingerprint")
+      .eq("user_id", USER_ID)
+      .eq("retailer", RETAILER)
+      .eq("city", CITY)
+      .eq("source_key", sourceKey)
+      .maybeSingle();
+    const changed = previousRegistry?.metadata_fingerprint !== fingerprintKey;
+
     await writeRegistry(client, {
       source_key: sourceKey,
       source_url: SOURCE_URL,
       source_title: "Swift Online · Marília",
       valid_from: today,
       valid_to: today,
-      metadata_fingerprint: regionId + "|" + fingerprint + "|v1",
+      metadata_fingerprint: fingerprintKey,
       file_hash: fingerprint,
       last_seen_at: now,
       last_downloaded_at: now,
@@ -639,6 +650,7 @@ Deno.serve(async (req: Request) => {
       valid_from: today,
       valid_to: today,
       flyer_id: flyerId,
+      changed,
       note: "Preços da loja online Swift; a loja física pode praticar valores diferentes.",
     });
   } catch (error) {
