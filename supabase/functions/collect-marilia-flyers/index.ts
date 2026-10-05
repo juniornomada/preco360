@@ -8,6 +8,7 @@ const SOURCES = [
   { retailer:"Kawakami", urls:["https://institucional.kawakami.com.br/oferta/marilia","https://institucional.kawakami.com.br/ofertas/marilia","https://institucional.kawakami.com.br/ofertas"], city:"Marília" },
   { retailer:"Confiança", urls:["https://clienteconfianca.com.br/ofertas-marilia.html","https://www.clienteconfianca.com.br/ofertas.html"], city:"Marília" },
   { retailer:"Tauste", urls:["https://institucional.tauste.com.br/ofertas","https://www.flipsnack.com/taustesupermercado/"], city:"Marília" },
+  { retailer:"Swift", urls:["https://loja.swift.com.br/"], city:"Marília" },
 ] as const;
 const USER_ID="e596fdb9-5827-438a-a01a-f452822ad757";
 const UA="Mozilla/5.0 (compatible; Preco360FlyerBot/1.0; +https://preco360.vercel.app)";
@@ -1120,6 +1121,39 @@ async function collectTauste(db:any, report:any[], onlyTitle="", manifest:any=nu
   report.push({retailer:"Tauste",endpoint:sourcePage,result:"resumo",found:publications.length,imported,unchanged,failed});
 }
 
+async function collectSwift(report:any[]){
+  const endpoint="https://loja.swift.com.br/";
+  try{
+    const fnUrl=String(Deno.env.get("SUPABASE_URL")||"")+"/functions/v1/collect-swift-marilia";
+    const response=await fetch(fnUrl,{
+      method:"POST",
+      headers:{
+        authorization:"Bearer "+String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||""),
+        "content-type":"application/json",
+      },
+      body:JSON.stringify({source:"collect-marilia-flyers"}),
+    });
+    const payload=await response.json().catch(()=>({}));
+    if(!response.ok){
+      report.push({
+        retailer:"Swift",endpoint,result:"erro",files:0,offers:0,
+        error:String(payload?.message||payload?.error||("HTTP "+response.status)),
+      });
+      return;
+    }
+    report.push({
+      retailer:"Swift",endpoint,title:"Swift Online · Marília",
+      validity:{from:payload?.valid_from||null,to:payload?.valid_to||null},
+      result:payload?.changed?"novo importado":"já conhecido antes do download",
+      files:0,offers:Number(payload?.offers||0),
+      scanned_products:Number(payload?.scanned_products||0),
+      price_scope:payload?.scope||"online_marilia",
+    });
+  }catch(error){
+    report.push({retailer:"Swift",endpoint,result:"erro",files:0,offers:0,error:String(error)});
+  }
+}
+
 Deno.serve(async(req)=>{
  if(req.method==="OPTIONS") return new Response("ok",{headers:corsHeaders});
  if(req.method!=="POST")return new Response("POST only",{status:405,headers:corsHeaders});
@@ -1149,6 +1183,10 @@ Deno.serve(async(req)=>{
   }
   if(src.retailer==="Confiança"){
     await collectConfianca(db,report);
+    continue;
+  }
+  if(src.retailer==="Swift"){
+    await collectSwift(report);
     continue;
   }
   let page:any=null, used="", err="";
