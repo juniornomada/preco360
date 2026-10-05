@@ -127,7 +127,73 @@ function packageInfo(name: string, measurementUnit?: unknown) {
   };
 }
 
-function extractDiscountedOffers(products: any[]) {
+function teaserPrice(teaser: any, regularPrice: number) {
+  const name = String(teaser?.name ?? "").trim();
+  const minimumQuantity = Number(teaser?.conditions?.minimumQuantity ?? 0) || null;
+
+  const eachMatch = name.match(
+    /(?:a partir de\s+)?(\d+)\s*(?:un|unid|unidades?)?\s+(\d+(?:[.,]\d{2}))\s*(\/kg)?\s*cada/i,
+  );
+  if (eachMatch) {
+    const quantity = Number(eachMatch[1]) || minimumQuantity || null;
+    const price = Number(eachMatch[2].replace(",", "."));
+    if (Number.isFinite(price) && price > 0 && price < regularPrice) {
+      return {
+        price,
+        minimum_quantity: quantity,
+        price_per_kg: Boolean(eachMatch[3]),
+        note: name,
+      };
+    }
+  }
+
+  const parameters = Array.isArray(teaser?.effects?.parameters)
+    ? teaser.effects.parameters
+    : [];
+  const maximum = parameters.find(
+    (parameter: any) => parameter?.name === "MaximumUnitPriceDiscount",
+  );
+  const maximumValue = Number(maximum?.value);
+  if (
+    Number.isFinite(maximumValue) &&
+    maximumValue > 0 &&
+    maximumValue / 100 < regularPrice
+  ) {
+    return {
+      price: maximumValue / 100,
+      minimum_quantity: minimumQuantity,
+      price_per_kg: /\/kg/i.test(name),
+      note: name || "Promoção por quantidade",
+    };
+  }
+
+  const percentual = parameters.find(
+    (parameter: any) => parameter?.name === "PercentualDiscount",
+  );
+  const percent = Number(percentual?.value);
+  if (
+    /segunda\s+unidade/i.test(name) &&
+    minimumQuantity === 2 &&
+    Number.isFinite(percent) &&
+    percent > 0 &&
+    percent < 100
+  ) {
+    const effectiveUnitPrice =
+      regularPrice * (2 - percent / 100) / 2;
+    return {
+      price: effectiveUnitPrice,
+      minimum_quantity: 2,
+      price_per_kg: false,
+      note:
+        name +
+        " — preço exibido no Preço 360 é a média por unidade ao levar 2.",
+    };
+  }
+
+  return null;
+}
+
+function extractSwiftOffers(products: any[]) {
   const offers: any[] = [];
 
   for (const product of products ?? []) {
@@ -147,7 +213,7 @@ function extractDiscountedOffers(products: any[]) {
           continue;
         }
 
-        const price = Number(
+        const regularPrice = Number(
           offer?.spotPrice ??
             offer?.Price ??
             offer?.price ??
@@ -159,14 +225,47 @@ function extractDiscountedOffers(products: any[]) {
             offer?.listPrice ??
             offer?.PriceWithoutDiscount ??
             offer?.priceWithoutDiscount ??
-            price,
+            regularPrice,
         );
+        if (!Number.isFinite(regularPrice) || regularPrice <= 0) continue;
 
-        if (!Number.isFinite(price) || price <= 0) continue;
-        if (!Number.isFinite(listPrice) || listPrice <= price + 0.009) continue;
+        const teasers = Array.isArray(offer?.teasers) ? offer.teasers : [];
+        const teaserCandidates = teasers
+          .map((teaser: any) => teaserPrice(teaser, regularPrice))
+          .filter(Boolean);
 
-        if (!selected || price < selected.price) {
-          selected = { offer, price, listPrice };
+        let promo: any = teaserCandidates
+          .sort((a: any, b: any) => a.price - b.price)[0] ?? null;
+
+        const directDiscount =
+          Number.isFinite(listPrice) &&
+          listPrice > regularPrice &&
+          listPrice - regularPrice >= 0.1 &&
+          (1 - regularPrice / listPrice) * 100 >= 1;
+
+        if (!promo && directDiscount) {
+          promo = {
+            price: regularPrice,
+            minimum_quantity: null,
+            price_per_kg: false,
+            note:
+              "De R$ " +
+              listPrice.toFixed(2) +
+              " por R$ " +
+              regularPrice.toFixed(2) +
+              ".",
+          };
+        }
+
+        if (!promo) continue;
+
+        if (!selected || promo.price < selected.promo.price) {
+          selected = {
+            offer,
+            regularPrice,
+            listPrice,
+            promo,
+          };
         }
       }
 
@@ -182,8 +281,14 @@ function extractDiscountedOffers(products: any[]) {
       if (!rawName) continue;
 
       const pkg = packageInfo(rawName, item?.measurementUnit);
-      const normalizedPrice =
-        pkg.factor && pkg.factor > 0 ? selected.price / pkg.factor : null;
+      const baseUnit = selected.promo.price_per_kg
+        ? "kg"
+        : pkg.base_unit;
+      const normalizedPrice = selected.promo.price_per_kg
+        ? selected.promo.price
+        : pkg.factor && pkg.factor > 0
+          ? selected.promo.price / pkg.factor
+          : null;
 
       const images = Array.isArray(item?.images) ? item.images : [];
       const imageUrl = String(
@@ -193,10 +298,6 @@ function extractDiscountedOffers(products: any[]) {
       const externalId = String(
         item?.itemId ?? item?.id ?? product?.productId ?? rawName,
       );
-      const discountPercent = Math.max(
-        0,
-        Math.round((1 - selected.price / selected.listPrice) * 100),
-      );
 
       offers.push({
         external_id: externalId,
@@ -205,20 +306,23 @@ function extractDiscountedOffers(products: any[]) {
         brand: String(product?.brand ?? "").trim() || null,
         package_quantity: pkg.package_quantity,
         package_unit: pkg.package_unit,
-        advertised_price: Number(selected.price.toFixed(2)),
-        base_unit: pkg.base_unit,
+        advertised_price: Number(selected.promo.price.toFixed(2)),
+        base_unit: baseUnit,
         normalized_price:
           normalizedPrice && Number.isFinite(normalizedPrice)
             ? Number(normalizedPrice.toFixed(4))
             : null,
+        price_basis_quantity: selected.promo.price_per_kg ? 1 : null,
+        price_basis_unit: selected.promo.price_per_kg ? "kg" : null,
+        purchase_limit: selected.promo.minimum_quantity
+          ? "Leve pelo menos " +
+            selected.promo.minimum_quantity +
+            " unidades para obter este preço."
+          : null,
         image_url: imageUrl,
         offer_notes: [
+          selected.promo.note,
           "Preço promocional da loja online Swift regionalizado para Marília.",
-          "De R$ " +
-            selected.listPrice.toFixed(2) +
-            " por R$ " +
-            selected.price.toFixed(2) +
-            (discountPercent > 0 ? " (-" + discountPercent + "%)." : "."),
           "O preço da loja física pode ser diferente.",
         ],
       });
@@ -289,7 +393,6 @@ async function fetchSearchPage(
           : "https://loja.swift.com.br/api/io/_v/api/intelligent-search/product_search/trade-policy/1";
 
       const params = new URLSearchParams({
-        query: "",
         page: String(page),
         count: "50",
         sort: "discount:desc",
@@ -426,7 +529,7 @@ Deno.serve(async (req: Request) => {
     let noDiscountPages = 0;
     const collected: any[] = [];
 
-    for (let page = 0; page < 10; page += 1) {
+    for (let page = 1; page <= 10; page += 1) {
       const result = await fetchSearchPage(regionId, segment, page, mode);
       mode = result.mode;
 
@@ -434,7 +537,7 @@ Deno.serve(async (req: Request) => {
       scannedProducts += products.length;
       if (!products.length) break;
 
-      const pageOffers = extractDiscountedOffers(products);
+      const pageOffers = extractSwiftOffers(products);
       collected.push(...pageOffers);
 
       if (pageOffers.length) noDiscountPages = 0;
@@ -529,6 +632,9 @@ Deno.serve(async (req: Request) => {
         image_url: offer.image_url,
         image_source: offer.image_url ? "swift_online" : null,
         image_match_status: offer.image_url ? "verified" : null,
+        purchase_limit: offer.purchase_limit,
+        price_basis_quantity: offer.price_basis_quantity,
+        price_basis_unit: offer.price_basis_unit,
         offer_notes: offer.offer_notes,
       }));
 
