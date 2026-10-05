@@ -11,6 +11,8 @@ const USER_ID = "e596fdb9-5827-438a-a01a-f452822ad757";
 const CITY = "Marília";
 const STATE = "SP";
 const POSTAL_CODE = "17519000";
+const MARILIA_REGION_ID = "v2.4E371F02AE6D14D7AC7E1C6FAE5BED3E";
+const MARILIA_SELLER_ID = "swiftbrmarilia5142";
 const RETAILER = "Swift";
 const SOURCE_URL = "https://loja.swift.com.br/";
 const UA = "Mozilla/5.0 (compatible; Preco360SwiftBot/1.0; +https://preco360.vercel.app)";
@@ -338,24 +340,7 @@ function extractSwiftOffers(products: any[]) {
 }
 
 async function resolveRegionId() {
-  const response = await fetch(
-    "https://loja.swift.com.br/api/checkout/pub/regions?country=BRA&postalCode=" +
-      POSTAL_CODE,
-    { headers: { accept: "application/json", "user-agent": UA } },
-  );
-
-  if (!response.ok) {
-    throw new Error("VTEX regions HTTP " + response.status);
-  }
-
-  const payload = await response.json();
-  const firstRegion = Array.isArray(payload)
-    ? payload[0]
-    : payload?.regions?.[0] ?? payload;
-  const regionId = String(firstRegion?.id ?? firstRegion?.regionId ?? "").trim();
-
-  if (!regionId) throw new Error("VTEX_REGION_NOT_FOUND");
-  return regionId;
+  return MARILIA_REGION_ID;
 }
 
 async function fetchSearchPage(regionId: string, page: number) {
@@ -485,7 +470,7 @@ Deno.serve(async (req: Request) => {
     let noDiscountPages = 0;
     const collected: any[] = [];
 
-    for (let page = 1; page <= 10; page += 1) {
+    for (let page = 1; page <= 4; page += 1) {
       const payload = await fetchSearchPage(regionId, page);
       const products = payload.products;
       scannedProducts += products.length;
@@ -631,6 +616,7 @@ Deno.serve(async (req: Request) => {
 
     console.log("swift_marilia_collection", {
       region_id: regionId,
+      seller_id: MARILIA_SELLER_ID,
       api_mode: "v1",
       scanned_products: scannedProducts,
       offers: offers.length,
