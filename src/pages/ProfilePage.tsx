@@ -187,6 +187,9 @@ export default function ProfilePage() {
       if (error) throw error;
       const report = Array.isArray(data?.report) ? data.report : [];
       setCollectionReport(report);
+      await queryClient.invalidateQueries({
+        queryKey: ["profile-retailer-city-map-v1", selectedCityId],
+      });
       const imported = report.filter((r: any) => r.result === "novo importado").length;
       toast({ title: "Coleta concluída", description: imported ? `${imported} novo(s) tabloide(s) enviado(s) para processamento.` : "Nenhum tabloide novo precisou ser importado." });
     } catch (err: any) {
@@ -291,7 +294,7 @@ export default function ProfilePage() {
                       <div key={entry.retailer} className="flex items-center justify-between gap-2 text-xs">
                         <span>{entry.retailer}</span>
                         <span className={entry.status === "available" ? "font-semibold text-emerald-600" : entry.status === "discovered" ? "font-semibold text-primary" : "text-muted-foreground"}>
-                          {entry.status === "available" ? "tabloide conectado" : entry.status === "discovered" ? "encontrada" : "em validação"}
+                          {entry.status === "available" ? "fonte conectada" : entry.status === "discovered" ? "encontrada" : "em validação"}
                         </span>
                       </div>
                     ))}
@@ -301,7 +304,7 @@ export default function ProfilePage() {
         </div>
         <Button type="button" className="w-full gap-2" onClick={runFlyerCollection} disabled={collecting}>
           {collecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          {collecting ? "Executando coleta..." : `Coletar tabloides de ${selectedCity?.name ?? "minha cidade"}`}
+          {collecting ? "Executando coleta..." : `Coletar ofertas de ${selectedCity?.name ?? "minha cidade"}`}
         </Button>
         <Button type="button" variant="outline" className="mt-2 w-full gap-2" onClick={() => navigate("/radar?view=import")}><Upload className="h-4 w-4" />Importar ofertas, gôndola ou prints do app</Button>
         {collectionReport && <div className="mt-3 space-y-2">{collectionReport.map((row: any, i: number) => <div key={`${row.retailer}-${i}`} className="rounded-md border p-2 text-xs"><div className="flex items-center justify-between gap-2"><span className="font-medium">{row.retailer}</span><span className="text-muted-foreground">{row.result}</span></div>{formatValidity(row.validity?.to) && <p className="mt-1 text-muted-foreground">Validade até {formatValidity(row.validity?.to)}</p>}{row.result === "resumo" && <p className="mt-1 text-muted-foreground">{row.found ?? 0} encontrado(s) · {row.imported ?? 0} novo(s) · {row.unchanged ?? 0} já conhecido(s) · {row.failed ?? 0} falha(s)</p>}{row.error && row.error !== "HTTP 200" && <p className="mt-1 text-destructive">{row.error}</p>}</div>)}</div>}
