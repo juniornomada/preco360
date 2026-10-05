@@ -38,6 +38,7 @@ export default function ProfilePage() {
   const [searchingRetailers, setSearchingRetailers] = useState(false);
   const [retailerSearchDone, setRetailerSearchDone] = useState(false);
   const [retailerSearchMessage, setRetailerSearchMessage] = useState("");
+  const [retailerToCollect, setRetailerToCollect] = useState("");
 
   const { data: cityPreference } = useQuery<any>({
     queryKey: ["profile-city-preference-v1", user?.id],
@@ -153,6 +154,7 @@ export default function ProfilePage() {
       setRetailerSearchMessage("");
       setCitySearch(`${city.name} - ${city.state}`);
       setCityPickerOpen(false);
+      setRetailerToCollect("");
       toast({
         title: "Cidade atualizada",
         description: `${city.name} - ${city.state} agora é a referência do seu perfil.`,
@@ -183,15 +185,26 @@ export default function ProfilePage() {
         toast({ title: "Coleta desta cidade ainda não está conectada", description: "A cidade foi cadastrada e o mapa de redes já está preparado. Agora precisamos validar as fontes oficiais dessa localidade." });
         return;
       }
-      const { data, error } = await supabase.functions.invoke("collect-marilia-flyers", { body: { manual: true } });
+      const requestedRetailer = retailerToCollect.trim();
+      const { data, error } = await supabase.functions.invoke("collect-marilia-flyers", {
+        body: { manual: true, retailer: requestedRetailer || undefined },
+      });
       if (error) throw error;
       const report = Array.isArray(data?.report) ? data.report : [];
       setCollectionReport(report);
       await queryClient.invalidateQueries({
         queryKey: ["profile-retailer-city-map-v1", selectedCityId],
       });
-      const imported = report.filter((r: any) => r.result === "novo importado").length;
-      toast({ title: "Coleta concluída", description: imported ? `${imported} novo(s) tabloide(s) enviado(s) para processamento.` : "Nenhum tabloide novo precisou ser importado." });
+      const imported = report.filter((r: any) => r.result === "novo importado" || r.result === "novo enviado para processamento").length;
+      const pendingSource = report.some((r: any) => r.result === "fonte ainda não conectada");
+      toast({
+        title: pendingSource ? "Fonte ainda não conectada" : "Coleta concluída",
+        description: pendingSource
+          ? `Ainda não há coleta automática para ${requestedRetailer}.`
+          : imported
+            ? `${imported} nova(s) fonte(s)/oferta(s) enviada(s) para processamento.`
+            : "Nenhuma oferta nova precisou ser importada.",
+      });
     } catch (err: any) {
       toast({ title: "Erro na coleta", description: err?.message || "Não foi possível executar a coleta agora.", variant: "destructive" });
     } finally {
@@ -221,7 +234,7 @@ export default function ProfilePage() {
       </div></CardContent></Card>
       <Card className="mb-6"><CardContent className="p-4">
         <div className="mb-3">
-          <p className="font-medium">Tabloides</p>
+          <p className="font-medium">Ofertas e tabloides</p>
           <p className="text-xs text-muted-foreground">Digite sua cidade e selecione o município correto. As redes serão descobertas automaticamente pelo Tiendeo.</p>
 
           <div className="relative mt-3">
@@ -302,9 +315,42 @@ export default function ProfilePage() {
             </div>
           )}
         </div>
+        <div className="mb-3">
+          <label htmlFor="retailer-to-collect" className="mb-1.5 block text-xs font-semibold">
+            Qual supermercado deseja importar as ofertas?
+          </label>
+          <input
+            id="retailer-to-collect"
+            type="text"
+            value={retailerToCollect}
+            onChange={(event) => setRetailerToCollect(event.target.value)}
+            placeholder="Ex.: Swift, Tauste, Amigão... (vazio = todos)"
+            list="retailer-suggestions"
+            autoComplete="off"
+            className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+            disabled={collecting || !selectedCity}
+          />
+          <datalist id="retailer-suggestions">
+            {Array.from(new Set([
+              ...retailerMap.map((entry: any) => String(entry.retailer)),
+              "Atacadão",
+              "Max Atacadista",
+              "Kawakami",
+              "Confiança",
+              "Tauste",
+              "Swift",
+              "Amigão",
+            ])).map((retailer) => (
+              <option key={retailer} value={retailer} />
+            ))}
+          </datalist>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Digite o nome da rede. Se deixar vazio, o sistema tenta coletar todas as fontes conectadas de {selectedCity?.name ?? "sua cidade"}.
+          </p>
+        </div>
         <Button type="button" className="w-full gap-2" onClick={runFlyerCollection} disabled={collecting}>
           {collecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          {collecting ? "Executando coleta..." : `Coletar ofertas de ${selectedCity?.name ?? "minha cidade"}`}
+          {collecting ? "Executando coleta..." : retailerToCollect.trim() ? `Importar ofertas de ${retailerToCollect.trim()}` : `Coletar ofertas de ${selectedCity?.name ?? "minha cidade"}`}
         </Button>
         <Button type="button" variant="outline" className="mt-2 w-full gap-2" onClick={() => navigate("/radar?view=import")}><Upload className="h-4 w-4" />Importar ofertas, gôndola ou prints do app</Button>
         {collectionReport && <div className="mt-3 space-y-2">{collectionReport.map((row: any, i: number) => <div key={`${row.retailer}-${i}`} className="rounded-md border p-2 text-xs"><div className="flex items-center justify-between gap-2"><span className="font-medium">{row.retailer}</span><span className="text-muted-foreground">{row.result}</span></div>{formatValidity(row.validity?.to) && <p className="mt-1 text-muted-foreground">Validade até {formatValidity(row.validity?.to)}</p>}{row.result === "resumo" && <p className="mt-1 text-muted-foreground">{row.found ?? 0} encontrado(s) · {row.imported ?? 0} novo(s) · {row.unchanged ?? 0} já conhecido(s) · {row.failed ?? 0} falha(s)</p>}{row.error && row.error !== "HTTP 200" && <p className="mt-1 text-destructive">{row.error}</p>}</div>)}</div>}
