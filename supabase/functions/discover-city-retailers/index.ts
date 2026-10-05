@@ -185,6 +185,9 @@ function tiendeoRetailerFromLine(line: string, cityName: string) {
     .trim();
 
   if (candidate.length < 2 || candidate.length > 80) return null;
+  if (/^(?:Avenida|Av\\.?|Rua|R\\.?|Rodovia|Rod\\.?|Estrada|Praça|Pç\\.?|Alameda|Travessa|BR[-\\s]?\\d)\\b/i.test(candidate)) {
+    return null;
+  }
 
   const genericNoise =
     /^(?:publicidade|ver mais|mapa|supermercados|catálogos?|folhetos?|ofertas?|promoções?)$/i;
@@ -233,18 +236,18 @@ function parseTiendeoNearbyStores(document: string, city: any) {
   const addCandidate = (raw: string, index: number) => {
     const compact = raw.replace(/\s+/g, " ").trim();
     const compactNorm = normalize(compact);
-    if (!compact || !compactNorm.includes(cityNorm)) return;
+    if (!compact || !compactNorm.includes(cityNorm)) return false;
 
     const hasAddress =
       /(?:Avenida|Av\.?|Rua|R\.?|Rodovia|Rod\.?|Estrada|Praça|Pç\.?|Alameda|Travessa|BR[-\s]?\d)/i.test(compact) ||
       /\b\d+(?:[.,]\d+)?\s*(?:m|km)\b/i.test(compact);
-    if (!hasAddress) return;
+    if (!hasAddress) return false;
 
     const retailer = tiendeoRetailerFromLine(compact, cityName);
-    if (!retailer) return;
+    if (!retailer) return false;
 
     const placeKey = `${normalize(retailer)}|${compactNorm}`;
-    if (seenPlaceKeys.has(placeKey)) return;
+    if (seenPlaceKeys.has(placeKey)) return false;
     seenPlaceKeys.add(placeKey);
 
     places.push({
@@ -255,19 +258,28 @@ function parseTiendeoNearbyStores(document: string, city: any) {
       businessStatus: "OPERATIONAL",
       _rankScore: Math.max(1, 100 - index),
     });
+    return true;
   };
 
   for (let i = sectionStart; i < sectionEnd; i += 1) {
-    addCandidate(lines[i], i);
-    if (i > sectionStart) addCandidate(`${lines[i - 1]} ${lines[i]}`, i);
-    if (i + 1 < sectionEnd) addCandidate(`${lines[i]} ${lines[i + 1]}`, i);
+    let added = addCandidate(lines[i], i);
+    if (!added && i > sectionStart) {
+      added = addCandidate(`${lines[i - 1]} ${lines[i]}`, i);
+    }
+    if (!added && i + 1 < sectionEnd) {
+      addCandidate(`${lines[i]} ${lines[i + 1]}`, i);
+    }
   }
 
   if (!places.length && headingIndex < 0) {
     for (let i = 0; i < lines.length; i += 1) {
-      addCandidate(lines[i], i);
-      if (i > 0) addCandidate(`${lines[i - 1]} ${lines[i]}`, i);
-      if (i + 1 < lines.length) addCandidate(`${lines[i]} ${lines[i + 1]}`, i);
+      let added = addCandidate(lines[i], i);
+      if (!added && i > 0) {
+        added = addCandidate(`${lines[i - 1]} ${lines[i]}`, i);
+      }
+      if (!added && i + 1 < lines.length) {
+        addCandidate(`${lines[i]} ${lines[i + 1]}`, i);
+      }
     }
   }
 
