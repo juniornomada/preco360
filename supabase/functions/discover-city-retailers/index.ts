@@ -187,15 +187,12 @@ function tiendeoRetailerFromLine(line: string, cityName: string) {
     .trim();
 
   if (candidate.length < 2 || candidate.length > 80) return null;
-  if (/^(?:Avenida|Av\.?|Rua|R\.?|Rodovia|Rod\.?|Estrada|Praça|Pç\.?|Alameda|Travessa|BR[-\s]?\d)\b/i.test(candidate)) {
-    return null;
-  }
-  if (/\d{1,2}[\s/.-]\d{1,2}|\b(?:valido|válido|vence|novo|publicidade|catalogos?|catálogos?|folhetos?|tiendeo|esta aqui|ver mais)\b/i.test(candidate)) {
+  if (/^(?:Avenida|Av\\.?|Rua|R\\.?|Rodovia|Rod\\.?|Estrada|Praça|Pç\\.?|Alameda|Travessa|BR[-\\s]?\\d)\\b/i.test(candidate)) {
     return null;
   }
 
   const genericNoise =
-    /^(?:publicidade|ver mais|mapa|supermercados?|supe|catálogos?|catalogos?|folhetos?|ofertas?|promoções?|tiendeo.*|esta aqui.*)$/i;
+    /^(?:publicidade|ver mais|mapa|supermercados|catálogos?|folhetos?|ofertas?|promoções?)$/i;
   if (genericNoise.test(candidate)) return null;
 
   return canonicalRetailer(candidate, cityName).name;
@@ -296,6 +293,13 @@ async function tiendeoSearch(city: any) {
   if (!slug) return { available: false, places: [] as any[], url: null };
 
   const tiendeoUrl = `https://www.tiendeo.com.br/${slug}/supermercados`;
+  const browserHeaders = {
+    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "accept-language": "pt-BR,pt;q=0.9,en;q=0.7",
+    "user-agent":
+      "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36",
+  };
+
   const sources = [
     {
       name: "jina-https",
