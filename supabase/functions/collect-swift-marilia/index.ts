@@ -358,78 +358,37 @@ async function resolveRegionId() {
   return regionId;
 }
 
-function segmentCookie(regionId: string) {
-  return btoa(
-    JSON.stringify({
-      campaigns: null,
-      channel: "1",
-      priceTables: null,
-      regionId,
-      utm_campaign: null,
-      utm_source: null,
-      utmi_campaign: null,
-      currencyCode: "BRL",
-      currencySymbol: "R$",
-      countryCode: "BRA",
-      cultureInfo: "pt-BR",
-    }),
-  );
-}
+async function fetchSearchPage(regionId: string, page: number) {
+  const base =
+    "https://loja.swift.com.br/api/intelligent-search/v1/product-search/trade-policy/1";
+  const params = new URLSearchParams({
+    page: String(page),
+    count: "50",
+    sort: "discount:desc",
+    locale: "pt-BR",
+    sc: "1",
+    country: "BRA",
+    regionId,
+    "zip-code": POSTAL_CODE,
+  });
 
-async function fetchSearchPage(
-  regionId: string,
-  segment: string,
-  page: number,
-  preferredMode: string,
-) {
-  const modes = preferredMode ? [preferredMode] : ["v1", "legacy"];
-  let lastError: unknown = null;
+  const response = await fetch(base + "?" + params.toString(), {
+    headers: {
+      accept: "application/json",
+      "user-agent": UA,
+    },
+  });
 
-  for (const mode of modes) {
-    try {
-      const base =
-        mode === "v1"
-          ? "https://loja.swift.com.br/api/intelligent-search/v1/product-search/trade-policy/1"
-          : "https://loja.swift.com.br/api/io/_v/api/intelligent-search/product_search/trade-policy/1";
-
-      const params = new URLSearchParams({
-        page: String(page),
-        count: "50",
-        sort: "discount:desc",
-        locale: "pt-BR",
-        sc: "1",
-      });
-
-      if (mode === "v1") {
-        params.set("country", "BRA");
-        params.set("regionId", regionId);
-      }
-
-      const headers: Record<string, string> = {
-        accept: "application/json",
-        "user-agent": UA,
-      };
-      if (mode === "legacy") {
-        headers.cookie = "vtex_segment=" + segment;
-      }
-
-      const response = await fetch(base + "?" + params.toString(), { headers });
-      if (!response.ok) {
-        throw new Error(mode + " HTTP " + response.status);
-      }
-
-      const payload = await response.json();
-      if (!Array.isArray(payload?.products)) {
-        throw new Error(mode + " RESPONSE_INVALID");
-      }
-
-      return { payload, mode };
-    } catch (error) {
-      lastError = error;
-    }
+  if (!response.ok) {
+    throw new Error("VTEX search HTTP " + response.status);
   }
 
-  throw lastError ?? new Error("SWIFT_SEARCH_FAILED");
+  const payload = await response.json();
+  if (!Array.isArray(payload?.products)) {
+    throw new Error("VTEX_SEARCH_RESPONSE_INVALID");
+  }
+
+  return payload;
 }
 
 async function writeRegistry(client: any, values: any) {
@@ -522,18 +481,13 @@ Deno.serve(async (req: Request) => {
 
   try {
     const regionId = await resolveRegionId();
-    const segment = segmentCookie(regionId);
-
-    let mode = "";
     let scannedProducts = 0;
     let noDiscountPages = 0;
     const collected: any[] = [];
 
     for (let page = 1; page <= 10; page += 1) {
-      const result = await fetchSearchPage(regionId, segment, page, mode);
-      mode = result.mode;
-
-      const products = result.payload.products;
+      const payload = await fetchSearchPage(regionId, page);
+      const products = payload.products;
       scannedProducts += products.length;
       if (!products.length) break;
 
@@ -653,7 +607,7 @@ Deno.serve(async (req: Request) => {
       source_title: "Swift Online · Marília",
       valid_from: today,
       valid_to: today,
-      metadata_fingerprint: regionId + "|" + fingerprint + "|" + mode,
+      metadata_fingerprint: regionId + "|" + fingerprint + "|v1",
       file_hash: fingerprint,
       last_seen_at: now,
       last_downloaded_at: now,
@@ -666,7 +620,7 @@ Deno.serve(async (req: Request) => {
 
     console.log("swift_marilia_collection", {
       region_id: regionId,
-      mode,
+      api_mode: "v1",
       scanned_products: scannedProducts,
       offers: offers.length,
       flyer_id: flyerId,
@@ -679,7 +633,7 @@ Deno.serve(async (req: Request) => {
       scope: "online_marilia",
       postal_code: "17519-000",
       region_id: regionId,
-      api_mode: mode,
+      api_mode: "v1",
       scanned_products: scannedProducts,
       offers: offers.length,
       valid_from: today,
