@@ -159,6 +159,7 @@ function tiendeoRetailerFromLine(line: string, cityName: string) {
     .trim();
 
   if (!compact) return null;
+  if (/^(?:Title|URL Source|Published Time|Markdown Content)\\s*:/i.test(compact)) return null;
 
   const known = canonicalRetailer(compact, cityName);
   if (known.known) return known.name;
@@ -198,64 +199,83 @@ function tiendeoRetailerFromLine(line: string, cityName: string) {
   return canonicalRetailer(candidate, cityName).name;
 }
 
+
+function findTiendeoSection(lines: string[]) {
+  let start = -1;
+  let end = lines.length;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const window = normalize(lines.slice(i, Math.min(lines.length, i + 5)).join(" "));
+    if (
+      window.includes("lojas mais proximas") &&
+      window.includes("supermercados")
+    ) {
+      start = i;
+      break;
+    }
+  }
+
+  if (start < 0) return null;
+
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const window = normalize(lines.slice(i, Math.min(lines.length, i + 5)).join(" "));
+    if (
+      window.includes("folhetos e melhores ofertas") ||
+      window.includes("supermercados em outras cidades") ||
+      window.includes("outros negocios de supermercados")
+    ) {
+      end = i;
+      break;
+    }
+  }
+
+  return { start, end };
+}
+
 function parseTiendeoNearbyStores(document: string, city: any) {
   const lines = tiendeoDocumentLines(document);
   const cityName = String(city?.name ?? "").trim();
   const cityNorm = normalize(cityName);
   if (!cityNorm) return [];
 
-  const headingIndex = lines.findIndex((line) => {
-    const n = normalize(line);
-    return (
-      n.includes("lojas mais proximas") &&
-      n.includes("supermercados")
-    ) || (
-      n.includes("lojas proximas") &&
-      n.includes("supermercados")
-    );
-  });
-
-  const sectionStart = headingIndex >= 0 ? headingIndex + 1 : 0;
-  let sectionEnd = lines.length;
-
-  if (headingIndex >= 0) {
-    for (let i = sectionStart; i < lines.length; i += 1) {
-      const n = normalize(lines[i]);
-      if (
-        n.includes("folhetos e melhores ofertas") ||
-        n.includes("supermercados em outras cidades") ||
-        n.includes("outros negocios")
-      ) {
-        sectionEnd = i;
-        break;
-      }
-    }
-  }
+  const section = findTiendeoSection(lines);
+  if (!section) return [];
 
   const places: any[] = [];
-  const seenPlaceKeys = new Set<string>();
+  const seen = new Set<string>();
 
   const addCandidate = (raw: string, index: number) => {
     const compact = raw.replace(/\s+/g, " ").trim();
     const compactNorm = normalize(compact);
     if (!compact || !compactNorm.includes(cityNorm)) return false;
 
-    const hasAddress =
-      /(?:Avenida|Av\.?|Rua|R\.?|Rodovia|Rod\.?|Estrada|Praça|Pç\.?|Alameda|Travessa|BR[-\s]?\d)/i.test(compact) ||
-      /\b\d+(?:[.,]\d+)?\s*(?:m|km)\b/i.test(compact);
-    if (!hasAddress) return false;
+    const addressPattern =
+      /(?:Avenida|Rua|Rodovia|Estrada|Praça|Alameda|Travessa|Av\.|Rod\.|Pç\.|R:|BR[-\s]?\d)/i;
+    const distancePattern = /\b\d+(?:[.,]\d+)?\s*(?:m|km)\b/i;
+    if (!addressPattern.test(compact) && !distancePattern.test(compact)) return false;
 
     const retailer = tiendeoRetailerFromLine(compact, cityName);
     if (!retailer) return false;
 
-    const placeKey = `${normalize(retailer)}|${compactNorm}`;
-    if (seenPlaceKeys.has(placeKey)) return false;
-    seenPlaceKeys.add(placeKey);
+    const retailerNorm = normalize(retailer);
+    if (
+      !retailerNorm ||
+      /^(?:title|url source|markdown content|publicidade|catalogos?|folhetos?|ofertas?|valido|vence|novo|ver mais|tiendeo)\b/i.test(retailerNorm) ||
+      /^\d/.test(retailerNorm)
+    ) {
+      return false;
+    }
+
+    const addressStart = compact.search(addressPattern);
+    const address = addressStart >= 0 ? compact.slice(addressStart).trim() : compact;
+    const placeKey = `${retailerNorm}|${normalize(address)}`;
+    if (seen.has(placeKey)) return false;
+    seen.add(placeKey);
 
     places.push({
-      id: `tiendeo:${slugifyCity(cityName)}:${normalize(retailer)}:${places.length + 1}`,
+      id: `tiendeo:${slugifyCity(cityName)}:${retailerNorm}:${places.length + 1}`,
       displayName: { text: retailer },
-      formattedAddress: compact,
+      formattedAddress: address,
       types: ["supermarket"],
       businessStatus: "OPERATIONAL",
       _rankScore: Math.max(1, 100 - index),
@@ -263,26 +283,16 @@ function parseTiendeoNearbyStores(document: string, city: any) {
     return true;
   };
 
-  for (let i = sectionStart; i < sectionEnd; i += 1) {
-    let added = addCandidate(lines[i], i);
-    if (!added && i > sectionStart) {
-      added = addCandidate(`${lines[i - 1]} ${lines[i]}`, i);
-    }
-    if (!added && i + 1 < sectionEnd) {
-      addCandidate(`${lines[i]} ${lines[i + 1]}`, i);
-    }
-  }
-
-  if (!places.length && headingIndex < 0) {
-    for (let i = 0; i < lines.length; i += 1) {
-      let added = addCandidate(lines[i], i);
-      if (!added && i > 0) {
-        added = addCandidate(`${lines[i - 1]} ${lines[i]}`, i);
-      }
-      if (!added && i + 1 < lines.length) {
-        addCandidate(`${lines[i]} ${lines[i + 1]}`, i);
+  // Store cards can arrive as one line or split across name/address/distance lines.
+  for (let i = section.start; i < section.end; i += 1) {
+    let added = false;
+    for (let size = 1; size <= 4 && i + size <= section.end; size += 1) {
+      if (addCandidate(lines.slice(i, i + size).join(" "), i)) {
+        added = true;
+        break;
       }
     }
+    if (added) continue;
   }
 
   return places;
@@ -300,7 +310,20 @@ async function tiendeoSearch(city: any) {
       "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36",
   };
 
+  const browserHeaders = {
+    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "accept-language": "pt-BR,pt;q=0.9,en;q=0.7",
+    "user-agent":
+      "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36",
+  };
+
   const sources = [
+    {
+      name: "tiendeo-direct",
+      url: tiendeoUrl,
+      init: { headers: browserHeaders } as RequestInit,
+      timeoutMs: 8000,
+    },
     {
       name: "jina-https",
       url: `https://r.jina.ai/${tiendeoUrl}`,
