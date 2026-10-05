@@ -343,37 +343,20 @@ async function resolveRegionId() {
   return MARILIA_REGION_ID;
 }
 
-async function fetchSearchPage(regionId: string, page: number) {
-  const base =
-    "https://loja.swift.com.br/api/intelligent-search/v1/product-search/trade-policy/1";
-  const params = new URLSearchParams({
-    page: String(page),
-    count: "50",
-    sort: "discount:desc",
-    locale: "pt-BR",
-    sc: "1",
-    country: "BRA",
-    regionId,
-    "zip-code": POSTAL_CODE,
-  });
+async function fetchSearchPage(client: any, page: number) {
+  const { data, error } = await client.rpc(
+    "swift_marilia_vtex_search_page_v1",
+    { p_page: page },
+  );
 
-  const response = await fetch(base + "?" + params.toString(), {
-    headers: {
-      accept: "application/json",
-      "user-agent": UA,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error("VTEX search HTTP " + response.status);
+  if (error) {
+    throw new Error("Swift VTEX proxy: " + error.message);
   }
-
-  const payload = await response.json();
-  if (!Array.isArray(payload?.products)) {
+  if (!Array.isArray(data?.products)) {
     throw new Error("VTEX_SEARCH_RESPONSE_INVALID");
   }
 
-  return payload;
+  return data;
 }
 
 async function writeRegistry(client: any, values: any) {
@@ -471,7 +454,7 @@ Deno.serve(async (req: Request) => {
     const collected: any[] = [];
 
     for (let page = 1; page <= 4; page += 1) {
-      const payload = await fetchSearchPage(regionId, page);
+      const payload = await fetchSearchPage(client, page);
       const products = payload.products;
       scannedProducts += products.length;
       if (!products.length) break;
