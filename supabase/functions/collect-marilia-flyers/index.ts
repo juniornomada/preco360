@@ -9,11 +9,39 @@ const SOURCES = [
   { retailer:"Confiança", urls:["https://clienteconfianca.com.br/ofertas-marilia.html","https://www.clienteconfianca.com.br/ofertas.html"], city:"Marília" },
   { retailer:"Tauste", urls:["https://institucional.tauste.com.br/ofertas","https://www.flipsnack.com/taustesupermercado/"], city:"Marília" },
   { retailer:"Swift", urls:["https://loja.swift.com.br/"], city:"Marília" },
+  { retailer:"Amigão", urls:["https://institucional.amigao.com/encartes-e-tv/?loja=marilia","https://institucional.amigao.com/ofertas/?cidade=marilia"], city:"Marília" },
 ] as const;
 const USER_ID="e596fdb9-5827-438a-a01a-f452822ad757";
 const UA="Mozilla/5.0 (compatible; Preco360FlyerBot/1.0; +https://preco360.vercel.app)";
 
 function sb(){return createClient(Deno.env.get("SUPABASE_URL")!,Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,{auth:{persistSession:false}})}
+function retailerKey(value:string){
+  return String(value||"")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g," ")
+    .trim();
+}
+function resolveRequestedRetailer(value:string){
+  const key=retailerKey(value);
+  if(!key || key==="todos" || key==="todas") return "";
+  const aliases:Record<string,string>={
+    "atacadao":"Atacadão",
+    "max":"Max Atacadista",
+    "max atacadista":"Max Atacadista",
+    "kawakami":"Kawakami",
+    "confianca":"Confiança",
+    "confianca supermercados":"Confiança",
+    "tauste":"Tauste",
+    "swift":"Swift",
+    "amigao":"Amigão",
+    "amigao supermercados":"Amigão",
+  };
+  if(aliases[key]) return aliases[key];
+  const exact=SOURCES.find(src=>retailerKey(src.retailer)===key);
+  return exact?.retailer||value.trim();
+}
 function clean(u:string){try{const x=new URL(u);x.hash="";["utm_source","utm_medium","utm_campaign","fbclid","gclid"].forEach(k=>x.searchParams.delete(k));return x.toString()}catch{return u}}
 function abs(h:string,b:string){try{return new URL(h,b).toString()}catch{return ""}}
 function textOnly(s:string){return s.replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/&nbsp;/g," ").replace(/\s+/g," ").trim()}
@@ -1161,10 +1189,28 @@ Deno.serve(async(req)=>{
  if(expected && key!==expected)return new Response("unauthorized",{status:401,headers:corsHeaders});
  const db=sb(), report:any[]=[];
  let body:any={}; try{body=await req.json()}catch{}
- const requestedRetailer=String(body?.retailer||"").trim();
+ const requestedRetailer=resolveRequestedRetailer(String(body?.retailer||""));
  const requestedTitle=String(body?.title||"").trim();
+ const supportedRetailer=requestedRetailer
+   ? SOURCES.find(src=>retailerKey(src.retailer)===retailerKey(requestedRetailer))
+   : null;
+ if(requestedRetailer && !supportedRetailer){
+   report.push({
+     retailer:requestedRetailer,
+     result:"fonte ainda não conectada",
+     files:0,
+     offers:0,
+     error:"A rede foi informada, mas ainda não existe uma fonte oficial automatizada cadastrada para Marília.",
+   });
+   return new Response(JSON.stringify({
+     city:"Marília",
+     ran_at:new Date().toISOString(),
+     requested_retailer:requestedRetailer,
+     report,
+   }),{headers:{...corsHeaders,"content-type":"application/json"}});
+ }
  for(const src of SOURCES){
-  if(requestedRetailer && src.retailer!==requestedRetailer) continue;
+  if(requestedRetailer && retailerKey(src.retailer)!==retailerKey(requestedRetailer)) continue;
   if(src.retailer==="Atacadão"){
     await collectAtacadao(db,report,requestedTitle);
     continue;
