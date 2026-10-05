@@ -146,12 +146,12 @@ function tiendeoDocumentLines(document: string) {
         .replace(/\s+/g, " ")
         .trim()
     )
-    .filter(Bolean);
+    .filter(Boolean);
 }
 
 function tiendeoRetailerFromLine(line: string, cityName: string) {
   const compact = String(line ?? "")
-    .replace(/\[(5.*?)\]\([^)]*\)/g, "$1")
+    .replace(/\[(.*?)\]\([^)]*\)/g, "$1")
     .replace(/^\s*[-*•]+\s*/, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -369,12 +369,12 @@ async function tiendeoSearch(city: any) {
     city: city?.name,
     state: city?.state,
     url: tiendeoUrl,
-    provider_available: providerAvaile,
+    provider_available: providerAvailable,
     failures,
   });
 
   return {
-    available: providerAvaile,
+    available: providerAvailable,
     places: [] as any[],
     url: tiendeoUrl,
     source: null,
