@@ -111,10 +111,48 @@ async function fetchTextWithTimeout(
   }
 }
 
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&ccedil;/gi, "ç")
+    .replace(/&atilde;/gi, "ã")
+    .replace(/&aacute;/gi, "á")
+    .replace(/&eacute;/gi, "é")
+    .replace(/&iacute;/gi, "í")
+    .replace(/&oacute;/gi, "ó")
+    .replace(/&uacute;/gi, "ú");
+}
+
+function tiendeoDocumentLines(document: string) {
+  let value = String(document ?? "");
+
+  if (/<(?:html|body|main|section|article|div|li|p|h[1-6]|script)\b/i.test(value)) {
+    value = value
+      .replace(/<script\b[\s\S]*?<\/script>/gi, "\n")
+      .replace(/<style\b[\s\S]*?<\/style>/gi, "\n")
+      .replace(/<\/?(?:main|section|article|div|li|ul|ol|p|h[1-6]|br|tr|td|th)\b[^>]*>/gi, "\n")
+      .replace(/<[^>]+>/g, " ");
+  }
+
+  return decodeHtmlEntities(value)
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .replace(/\[(.*?)\]\([^)]*\)/g, "$1")
+        .replace(/^\s*[-*•]+\s*/, "")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+    .filter(Bolean);
+}
+
 function tiendeoRetailerFromLine(line: string, cityName: string) {
-  const compact = line
+  const compact = String(line ?? "")
+    .replace(/\[(5.*?)\]\([^)]*\)/g, "$1")
     .replace(/^\s*[-*•]+\s*/, "")
-    .replace(/\[(.*?)\]\([^)]*\)/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -128,50 +166,109 @@ function tiendeoRetailerFromLine(line: string, cityName: string) {
   );
 
   let candidate = addressStart > 0 ? compact.slice(0, addressStart).trim() : "";
+
+  if (!candidate) {
+    const cityIndex = normalize(compact).indexOf(normalize(cityName));
+    const distanceMatch = compact.match(/\b\d+(?:[.,]\d+)?\s*(?:m|km)\b/i);
+    const cutoff = distanceMatch?.index ?? (cityIndex > 0 ? cityIndex : -1);
+    if (cutoff > 0) {
+      const beforeLocation = compact.slice(0, cutoff).trim();
+      const commaIndex = beforeLocation.indexOf(",");
+      if (commaIndex > 2) candidate = beforeLocation.slice(0, commaIndex).trim();
+    }
+  }
+
   candidate = candidate
+    .replace(/\b(?:Aberto|Fechado|Fecha em breve)\b.*$/i, "")
     .replace(/\s+(?:loja|unidade|filial)\s*\d*$/i, "")
     .replace(/[,:;\-]+$/g, "")
     .trim();
 
-  if (candidate.length < 3 || candidate.length > 80) return null;
+  if (candidate.length < 2 || candidate.length > 80) return null;
+
+  const genericNoise =
+    /^(?:publicidade|ver mais|mapa|supermercados|catálogos?|folhetos?|ofertas?|promoções?)$/i;
+  if (genericNoise.test(candidate)) return null;
+
   return canonicalRetailer(candidate, cityName).name;
 }
 
-function parseTiendeoNearbyStores(markdown: string, city: any) {
-  const lines = String(markdown ?? "").split(/\r?\n/);
-  const headingIndex = lines.findIndex((line) =>
-    /As lojas mais próximas de Supermercados em/i.test(line),
-  );
+function parseTiendeoNearbyStores(document: string, city: any) {
+  const lines = tiendeoDocumentLines(document);
+  const cityName = String(city?.name ?? "").trim();
+  const cityNorm = normalize(cityName);
+  if (!cityNorm) return [];
 
-  if (headingIndex < 0) return [];
+  const headingIndex = lines.findIndex((line) => {
+    const n = normalize(line);
+    return (
+      n.includes("lojas mais proximas") &&
+      n.includes("supermercados")
+    ) || (
+      n.includes("lojas proximas") &&
+      n.includes("supermercados")
+    );
+  });
 
-  const cityNorm = normalize(city?.name);
+  const sectionStart = headingIndex >= 0 ? headingIndex + 1 : 0;
+  let sectionEnd = lines.length;
+
+  if (headingIndex >= 0) {
+    for (let i = sectionStart; i < lines.length; i += 1) {
+      const n = normalize(lines[i]);
+      if (
+        n.includes("folhetos e melhores ofertas") ||
+        n.includes("supermercados em outras cidades") ||
+        n.includes("outros negocios")
+      ) {
+        sectionEnd = i;
+        break;
+      }
+    }
+  }
+
   const places: any[] = [];
-  const seenNames = new Map<string, number>();
+  const seenPlaceKeys = new Set<string>();
 
-  for (let i = headingIndex + 1; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (/^\s*##\s+/.test(line)) break;
-    if (!/^\s*[-*•]\s+/.test(line)) continue;
+  const addCandidate = (raw: string, index: number) => {
+    const compact = raw.replace(/\s+/g, " ").trim();
+    const compactNorm = normalize(compact);
+    if (!compact || !compactNorm.includes(cityNorm)) return;
 
-    const lineNorm = normalize(line);
-    if (!cityNorm || !lineNorm.includes(cityNorm)) continue;
+    const hasAddress =
+      /(?:Avenida|Av\.?|Rua|R\.?|Rodovia|Rod\.?|Estrada|Praça|Pç\.?|Alameda|Travessa|BR[-\s]?\d)/i.test(compact) ||
+      /\b\d+(?:[.,]\d+)?\s*(?:m|km)\b/i.test(compact);
+    if (!hasAddress) return;
 
-    const retailer = tiendeoRetailerFromLine(line, city?.name ?? "");
-    if (!retailer) continue;
+    const retailer = tiendeoRetailerFromLine(compact, cityName);
+    if (!retailer) return;
 
-    const key = normalize(retailer);
-    const count = (seenNames.get(key) ?? 0) + 1;
-    seenNames.set(key, count);
+    const placeKey = `${normalize(retailer)}|${compactNorm}`;
+    if (seenPlaceKeys.has(placeKey)) return;
+    seenPlaceKeys.add(placeKey);
 
     places.push({
-      id: `tiendeo:${slugifyCity(city?.name)}:${key}:${count}`,
+      id: `tiendeo:${slugifyCity(cityName)}:${normalize(retailer)}:${places.length + 1}`,
       displayName: { text: retailer },
-      formattedAddress: line.replace(/^\s*[-*•]+\s*/, "").trim(),
+      formattedAddress: compact,
       types: ["supermarket"],
       businessStatus: "OPERATIONAL",
-      _rankScore: Math.max(1, 100 - places.length),
+      _rankScore: Math.max(1, 100 - index),
     });
+  };
+
+  for (let i = sectionStart; i < sectionEnd; i += 1) {
+    addCandidate(lines[i], i);
+    if (i > sectionStart) addCandidate(`${lines[i - 1]} ${lines[i]}`, i);
+    if (i + 1 < sectionEnd) addCandidate(`${lines[i]} ${lines[i + 1]}`, i);
+  }
+
+  if (!places.length && headingIndex < 0) {
+    for (let i = 0; i < lines.length; i += 1) {
+      addCandidate(lines[i], i);
+      if (i > 0) addCandidate(`${lines[i - 1]} ${lines[i]}`, i);
+      if (i + 1 < lines.length) addCandidate(`${lines[i]} ${lines[i + 1]}`, i);
+    }
   }
 
   return places;
@@ -182,47 +279,106 @@ async function tiendeoSearch(city: any) {
   if (!slug) return { available: false, places: [] as any[], url: null };
 
   const tiendeoUrl = `https://www.tiendeo.com.br/${slug}/supermercados`;
-  const readerUrl = `https://r.jina.ai/${tiendeoUrl}`;
+  const browserHeaders = {
+    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "accept-language": "pt-BR,pt;q=0.9,en;q=0.7",
+    "user-agent":
+      "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36",
+  };
 
-  try {
-    const markdown = await fetchTextWithTimeout(
-      readerUrl,
-      {
+  const sources = [
+    {
+      name: "tiendeo-direct",
+      url: tiendeoUrl,
+      init: { headers: browserHeaders } as RequestInit,
+      timeoutMs: 8000,
+    },
+    {
+      name: "jina-https",
+      url: `https://r.jina.ai/${tiendeoUrl}`,
+      init: {
         headers: {
           accept: "text/plain",
           "x-return-format": "markdown",
         },
-      },
-      10000,
-    );
+      } as RequestInit,
+      timeoutMs: 10000,
+    },
+    {
+      name: "jina-http",
+      url: `https://r.jina.ai/http://www.tiendeo.com.br/${slug}/supermercados`,
+      init: {
+        headers: {
+          accept: "text/plain",
+          "x-return-format": "markdown",
+        },
+      } as RequestInit,
+      timeoutMs: 10000,
+    },
+  ];
 
-    const pageLooksValid =
-      /Tiendeo/i.test(markdown) ||
-      /Supermercados em/i.test(markdown) ||
-      /As lojas mais próximas de Supermercados em/i.test(markdown);
+  let providerAvailable = false;
+  const failures: string[] = [];
 
-    if (!pageLooksValid) {
-      throw new Error("TIENDEO_PAGE_INVALID");
+  for (const source of sources) {
+    try {
+      const document = await fetchTextWithTimeout(
+        source.url,
+        source.init,
+        source.timeoutMs,
+      );
+
+      const pageLooksValid =
+        /Tiendeo/i.test(document) ||
+        /Supermercados em/i.test(document) ||
+        /lojas.{0,40}Supermercados/i.test(document);
+
+      if (!pageLooksValid) {
+        failures.push(`${source.name}:TIENDEO_PAGE_INVALID`);
+        continue;
+      }
+
+      providerAvailable = true;
+      const places = parseTiendeoNearbyStores(document, city);
+
+      console.log("tiendeo_retailer_discovery", {
+        city: city?.name,
+        state: city?.state,
+        url: tiendeoUrl,
+        source: source.name,
+        document_chars: document.length,
+        places: places.length,
+      });
+
+      if (places.length > 0) {
+        return {
+          available: true,
+          places,
+          url: tiendeoUrl,
+          source: source.name,
+        };
+      }
+    } catch (error) {
+      failures.push(
+        `${source.name}:${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-
-    const places = parseTiendeoNearbyStores(markdown, city);
-    console.log("tiendeo_retailer_discovery", {
-      city: city?.name,
-      state: city?.state,
-      url: tiendeoUrl,
-      places: places.length,
-    });
-
-    return { available: true, places, url: tiendeoUrl };
-  } catch (error) {
-    console.warn("Tiendeo retailer discovery failed", {
-      city: city?.name,
-      state: city?.state,
-      url: tiendeoUrl,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return { available: false, places: [] as any[], url: tiendeoUrl };
   }
+
+  console.warn("Tiendeo retailer discovery returned no stores", {
+    city: city?.name,
+    state: city?.state,
+    url: tiendeoUrl,
+    provider_available: providerAvaile,
+    failures,
+  });
+
+  return {
+    available: providerAvaile,
+    places: [] as any[],
+    url: tiendeoUrl,
+    source: null,
+  };
 }
 
 Deno.serve(async (req: Request) => {
