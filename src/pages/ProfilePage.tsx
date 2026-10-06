@@ -606,18 +606,13 @@ export default function ProfilePage() {
               {manualRetailers.length > 0 && (
                 <div className="mt-3 space-y-1">
                   {manualRetailers.map((entry: any) => {
-                    const connected = retailerMap.some(
-                      (item: any) =>
-                        normalizeCitySearch(String(item.retailer)) ===
-                          normalizeCitySearch(String(entry.retailer)) &&
-                        item.status === "available",
-                    );
+                    const status = sourceStatusLabel(entry.retailer);
                     return (
                       <div key={entry.retailer} className="flex items-center justify-between gap-2 text-xs">
                         <span className="min-w-0 truncate">{entry.retailer}</span>
                         <div className="flex shrink-0 items-center gap-2">
-                          <span className={connected ? "font-semibold text-emerald-600" : "text-muted-foreground"}>
-                            {connected ? "fonte conectada" : "adicionada manualmente"}
+                          <span className={status.className}>
+                            {status.label}
                           </span>
                           <button
                             type="button"
