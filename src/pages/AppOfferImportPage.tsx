@@ -127,6 +127,68 @@ function displayNumber(value: number | null) {
     ? ""
     : String(value).replace(".", ",");
 }
+function parseBrlPriceFromNote(value: string) {
+  const match = String(value ?? "").match(/R\$\s*([0-9.]+(?:,[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)/i);
+  if (!match) return null;
+  const raw = match[1];
+  const normalized = raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function structuredAppOfferConditions(
+  notes: string[] | null | undefined,
+  retailer: string,
+  promotionalPrice: number,
+) {
+  const remainingNotes: string[] = [];
+  const storeRestrictions: string[] = [];
+  let purchaseLimit: string | null = null;
+  let clubAdvertisedPrice: number | null = null;
+
+  for (const raw of notes ?? []) {
+    const note = String(raw ?? "").replace(/\s+/g, " ").trim();
+    if (!note) continue;
+
+    const limit = note.match(/limitad[ao]?\s+a\s+(\d+)\s+unidades?/i);
+    if (limit) {
+      if (!purchaseLimit) purchaseLimit = "Limitada a " + Number(limit[1]) + " unidades";
+      continue;
+    }
+
+    if (/v[aá]lida?\s+na\s+loja\s+f[ií]sica|exclusivo\s+loja/i.test(note)) {
+      if (!storeRestrictions.some((item) => normalizeSearchText(item) === normalizeSearchText(note))) storeRestrictions.push(note);
+      continue;
+    }
+
+    if (/clube\s+max\s+paga/i.test(note)) {
+      const parsed = parseBrlPriceFromNote(note);
+      if (parsed) clubAdvertisedPrice = parsed;
+    }
+
+    if (!remainingNotes.some((item) => normalizeSearchText(item) === normalizeSearchText(note))) remainingNotes.push(note);
+  }
+
+  const isMax = normalizeSearchText(canonicalRetailerName(retailer)) === "max atacadista";
+  const clubPrice = isMax && remainingNotes.some((note) => /clube\s+max\s+paga/i.test(note));
+  if (clubPrice && !clubAdvertisedPrice && promotionalPrice > 0) clubAdvertisedPrice = promotionalPrice;
+
+  return { purchaseLimit, storeRestrictions, clubPrice, clubAdvertisedPrice, remainingNotes };
+}
+
+function cleanAppOfferName(value: string) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/\bGarraf(?=\s+\d)/gi, "Garrafa")
+    .replace(/\bBranc(?=\s+(?:[A-ZÀ-Ý]|\d))/g, "Branco")
+    .replace(/\bFati(?=\s+(?:[A-ZÀ-Ý]|\d))/g, "Fatiado")
+    .replace(/\bCastr(?=\s+(?:[A-ZÀ-Ý]|\d))/g, "Castrados")
+    .replace(/\b(Caixa|Envelope)\s+1\s+(?=(?:[A-ZÀ-Ý][^\d]{0,20})?\d+(?:[.,]\d+)?\s*(?:kg|g|ml|l)\b)/gi, "$1 ")
+    .replace(/\bPacote\s+Com\s+(\d+)\s+U\s+\1\s*un\b/gi, "Pacote com $1un")
+    .replace(/\b(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|un)\s+\1\s*\2\b$/i, "$1$2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function packageNameLabel(
   quantity: number | null | undefined,
@@ -502,11 +564,13 @@ export default function AppOfferImportPage() {
 
     for (const offer of extracted) {
       const name = String(offer.product_name || "").trim();
-      const displayName = offerNameWithBrandAndPackage(
-        name,
-        offer.brand,
-        offer.package_quantity,
-        offer.package_unit,
+      const displayName = cleanAppOfferName(
+        offerNameWithBrandAndPackage(
+          name,
+          offer.brand,
+          offer.package_quantity,
+          offer.package_unit,
+        ),
       );
       const price = Number(offer.promotional_price);
       if (!name || !Number.isFinite(price) || price <= 0) continue;
@@ -747,23 +811,38 @@ export default function AppOfferImportPage() {
         if (flyerError) throw flyerError;
 
         const itemRows = groupRows.map((row) => {
-          const finalName = offerNameWithBrandAndPackage(
-            row.rawName,
-            row.brand,
-            row.packageQuantity,
-            row.packageUnit,
+          const finalName = cleanAppOfferName(
+            offerNameWithBrandAndPackage(
+              row.rawName,
+              row.brand,
+              row.packageQuantity,
+              row.packageUnit,
+            ),
           );
           const packageInfo =
             row.packageQuantity && row.packageUnit
               ? inferPackage(`${row.packageQuantity}${row.packageUnit}`)
               : inferPackage(finalName);
-          const normalized = normalizedUnitPrice(row.price, packageInfo);
-          const notes = [
-            ...row.notes,
-            alreadyActivated
-              ? "Oferta do app · ativada"
-              : "Oferta do app · requer ativação",
-          ];
+          const conditions = structuredAppOfferConditions(row.notes, supermarket, row.price);
+          const effectivePrice =
+            conditions.clubPrice && conditions.clubAdvertisedPrice
+              ? conditions.clubAdvertisedPrice
+              : row.price;
+          const normalPrice =
+            conditions.clubPrice &&
+            row.regularPrice &&
+            Number.isFinite(row.regularPrice) &&
+            row.regularPrice > effectivePrice
+              ? row.regularPrice
+              : row.price;
+          const normalized = normalizedUnitPrice(effectivePrice, packageInfo);
+          const activationNote = alreadyActivated
+            ? "Oferta do app · ativada"
+            : "Oferta do app · requer ativação";
+          const notes = [...conditions.remainingNotes];
+          if (!notes.some((note) => normalizeSearchText(note) === normalizeSearchText(activationNote))) {
+            notes.push(activationNote);
+          }
 
           return {
             flyer_id: flyer.id,
@@ -773,11 +852,13 @@ export default function AppOfferImportPage() {
             brand: row.brand,
             package_quantity: row.packageQuantity,
             package_unit: row.packageUnit,
-            advertised_price: row.price,
+            advertised_price: normalPrice,
             base_unit: normalized.baseUnit,
             normalized_price: normalized.normalizedPrice,
-            club_price: false,
-            club_advertised_price: null,
+            club_price: conditions.clubPrice,
+            club_advertised_price: conditions.clubPrice ? conditions.clubAdvertisedPrice : null,
+            store_restrictions: conditions.storeRestrictions,
+            purchase_limit: conditions.purchaseLimit,
             product_id: row.productId,
             match_confidence: row.matchConfidence,
             match_type: row.productId ? row.matchType : "unmatched",
@@ -786,7 +867,6 @@ export default function AppOfferImportPage() {
             offer_notes: notes,
           };
         });
-
         const { error: itemsError } = await db.from("flyer_items").insert(itemRows);
         if (itemsError) throw itemsError;
       }
