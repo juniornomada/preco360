@@ -769,8 +769,9 @@ Deno.serve(async (req: Request) => {
   }
 
   const results: any[] = [];
+  const targets = retailers.slice(0, 30);
 
-  for (const retailer of retailers.slice(0, 30)) {
+  const processRetailer = async (retailer: string) => {
     const retailerKey = compactKey(retailer);
 
     const { data: existing } = await admin
@@ -816,15 +817,19 @@ Deno.serve(async (req: Request) => {
       });
 
     if (upsertError) {
-      results.push({
+      return {
         retailer,
         source_status: "temporary_error",
         error: upsertError.message,
-      });
-      continue;
+      };
     }
 
-    results.push(values);
+    return values;
+  };
+
+  for (let index = 0; index < targets.length; index += 4) {
+    const batch = targets.slice(index, index + 4);
+    results.push(...(await Promise.all(batch.map(processRetailer))));
   }
 
   return json(200, {
