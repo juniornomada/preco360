@@ -34,7 +34,12 @@ REGRAS
 12. Não confunda preço parcelado, economia percentual ou preço anterior com promotional_price.
 13. Não invente datas, peso, preço ou nome.
 14. confidence deve refletir a leitura. Abaixo de 0,65, omita a oferta.
-15. Retorne SOMENTE JSON válido, sem markdown.
+15. Quando aparecer uma condição como "CLUBE MAX PAGA R$ 9,99", preserve essa frase em notes exatamente como condição de clube; promotional_price continua sendo o preço efetivo promocional.
+16. Quando aparecer "LIMITADA A X UNIDADES", preserve essa frase em notes. Não coloque o limite dentro do nome do produto.
+17. Se houver vários pesos/tamanhos alternativos na mesma oferta (ex.: 70g/80g/90g), mantenha-os no product_name e use package_quantity/package_unit somente se houver um único tamanho inequivocamente aplicável.
+18. Evite repetir o mesmo peso/tamanho no product_name e não transforme fragmentos de interface, número de card ou quantidade de itens em embalagem do produto.
+19. Preserve palavras completas quando estiverem legíveis. Não acrescente marca, peso ou descrição que não esteja visível.
+20. Retorne SOMENTE JSON válido, sem markdown.
 
 Estrutura:
 {
