@@ -517,16 +517,17 @@ async function syncRetailer(
   const merged = new Map<string, { url: string; title: string }>();
   let searchError = "";
 
-  for (const query of searches) {
-    try {
-      for (const result of await searchWeb(query)) {
-        const parsed = safeUrl(result.url);
-        if (!parsed || isBlockedHost(parsed)) continue;
-        const key = parsed.toString();
-        if (!merged.has(key)) merged.set(key, result);
-      }
-    } catch (error) {
-      searchError = error instanceof Error ? error.message : String(error);
+  const searchRuns = await Promise.allSettled(searches.map((query) => searchWeb(query)));
+  for (const run of searchRuns) {
+    if (run.status === "rejected") {
+      searchError = run.reason instanceof Error ? run.reason.message : String(run.reason);
+      continue;
+    }
+    for (const result of run.value) {
+      const parsed = safeUrl(result.url);
+      if (!parsed || isBlockedHost(parsed)) continue;
+      const key = parsed.toString();
+      if (!merged.has(key)) merged.set(key, result);
     }
   }
 
@@ -558,16 +559,19 @@ async function syncRetailer(
     };
   }
 
-  const inspections: any[] = [];
-  for (const result of ranked) {
-    const inspected = await inspectUrl(
-      retailer,
-      city.name,
-      result.url,
-      result.title,
-    );
-    if (inspected) inspections.push({ ...inspected, score: result.score });
-  }
+  const inspections = (
+    await Promise.all(
+      ranked.slice(0, 4).map(async (result) => {
+        const inspected = await inspectUrl(
+          retailer,
+          city.name,
+          result.url,
+          result.title,
+        );
+        return inspected ? { ...inspected, score: result.score } : null;
+      }),
+    )
+  ).filter(Boolean) as any[];
 
   const credible = inspections.filter(
     (item) => item.ok && item.retailer_score >= 0.5,
