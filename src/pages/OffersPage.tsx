@@ -602,7 +602,12 @@ const searchStopWords = new Set([
 ]);
 
 function searchTokens(value: string) {
-  return normalizeSearchText(value)
+  const voiceAliasNormalized = String(value ?? "").replace(
+    /\b(?:quinino|quenino|que\s+nino|qui\s+nino|ki\s+nino)\b/gi,
+    "kinino",
+  );
+
+  return normalizeSearchText(voiceAliasNormalized)
     .split(/\s+/)
     .filter(Boolean)
     .map((token) => {
@@ -1082,10 +1087,21 @@ function standardizedOfferName(item: FlyerItemRow, family: OfferFamily) {
     );
   }
 
-  return [headRule.label, brand, remainder]
+  let displayName = [headRule.label, brand, remainder]
     .map(cleanDisplayNamePart)
     .filter(Boolean)
     .join(" ");
+
+  // Final guard for catalog/OCR names such as "Café Melitta Café Tipos".
+  if (family === "coffeeGround" && brand) {
+    const repeatedCoffee = new RegExp(
+      "^Café\\s+" + escapeRegex(brand).replace(/\\ /g, "\\s+") + "\\s+Café\\b",
+      "i",
+    );
+    displayName = displayName.replace(repeatedCoffee, "Café " + brand);
+  }
+
+  return displayName;
 }
 
 function familySemanticTokens(intent: SearchFamilyIntent | null) {
