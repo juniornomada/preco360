@@ -77,8 +77,11 @@ export function normalizeVoiceSearchTranscript(value: string) {
   if (key === "sau") return "sal";
   if (PONCAN_ALIASES.has(key)) return "poncan";
 
-  if (/\bquinino\b/i.test(normalized)) {
-    return normalized.replace(/\bquinino\b/gi, "Kinino");
+  if (/\b(?:quinino|quenino|que\s+nino|qui\s+nino|ki\s+nino)\b/i.test(normalized)) {
+    return normalized.replace(
+      /\b(?:quinino|quenino|que\s+nino|qui\s+nino|ki\s+nino)\b/gi,
+      "Kinino",
+    );
   }
 
   return normalized;
