@@ -332,9 +332,14 @@ export default function ProfilePage() {
 
       if (!active) return;
 
-      await queryClient.invalidateQueries({
-        queryKey: ["profile-retailer-city-map-v1", selectedCityId],
-      });
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["profile-retailer-city-map-v1", selectedCityId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["profile-retailer-sources-v1", user?.id, selectedCityId],
+        }),
+      ]);
 
       if (!active) return;
 
@@ -410,13 +415,31 @@ export default function ProfilePage() {
         return;
       }
       const requestedRetailer = retailerToCollect.trim();
+      const availableRetailers = requestedRetailer
+        ? [requestedRetailer]
+        : capturableRetailers;
+      const matchingSources = dynamicCaptureSources.filter((source: any) =>
+        availableRetailers.some(
+          (retailer) =>
+            normalizeCitySearch(retailer) ===
+            normalizeCitySearch(String(source.retailer || "")),
+        ),
+      );
+
+      if (!requestedRetailer && availableRetailers.length === 0) {
+        toast({
+          title: "Nenhuma fonte pronta para importar",
+          description: "Sincronize as fontes primeiro. O sistema importará apenas redes com fonte validada e captura disponível.",
+        });
+        return;
+      }
+
       const { data, error } = await supabase.functions.invoke("collect-marilia-flyers", {
         body: {
           manual: true,
           retailer: requestedRetailer || undefined,
-          retailers: requestedRetailer || retailerCollectionList.length === 0
-            ? undefined
-            : retailerCollectionList,
+          retailers: requestedRetailer ? undefined : availableRetailers,
+          sources: matchingSources,
         },
       });
       if (error) throw error;
