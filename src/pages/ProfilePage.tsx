@@ -137,6 +137,124 @@ export default function ProfilePage() {
     ).values(),
   ).sort((a, b) => String(a).localeCompare(String(b), "pt-BR"));
 
+  const sourceConnectionMap = new Map(
+    sourceConnections.map((source: any) => [
+      normalizeCitySearch(String(source.retailer || "")),
+      source,
+    ]),
+  );
+
+  const sourceStatusLabel = (retailer: string) => {
+    const key = normalizeCitySearch(retailer);
+    const source = sourceConnectionMap.get(key) as any;
+    const previouslyConnected = retailerMap.some(
+      (entry: any) =>
+        normalizeCitySearch(String(entry.retailer || "")) === key &&
+        entry.status === "available",
+    );
+
+    if (!source) {
+      return previouslyConnected
+        ? { label: "fonte conectada", className: "font-semibold text-emerald-600" }
+        : { label: "não verificada", className: "text-muted-foreground" };
+    }
+
+    if (source.source_status === "available" && source.capture_supported) {
+      return { label: "fonte conectada", className: "font-semibold text-emerald-600" };
+    }
+    if (source.source_status === "available") {
+      return { label: "oferta encontrada · captura pendente", className: "font-semibold text-amber-600" };
+    }
+    if (source.source_status === "no_offer") {
+      return { label: "nenhuma oferta encontrada", className: "text-muted-foreground" };
+    }
+    if (source.source_status === "site_not_found") {
+      return { label: "site não encontrado", className: "text-muted-foreground" };
+    }
+    if (source.source_status === "temporary_error") {
+      return { label: "indisponível temporariamente", className: "font-semibold text-amber-600" };
+    }
+    if (source.source_status === "review") {
+      return { label: "verificar", className: "font-semibold text-amber-600" };
+    }
+    return { label: "não verificada", className: "text-muted-foreground" };
+  };
+
+  const capturableRetailers = retailerCollectionList.filter((retailer) => {
+    const key = normalizeCitySearch(retailer);
+    const source = sourceConnectionMap.get(key) as any;
+    if (source?.source_status === "available" && source?.capture_supported) return true;
+    return retailerMap.some(
+      (entry: any) =>
+        normalizeCitySearch(String(entry.retailer || "")) === key &&
+        entry.status === "available",
+    );
+  });
+
+  const dynamicCaptureSources = sourceConnections
+    .filter(
+      (source: any) =>
+        source.source_status === "available" &&
+        source.capture_supported &&
+        source.offers_url,
+    )
+    .map((source: any) => ({
+      retailer: source.retailer,
+      offers_url: source.offers_url,
+      asset_urls: Array.isArray(source.metadata?.assets)
+        ? source.metadata.assets
+            .map((asset: any) => String(asset?.url || "").trim())
+            .filter(Boolean)
+        : [],
+    }));
+
+  const syncSources = async (retailer?: string) => {
+    if (!selectedCityId) return;
+    setSyncingSources(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("sync-retailer-sources", {
+        body: {
+          city_id: selectedCityId,
+          retailer: retailer?.trim() || undefined,
+        },
+      });
+      if (error) throw error;
+
+      await queryClient.invalidateQueries({
+        queryKey: ["profile-retailer-sources-v1", user?.id, selectedCityId],
+      });
+
+      const results = Array.isArray(data?.results) ? data.results : [];
+      const available = results.filter((row: any) => row.source_status === "available").length;
+      const connected = results.filter(
+        (row: any) => row.source_status === "available" && row.capture_supported,
+      ).length;
+      const noOffer = results.filter((row: any) => row.source_status === "no_offer").length;
+      const pending = results.length - available - noOffer;
+
+      const parts = [
+        String(results.length) + " rede(s) verificadas",
+        String(available) + " com oferta/fonte disponível",
+        String(connected) + " prontas para captura",
+      ];
+      if (noOffer) parts.push(String(noOffer) + " sem oferta encontrada");
+      if (pending) parts.push(String(pending) + " para revisar");
+
+      toast({
+        title: "Sincronização concluída",
+        description: parts.join(" · ") + ".",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Erro ao sincronizar fontes",
+        description: err?.message || "Não foi possível verificar as fontes agora.",
+        variant: "destructive",
+      });
+    } finally {
+      setSyncingSources(false);
+    }
+  };
+
   const addManualRetailer = async () => {
     const retailer = manualRetailerName.replace(/\s+/g, " ").trim();
     if (!user || !selectedCityId || !retailer) return;
