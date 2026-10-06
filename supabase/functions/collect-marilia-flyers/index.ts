@@ -1190,27 +1190,32 @@ Deno.serve(async(req)=>{
  const db=sb(), report:any[]=[];
  let body:any={}; try{body=await req.json()}catch{}
  const requestedRetailer=resolveRequestedRetailer(String(body?.retailer||""));
+ const requestedRetailers=Array.from(new Map(
+   [
+     ...(requestedRetailer?[requestedRetailer]:[]),
+     ...(Array.isArray(body?.retailers)?body.retailers:[])
+       .map((value:any)=>resolveRequestedRetailer(String(value||"")))
+       .filter(Boolean),
+   ].map((value:string)=>[retailerKey(value),value])
+ ).values()).filter(Boolean) as string[];
  const requestedTitle=String(body?.title||"").trim();
- const supportedRetailer=requestedRetailer
-   ? SOURCES.find(src=>retailerKey(src.retailer)===retailerKey(requestedRetailer))
-   : null;
- if(requestedRetailer && !supportedRetailer){
-   report.push({
-     retailer:requestedRetailer,
-     result:"fonte ainda não conectada",
-     files:0,
-     offers:0,
-     error:"A rede foi informada, mas ainda não existe uma fonte oficial automatizada cadastrada para Marília.",
-   });
-   return new Response(JSON.stringify({
-     city:"Marília",
-     ran_at:new Date().toISOString(),
-     requested_retailer:requestedRetailer,
-     report,
-   }),{headers:{...corsHeaders,"content-type":"application/json"}});
+ const requestedKeys=new Set(requestedRetailers.map(retailerKey));
+
+ for(const retailer of requestedRetailers){
+   const supported=SOURCES.some(src=>retailerKey(src.retailer)===retailerKey(retailer));
+   if(!supported){
+     report.push({
+       retailer,
+       result:"fonte ainda não conectada",
+       files:0,
+       offers:0,
+       error:"A rede está salva na sua lista, mas ainda não existe uma fonte oficial automatizada cadastrada para Marília.",
+     });
+   }
  }
+
  for(const src of SOURCES){
-  if(requestedRetailer && retailerKey(src.retailer)!==retailerKey(requestedRetailer)) continue;
+  if(requestedKeys.size && !requestedKeys.has(retailerKey(src.retailer))) continue;
   if(src.retailer==="Atacadão"){
     await collectAtacadao(db,report,requestedTitle);
     continue;
@@ -1268,5 +1273,10 @@ Deno.serve(async(req)=>{
   if(!handled) report.push({retailer:src.retailer,endpoint:used,validity:val,result:links.length?"erro":"sem asset oficial obtível com segurança",files:0,offers:0,error:err||null});
   else report.push({retailer:src.retailer,endpoint:used,result:"resumo",found:links.length,imported,unchanged,failed});
  }
- return new Response(JSON.stringify({city:"Marília",ran_at:new Date().toISOString(),report}),{headers:{...corsHeaders,"content-type":"application/json"}});
+ return new Response(JSON.stringify({
+   city:"Marília",
+   ran_at:new Date().toISOString(),
+   requested_retailers:requestedRetailers,
+   report,
+ }),{headers:{...corsHeaders,"content-type":"application/json"}});
 });
