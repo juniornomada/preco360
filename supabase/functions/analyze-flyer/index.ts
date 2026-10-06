@@ -31,7 +31,7 @@ REGRAS OBRIGATÓRIAS
 2. Um produto distinto = um registro. Se o encarte disser "Abóbora ... OU Repolho ... R$ 1,85/kg", crie DOIS registros, ambos a R$ 1,85/kg.
 3. Variações do MESMO produto (sabores, cores, tipos) permanecem em um registro. Preencha included_types quando os tipos estiverem legíveis.
 4. Se houver "tipos, exceto X/Y", mantenha o produto em um registro e coloque X/Y em excluded_types. Não misture a exceção no nome do produto.
-5. Preço Clube/Vantagens deve ficar em club_price. O preço normal fica em price. Não substitua o preço normal pelo Clube.
+5. Preço Clube/Vantagens deve ficar em club_price. O preço normal fica em price. Não substitua o preço normal pelo Clube.\n5A. Preço que exige meio de pagamento específico (cartão próprio, carteira/pay da rede ou equivalente) NÃO é club_price. Preserve-o somente em notes e mantenha price como o preço normal.\n5B. REGRA ESPECÍFICA DO ATACADÃO: se houver três faixas — PREÇO VAREJO/ATACADO, PREÇO COM OFERTA ATIVADA NO APP e PREÇO COM OFERTA ATIVADA NO APP PAGANDO COM CARTÃO ATACADÃO, CARREFOUR OU SAM’S CLUB — grave o primeiro em price, o segundo em club_price e preserve o terceiro apenas em notes como preço condicionado a APP + cartão. Ex.: 8,50 / 8,07 / 7,10 => price=8.50, club_price=8.07; 7.10 somente em notes.\n5C. Se retailer=Atacadão, ignore ofertas que pertençam claramente a outra rede/app/clube (por exemplo Clube Max/Max Atacadista). Não misture peças de origens diferentes.
 6. Preserve a base original do anúncio em price_basis_quantity e price_basis_unit. Exemplos:
    - R$ 1,85/kg => 1 + kg
    - R$ 2,75 a cada 100g => 100 + g
