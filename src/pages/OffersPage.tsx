@@ -609,6 +609,7 @@ function searchTokens(value: string) {
       if (["refri", "refr"].includes(token)) return "refrigerante";
       if (["qj", "qjo"].includes(token)) return "queijo";
       if (["muss", "mussar", "mozzarella"].includes(token)) return "mussarela";
+      if (token === "quinino") return "kinino";
       return normalizePoncaSearchToken(token);
     })
     .filter((token) => !searchStopWords.has(token));
