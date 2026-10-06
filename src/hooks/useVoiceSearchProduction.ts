@@ -81,6 +81,11 @@ export function normalizeVoiceSearchProductionTranscript(value: string) {
   if (key === "sau") return "sal";
   if (PONCAN_ALIASES.has(key)) return "poncã";
 
+  // Common pt-BR ASR confusion for the Kinino brand.
+  if (/\bquinino\b/i.test(normalized)) {
+    return normalized.replace(/\bquinino\b/gi, "Kinino");
+  }
+
   return normalized;
 }
 
