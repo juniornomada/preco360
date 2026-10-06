@@ -40,7 +40,7 @@ export default function ProfilePage() {
   const [retailerSearchMessage, setRetailerSearchMessage] = useState("");
   const [retailerToCollect, setRetailerToCollect] = useState("");
   const [manualRetailerName, setManualRetailerName] = useState("");
-  const [savingManualRetailer, setSavingManualRetailer] = useState(false);
+  const [savingManualRetailer, setSavingManualRetailer] = useState(false);\n  const [syncingSources, setSyncingSources] = useState(false);
 
   const { data: cityPreference } = useQuery<any>({
     queryKey: ["profile-city-preference-v1", user?.id],
@@ -111,7 +111,7 @@ export default function ProfilePage() {
     enabled: !!user && !!selectedCityId,
   });
 
-  const retailerCollectionList = Array.from(
+  const { data: sourceConnections = [] } = useQuery<any[]>({\n    queryKey: ["profile-retailer-sources-v1", user?.id, selectedCityId],\n    queryFn: async () => {\n      const { data, error } = await db\n        .from("user_city_retailer_sources")\n        .select("retailer,official_site_url,offers_url,source_type,source_status,city_verified,capture_supported,collector_key,last_sync_at,last_offer_seen_at,last_error,metadata")\n        .eq("user_id", user!.id)\n        .eq("city_id", selectedCityId)\n        .order("retailer");\n      if (error) throw error;\n      return data ?? [];\n    },\n    enabled: !!user && !!selectedCityId,\n  });\n  const retailerCollectionList = Array.from(
     new Map(
       [
         ...retailerMap.map((entry: any) => String(entry.retailer || "").trim()),
