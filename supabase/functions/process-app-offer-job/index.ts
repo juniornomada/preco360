@@ -194,7 +194,7 @@ async function processBatch(jobId: string) {
 
     await updateJob(jobId, {
       status: "processing",
-      progress_current: processedFiles.length,
+      progress_current: Math.min(sources.length, Math.max(processedFiles.length + 1, source.index)),
       progress_total: sources.length,
       progress_label: `Analisando print ${source.index} de ${sources.length} no servidor…`,
       error_message: null,
