@@ -19,7 +19,7 @@ function normalizeCitySearch(value: string) {
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { DollarSign, Laptop, Loader2, LogOut, MapPin, Moon, Package, RefreshCw, Search, Store, Sun, Upload } from "lucide-react";
+import { DollarSign, Laptop, Loader2, LogOut, MapPin, Moon, Package, Plus, RefreshCw, Search, Store, Sun, Trash2, Upload } from "lucide-react";
 
 export default function ProfilePage() {
   const { user, signOut } = useAuth();
@@ -39,6 +39,8 @@ export default function ProfilePage() {
   const [retailerSearchDone, setRetailerSearchDone] = useState(false);
   const [retailerSearchMessage, setRetailerSearchMessage] = useState("");
   const [retailerToCollect, setRetailerToCollect] = useState("");
+  const [manualRetailerName, setManualRetailerName] = useState("");
+  const [savingManualRetailer, setSavingManualRetailer] = useState(false);
 
   const { data: cityPreference } = useQuery<any>({
     queryKey: ["profile-city-preference-v1", user?.id],
@@ -93,6 +95,94 @@ export default function ProfilePage() {
     },
     enabled: !!selectedCityId,
   });
+
+  const { data: manualRetailers = [] } = useQuery<any[]>({
+    queryKey: ["profile-manual-retailers-v1", user?.id, selectedCityId],
+    queryFn: async () => {
+      const { data, error } = await db
+        .from("user_city_retailers")
+        .select("retailer,created_at")
+        .eq("user_id", user!.id)
+        .eq("city_id", selectedCityId)
+        .order("retailer");
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!user && !!selectedCityId,
+  });
+
+  const retailerCollectionList = Array.from(
+    new Map(
+      [
+        ...retailerMap.map((entry: any) => String(entry.retailer || "").trim()),
+        ...manualRetailers.map((entry: any) => String(entry.retailer || "").trim()),
+      ]
+        .filter(Boolean)
+        .map((retailer) => [normalizeCitySearch(retailer), retailer]),
+    ).values(),
+  ).sort((a, b) => String(a).localeCompare(String(b), "pt-BR"));
+
+  const addManualRetailer = async () => {
+    const retailer = manualRetailerName.replace(/\s+/g, " ").trim();
+    if (!user || !selectedCityId || !retailer) return;
+    if (retailer.length < 2) {
+      toast({ title: "Informe o supermercado", description: "Digite pelo menos 2 caracteres." });
+      return;
+    }
+
+    setSavingManualRetailer(true);
+    try {
+      const { error } = await db.from("user_city_retailers").insert({
+        user_id: user.id,
+        city_id: selectedCityId,
+        retailer,
+      });
+      if (error && error.code !== "23505") throw error;
+
+      setManualRetailerName("");
+      await queryClient.invalidateQueries({
+        queryKey: ["profile-manual-retailers-v1", user.id, selectedCityId],
+      });
+      toast({
+        title: error?.code === "23505" ? "Rede já cadastrada" : "Supermercado adicionado",
+        description: error?.code === "23505"
+          ? retailer + " já faz parte da lista desta cidade."
+          : retailer + " foi adicionado à lista de " + (selectedCity?.name ?? "sua cidade") + ".",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Não consegui adicionar a rede",
+        description: err?.message || "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingManualRetailer(false);
+    }
+  };
+
+  const removeManualRetailer = async (retailer: string) => {
+    if (!user || !selectedCityId) return;
+    try {
+      const { error } = await db
+        .from("user_city_retailers")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("city_id", selectedCityId)
+        .eq("retailer", retailer);
+      if (error) throw error;
+
+      await queryClient.invalidateQueries({
+        queryKey: ["profile-manual-retailers-v1", user.id, selectedCityId],
+      });
+      toast({ title: "Rede removida", description: retailer + " saiu da lista manual." });
+    } catch (err: any) {
+      toast({
+        title: "Não consegui remover a rede",
+        description: err?.message || "Tente novamente.",
+        variant: "destructive",
+      });
+    }
+  };
 
   useEffect(() => {
     if (!selectedCityId) return;
@@ -155,6 +245,7 @@ export default function ProfilePage() {
       setCitySearch(`${city.name} - ${city.state}`);
       setCityPickerOpen(false);
       setRetailerToCollect("");
+      setManualRetailerName("");
       toast({
         title: "Cidade atualizada",
         description: `${city.name} - ${city.state} agora é a referência do seu perfil.`,
@@ -187,7 +278,13 @@ export default function ProfilePage() {
       }
       const requestedRetailer = retailerToCollect.trim();
       const { data, error } = await supabase.functions.invoke("collect-marilia-flyers", {
-        body: { manual: true, retailer: requestedRetailer || undefined },
+        body: {
+          manual: true,
+          retailer: requestedRetailer || undefined,
+          retailers: requestedRetailer || retailerCollectionList.length === 0
+            ? undefined
+            : retailerCollectionList,
+        },
       });
       if (error) throw error;
       const report = Array.isArray(data?.report) ? data.report : [];
@@ -196,11 +293,11 @@ export default function ProfilePage() {
         queryKey: ["profile-retailer-city-map-v1", selectedCityId],
       });
       const imported = report.filter((r: any) => r.result === "novo importado" || r.result === "novo enviado para processamento").length;
-      const pendingSource = report.some((r: any) => r.result === "fonte ainda não conectada");
+      const pendingCount = report.filter((r: any) => r.result === "fonte ainda não conectada").length;
       toast({
-        title: pendingSource ? "Fonte ainda não conectada" : "Coleta concluída",
-        description: pendingSource
-          ? `Ainda não há coleta automática para ${requestedRetailer}.`
+        title: pendingCount ? "Coleta concluída com pendências" : "Coleta concluída",
+        description: pendingCount
+          ? `${imported} nova(s) importação(ões) iniciada(s) e ${pendingCount} rede(s) ainda sem fonte automática.`
           : imported
             ? `${imported} nova(s) fonte(s)/oferta(s) enviada(s) para processamento.`
             : "Nenhuma oferta nova precisou ser importada.",
@@ -314,6 +411,74 @@ export default function ProfilePage() {
               </div>
             </div>
           )}
+
+          {selectedCity && (
+            <div className="mt-3 rounded-md border p-3">
+              <p className="text-xs font-semibold">Adicionar supermercados manualmente</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                A lista fica salva para {selectedCity.name} - {selectedCity.state}. Redes sem integração continuam cadastradas até a fonte ser conectada.
+              </p>
+
+              <div className="mt-2 flex gap-2">
+                <input
+                  type="text"
+                  value={manualRetailerName}
+                  onChange={(event) => setManualRetailerName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void addManualRetailer();
+                    }
+                  }}
+                  placeholder="Ex.: Pão de Açúcar"
+                  autoComplete="off"
+                  className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                  disabled={savingManualRetailer}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 shrink-0 gap-1 px-3"
+                  onClick={() => void addManualRetailer()}
+                  disabled={savingManualRetailer || !manualRetailerName.trim()}
+                >
+                  {savingManualRetailer ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Adicionar
+                </Button>
+              </div>
+
+              {manualRetailers.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  {manualRetailers.map((entry: any) => {
+                    const connected = retailerMap.some(
+                      (item: any) =>
+                        normalizeCitySearch(String(item.retailer)) ===
+                          normalizeCitySearch(String(entry.retailer)) &&
+                        item.status === "available",
+                    );
+                    return (
+                      <div key={entry.retailer} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="min-w-0 truncate">{entry.retailer}</span>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className={connected ? "font-semibold text-emerald-600" : "text-muted-foreground"}>
+                            {connected ? "fonte conectada" : "adicionada manualmente"}
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive"
+                            onClick={() => void removeManualRetailer(entry.retailer)}
+                            aria-label={`Remover ${entry.retailer}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="mb-3">
           <label htmlFor="retailer-to-collect" className="mb-1.5 block text-xs font-semibold">
@@ -332,7 +497,7 @@ export default function ProfilePage() {
           />
           <datalist id="retailer-suggestions">
             {Array.from(new Set([
-              ...retailerMap.map((entry: any) => String(entry.retailer)),
+              ...retailerCollectionList,
               "Atacadão",
               "Max Atacadista",
               "Kawakami",
@@ -345,12 +510,12 @@ export default function ProfilePage() {
             ))}
           </datalist>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Digite o nome da rede. Se deixar vazio, o sistema tenta coletar todas as fontes conectadas de {selectedCity?.name ?? "sua cidade"}.
+            Digite uma rede específica. Se deixar vazio, o sistema tenta importar todas as redes encontradas ou adicionadas manualmente em {selectedCity?.name ?? "sua cidade"}.
           </p>
         </div>
         <Button type="button" className="w-full gap-2" onClick={runFlyerCollection} disabled={collecting}>
           {collecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          {collecting ? "Executando coleta..." : retailerToCollect.trim() ? `Importar ofertas de ${retailerToCollect.trim()}` : `Coletar ofertas de ${selectedCity?.name ?? "minha cidade"}`}
+          {collecting ? "Executando coleta..." : retailerToCollect.trim() ? `Importar ofertas de ${retailerToCollect.trim()}` : retailerCollectionList.length ? `Importar ofertas de todos (${retailerCollectionList.length})` : `Coletar ofertas de ${selectedCity?.name ?? "minha cidade"}`}
         </Button>
         <Button type="button" variant="outline" className="mt-2 w-full gap-2" onClick={() => navigate("/radar?view=import")}><Upload className="h-4 w-4" />Importar ofertas, gôndola ou prints do app</Button>
         {collectionReport && <div className="mt-3 space-y-2">{collectionReport.map((row: any, i: number) => <div key={`${row.retailer}-${i}`} className="rounded-md border p-2 text-xs"><div className="flex items-center justify-between gap-2"><span className="font-medium">{row.retailer}</span><span className="text-muted-foreground">{row.result}</span></div>{formatValidity(row.validity?.to) && <p className="mt-1 text-muted-foreground">Validade até {formatValidity(row.validity?.to)}</p>}{row.result === "resumo" && <p className="mt-1 text-muted-foreground">{row.found ?? 0} encontrado(s) · {row.imported ?? 0} novo(s) · {row.unchanged ?? 0} já conhecido(s) · {row.failed ?? 0} falha(s)</p>}{row.error && row.error !== "HTTP 200" && <p className="mt-1 text-destructive">{row.error}</p>}</div>)}</div>}
