@@ -1189,6 +1189,24 @@ Deno.serve(async(req)=>{
  if(expected && key!==expected)return new Response("unauthorized",{status:401,headers:corsHeaders});
  const db=sb(), report:any[]=[];
  let body:any={}; try{body=await req.json()}catch{}
+ const dynamicSources=(Array.isArray(body?.sources)?body.sources:[])
+   .map((source:any)=>{
+     const retailer=String(source?.retailer||"").replace(/\s+/g," ").trim();
+     const urls=Array.from(new Set([
+       String(source?.offers_url||"").trim(),
+       ...(Array.isArray(source?.asset_urls)?source.asset_urls.map((value:any)=>String(value||"").trim()):[]),
+     ].filter(Boolean)));
+     return retailer&&urls.length?{retailer,urls,city:"Marília"}:null;
+   })
+   .filter(Boolean) as Array<{retailer:string;urls:string[];city:string}>;
+
+ const runtimeSources=Array.from(new Map(
+   [
+     ...SOURCES.map((source:any)=>[retailerKey(source.retailer),source] as const),
+     ...dynamicSources.map((source:any)=>[retailerKey(source.retailer),source] as const),
+   ]
+ ).values());
+
  const requestedRetailer=resolveRequestedRetailer(String(body?.retailer||""));
  const requestedRetailers=Array.from(new Map(
    [
@@ -1202,19 +1220,19 @@ Deno.serve(async(req)=>{
  const requestedKeys=new Set(requestedRetailers.map(retailerKey));
 
  for(const retailer of requestedRetailers){
-   const supported=SOURCES.some(src=>retailerKey(src.retailer)===retailerKey(retailer));
+   const supported=runtimeSources.some(src=>retailerKey(src.retailer)===retailerKey(retailer));
    if(!supported){
      report.push({
        retailer,
        result:"fonte ainda não conectada",
        files:0,
        offers:0,
-       error:"A rede está salva na sua lista, mas ainda não existe uma fonte oficial automatizada cadastrada para Marília.",
+       error:"A rede está salva na sua lista, mas a sincronização ainda não encontrou uma fonte capturável para Marília.",
      });
    }
  }
 
- for(const src of SOURCES){
+ for(const src of runtimeSources){
   if(requestedKeys.size && !requestedKeys.has(retailerKey(src.retailer))) continue;
   if(src.retailer==="Atacadão"){
     await collectAtacadao(db,report,requestedTitle);
@@ -1241,9 +1259,27 @@ Deno.serve(async(req)=>{
     continue;
   }
   let page:any=null, used="", err="";
-  for(const u of src.urls){try{const r=await fetchSafe(u);if(r.ok){const h=await r.text();if(/mar[ií]lia/i.test(h)||src.retailer==="Tauste"){page={html:h,headers:r.headers};used=r.url;break}}err=`HTTP ${r.status}`}catch(e){err=String(e)}}
+  for(const u of src.urls){
+   try{
+    const r=await fetchSafe(u);
+    if(!r.ok){err=`HTTP ${r.status}`;continue}
+    const ct=String(r.headers.get("content-type")||"").toLowerCase();
+    const directAsset=/(pdf|image)/i.test(ct)||/\.(pdf|png|jpe?g|webp)(\?|$)/i.test(r.url);
+    if(directAsset){
+      page={html:`${src.retailer} ofertas Marília`,headers:r.headers,directAssets:[r.url]};
+      used=r.url;
+      break;
+    }
+    const h=await r.text();
+    if(/mar[ií]lia/i.test(h)||src.retailer==="Tauste"){
+      page={html:h,headers:r.headers};
+      used=r.url;
+      break;
+    }
+   }catch(e){err=String(e)}
+  }
   if(!page){report.push({retailer:src.retailer,result:"erro",error:err||"página oficial indisponível"});continue}
-  const plain=textOnly(page.html), val=validity(plain), links=candidates(page.html,used,src.retailer);
+  const plain=textOnly(page.html), val=validity(plain), links=page.directAssets?.length?page.directAssets:candidates(page.html,used,src.retailer);
   let handled=0, imported=0, unchanged=0, failed=0;
   for(const asset of links){
    const sourceKey=clean(asset).replace(/([?&](token|sig|signature|expires)=[^&]*)/gi,"");
