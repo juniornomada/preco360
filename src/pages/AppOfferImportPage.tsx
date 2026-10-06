@@ -190,6 +190,20 @@ function cleanAppOfferName(value: string) {
     .trim();
 }
 
+function hasMultipleDistinctPackageSizes(value: string) {
+  const matches = [
+    ...String(value ?? "").matchAll(/\b(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|lt|un|und|unid)\b/gi),
+  ];
+  const distinct = new Set(
+    matches.map((match) => {
+      const quantity = Number(String(match[1]).replace(",", "."));
+      const rawUnit = String(match[2]).toLowerCase();
+      const unit = rawUnit === "lt" ? "l" : ["und", "unid"].includes(rawUnit) ? "un" : rawUnit;
+      return Number.isFinite(quantity) ? quantity + "|" + unit : "";
+    }).filter(Boolean),
+  );
+  return distinct.size > 1;
+}
 function packageNameLabel(
   quantity: number | null | undefined,
   unit: string | null | undefined,
@@ -361,20 +375,23 @@ function offerNameWithBrandAndPackage(
 }
 
 function candidateFromOffer(offer: ExtractedAppOffer): FlyerCandidate {
+  const multipleSizes = hasMultipleDistinctPackageSizes(offer.product_name);
   const packageText =
-    offer.package_quantity && offer.package_unit
+    !multipleSizes && offer.package_quantity && offer.package_unit
       ? `${offer.package_quantity}${offer.package_unit}`
       : "";
-  const packageInfo = inferPackage(
-    `${offer.product_name} ${packageText}`.trim(),
-  );
+  const packageInfo = multipleSizes
+    ? null
+    : inferPackage(`${offer.product_name} ${packageText}`.trim());
   const normalized = normalizedUnitPrice(offer.promotional_price, packageInfo);
   return {
-    rawName: offerNameWithBrandAndPackage(
-      offer.product_name,
-      offer.brand,
-      offer.package_quantity,
-      offer.package_unit,
+    rawName: cleanAppOfferName(
+      offerNameWithBrandAndPackage(
+        offer.product_name,
+        offer.brand,
+        multipleSizes ? null : offer.package_quantity,
+        multipleSizes ? null : offer.package_unit,
+      ),
     ),
     brand: offer.brand,
     price: offer.promotional_price,
@@ -385,7 +402,6 @@ function candidateFromOffer(offer: ExtractedAppOffer): FlyerCandidate {
     sourcePage: offer.source_index ?? 1,
   };
 }
-
 async function invokeWorker(jobId: string) {
   let lastError: any = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -564,12 +580,13 @@ export default function AppOfferImportPage() {
 
     for (const offer of extracted) {
       const name = String(offer.product_name || "").trim();
+      const multipleSizes = hasMultipleDistinctPackageSizes(name);
       const displayName = cleanAppOfferName(
         offerNameWithBrandAndPackage(
           name,
           offer.brand,
-          offer.package_quantity,
-          offer.package_unit,
+          multipleSizes ? null : offer.package_quantity,
+          multipleSizes ? null : offer.package_unit,
         ),
       );
       const price = Number(offer.promotional_price);
@@ -612,8 +629,8 @@ export default function AppOfferImportPage() {
         localId: crypto.randomUUID(),
         rawName: displayName,
         brand: offer.brand ?? null,
-        packageQuantity: offer.package_quantity ?? null,
-        packageUnit: offer.package_unit ?? null,
+        packageQuantity: multipleSizes ? null : offer.package_quantity ?? null,
+        packageUnit: multipleSizes ? null : offer.package_unit ?? null,
         price,
         regularPrice:
           offer.regular_price == null ? null : Number(offer.regular_price),
@@ -822,7 +839,9 @@ export default function AppOfferImportPage() {
           const packageInfo =
             row.packageQuantity && row.packageUnit
               ? inferPackage(`${row.packageQuantity}${row.packageUnit}`)
-              : inferPackage(finalName);
+              : hasMultipleDistinctPackageSizes(finalName)
+                ? null
+                : inferPackage(finalName);
           const conditions = structuredAppOfferConditions(row.notes, supermarket, row.price);
           const effectivePrice =
             conditions.clubPrice && conditions.clubAdvertisedPrice
