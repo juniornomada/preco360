@@ -62,8 +62,8 @@ const EMPTY_SPEECH_END_GRACE_MS = 900;
 const MAX_LISTENING_MS = 4500;
 const GROQ_CAPTURE_MS = 3200;
 const MIN_GROQ_AUDIO_BYTES = 4_000;
-const GROQ_VAD_MIN_CAPTURE_MS = 1_300;
-const GROQ_VAD_SILENCE_MS = 900;
+const GROQ_VAD_MIN_CAPTURE_MS = 1_100;
+const GROQ_VAD_SILENCE_MS = 650;
 const GROQ_VAD_SAMPLE_MS = 50;
 const GROQ_VAD_MIN_RMS = 0.008;
 const GROQ_VAD_SPEECH_FRAMES = 3;
@@ -332,9 +332,89 @@ export function useVoiceSearchBeta() {
 
         recorder.start();
         setIsListening(true);
-        window.setTimeout(() => {
-          if (recorder.state === "recording") recorder.stop();
-        }, GROQ_CAPTURE_MS);
+
+        // Latency optimization: Web Audio only decides *when* speech has ended.
+        // It never flushes or manipulates MediaRecorder chunks. MediaRecorder
+        // is stopped exactly once and finalizes the WebM normally.
+        let audioContext: AudioContext | null = null;
+        let vadTimer: number | null = null;
+        let hardStopTimer: number | null = null;
+        let stopRequested = false;
+
+        const stopRecorderOnce = () => {
+          if (stopRequested || recorder.state !== "recording") return;
+          stopRequested = true;
+          recorder.stop();
+        };
+
+        const cleanupVad = () => {
+          if (vadTimer !== null) window.clearInterval(vadTimer);
+          if (hardStopTimer !== null) window.clearTimeout(hardStopTimer);
+          vadTimer = null;
+          hardStopTimer = null;
+          void audioContext?.close().catch(() => undefined);
+          audioContext = null;
+        };
+
+        recorder.addEventListener("stop", cleanupVad, { once: true });
+
+        try {
+          const AudioContextCtor = window.AudioContext;
+          if (AudioContextCtor) {
+            audioContext = new AudioContextCtor();
+            const source = audioContext.createMediaStreamSource(stream);
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 1024;
+            source.connect(analyser);
+
+            const samples = new Float32Array(analyser.fftSize);
+            let noiseFloor = 0.01;
+            let speechFrames = 0;
+            let speechDetected = false;
+            let lastSpeechAt = startedAt;
+
+            vadTimer = window.setInterval(() => {
+              if (stopRequested || recorder.state !== "recording") return;
+
+              analyser.getFloatTimeDomainData(samples);
+              let sumSquares = 0;
+              for (const sample of samples) sumSquares += sample * sample;
+              const rms = Math.sqrt(sumSquares / samples.length);
+
+              if (rms < noiseFloor) {
+                noiseFloor = noiseFloor * 0.8 + rms * 0.2;
+              }
+
+              const speechThreshold = Math.max(
+                GROQ_VAD_MIN_RMS,
+                noiseFloor * 2.8,
+              );
+
+              if (rms >= speechThreshold) {
+                speechFrames += 1;
+                if (speechFrames >= GROQ_VAD_SPEECH_FRAMES) {
+                  speechDetected = true;
+                  lastSpeechAt = performance.now();
+                }
+              } else {
+                speechFrames = 0;
+              }
+
+              const now = performance.now();
+              if (
+                speechDetected &&
+                now - startedAt >= GROQ_VAD_MIN_CAPTURE_MS &&
+                now - lastSpeechAt >= GROQ_VAD_SILENCE_MS
+              ) {
+                stopRecorderOnce();
+              }
+            }, GROQ_VAD_SAMPLE_MS);
+          }
+        } catch (vadError) {
+          console.debug("Beta voice VAD unavailable; using fixed capture", vadError);
+        }
+
+        hardStopTimer = window.setTimeout(stopRecorderOnce, GROQ_CAPTURE_MS);
         return true;
       } catch (captureError) {
         console.debug("Groq beta capture unavailable", captureError);
