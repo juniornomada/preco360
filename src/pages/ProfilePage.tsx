@@ -636,9 +636,54 @@ export default function ProfilePage() {
             </div>
           )}
         </div>
+
+        {selectedCity && retailerCollectionList.length > 0 && (
+          <div className="mb-3 rounded-md border p-3">
+            <p className="text-xs font-semibold">Fontes de ofertas</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              A sincronização pesquisa o site oficial, procura ofertas/encartes e confirma a cidade antes de liberar a captura.
+            </p>
+
+            <div className="mt-3 space-y-1.5">
+              {retailerCollectionList.map((retailer) => {
+                const status = sourceStatusLabel(retailer);
+                const source = sourceConnectionMap.get(normalizeCitySearch(retailer)) as any;
+                return (
+                  <div key={retailer} className="rounded border px-2.5 py-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{retailer}</span>
+                      <span className={status.className}>{status.label}</span>
+                    </div>
+                    {source?.source_type && (
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Fonte: {source.source_type === "api" ? "catálogo/API" : source.source_type === "web_catalog" ? "catálogo web" : String(source.source_type).toUpperCase()}
+                        {source.city_verified ? " · cidade confirmada" : ""}
+                      </p>
+                    )}
+                    {source?.last_error && (
+                      <p className="mt-1 text-[11px] text-muted-foreground">{source.last_error}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-3 w-full gap-2"
+              onClick={() => void syncSources()}
+              disabled={syncingSources || collecting}
+            >
+              {syncingSources ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {syncingSources ? "Pesquisando sites e ofertas..." : "Sincronizar fontes de todos (" + retailerCollectionList.length + ")"}
+            </Button>
+          </div>
+        )}
+
         <div className="mb-3">
           <label htmlFor="retailer-to-collect" className="mb-1.5 block text-xs font-semibold">
-            Qual supermercado deseja importar as ofertas?
+            Importar uma rede específica (opcional)
           </label>
           <input
             id="retailer-to-collect"
@@ -666,12 +711,12 @@ export default function ProfilePage() {
             ))}
           </datalist>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Digite uma rede específica. Se deixar vazio, o sistema tenta importar todas as redes encontradas ou adicionadas manualmente em {selectedCity?.name ?? "sua cidade"}.
+            Digite uma rede específica ou deixe vazio para importar apenas as fontes já validadas e capturáveis de {selectedCity?.name ?? "sua cidade"}.
           </p>
         </div>
         <Button type="button" className="w-full gap-2" onClick={runFlyerCollection} disabled={collecting}>
           {collecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          {collecting ? "Executando coleta..." : retailerToCollect.trim() ? `Importar ofertas de ${retailerToCollect.trim()}` : retailerCollectionList.length ? `Importar ofertas de todos (${retailerCollectionList.length})` : `Coletar ofertas de ${selectedCity?.name ?? "minha cidade"}`}
+          {collecting ? "Executando coleta..." : retailerToCollect.trim() ? `Importar ofertas de ${retailerToCollect.trim()}` : `Importar ofertas disponíveis (${capturableRetailers.length})`}
         </Button>
         <Button type="button" variant="outline" className="mt-2 w-full gap-2" onClick={() => navigate("/radar?view=import")}><Upload className="h-4 w-4" />Importar ofertas, gôndola ou prints do app</Button>
         {collectionReport && <div className="mt-3 space-y-2">{collectionReport.map((row: any, i: number) => <div key={`${row.retailer}-${i}`} className="rounded-md border p-2 text-xs"><div className="flex items-center justify-between gap-2"><span className="font-medium">{row.retailer}</span><span className="text-muted-foreground">{row.result}</span></div>{formatValidity(row.validity?.to) && <p className="mt-1 text-muted-foreground">Validade até {formatValidity(row.validity?.to)}</p>}{row.result === "resumo" && <p className="mt-1 text-muted-foreground">{row.found ?? 0} encontrado(s) · {row.imported ?? 0} novo(s) · {row.unchanged ?? 0} já conhecido(s) · {row.failed ?? 0} falha(s)</p>}{row.error && row.error !== "HTTP 200" && <p className="mt-1 text-destructive">{row.error}</p>}</div>)}</div>}
