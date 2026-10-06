@@ -1071,6 +1071,9 @@ function standardizedOfferName(item: FlyerItemRow, family: OfferFamily) {
   if (!headRule) return compact;
 
   let remainder = cleanDisplayNamePart(withoutBrand.replace(headRule.pattern, " "));
+  // OCR/import aliases can occasionally repeat the product head around the brand,
+  // e.g. "Café Melitta Café Tipos". Remove the repeated head once more.
+  remainder = cleanDisplayNamePart(remainder.replace(headRule.pattern, " "));
 
   if (family === "tomatoSauce" && /^molho\s+tomate\b/i.test(withoutBrand)) {
     remainder = cleanDisplayNamePart(
@@ -1422,6 +1425,32 @@ function validClubPrice(item: FlyerItemRow) {
     (!Number.isFinite(regular) || regular <= 0 || club <= regular)
     ? club
     : null;
+}
+
+function appOfferActivationState(
+  retailer: string | null | undefined,
+  offerNotes?: string[] | null,
+) {
+  const notes = normalizeOfferNotes(offerNotes);
+
+  if (
+    notes.some((note) =>
+      /oferta\s+do\s+app.{0,20}ativada|app.{0,20}ativad[oa]/i.test(note),
+    )
+  ) {
+    return "activated" as const;
+  }
+
+  if (
+    notes.some((note) =>
+      /oferta\s+do\s+app.{0,20}requer.{0,20}ativa|ativar.{0,20}app/i.test(note),
+    ) ||
+    requiresAppActivation(retailer, offerNotes)
+  ) {
+    return "required" as const;
+  }
+
+  return "none" as const;
 }
 
 function duplicateOfferPreferenceScore(item: SearchOfferItemRow) {
@@ -2771,6 +2800,26 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                   quickCandidate.baseUnit,
                 )
               : null;
+          const quickClubPrice = validClubPrice(quickItem);
+          const quickRegularPrice = Number(quickItem.advertised_price) || 0;
+          const quickActivationState =
+            quickClubPrice !== null
+              ? appOfferActivationState(
+                  bestCurrentOffer.flyer?.retailer,
+                  quickItem.offer_notes,
+                )
+              : "none";
+          const quickRegularPackage = offerPackageInfo(
+            quickItem.raw_name,
+            quickItem.package_quantity,
+            quickItem.package_unit,
+            quickItem.offer_notes,
+            quickRegularPrice,
+          );
+          const quickRegularNormalized = normalizedUnitPrice(
+            quickRegularPrice,
+            quickRegularPackage,
+          );
 
           return (
             <section
@@ -2814,6 +2863,16 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                           <Store className="h-3.5 w-3.5 text-primary" />
                           {quickRetailer}
                         </span>
+                        {quickClubPrice !== null && (
+                          <span className="inline-flex items-center rounded-full border border-primary/25 bg-primary/15 px-2 py-0.5 font-extrabold uppercase tracking-[0.08em] text-primary">
+                            {normalizeSearchText(quickRetailer) === "max atacadista" ? "Clube Max" : "Clube"}
+                          </span>
+                        )}
+                        {quickActivationState !== "none" && (
+                          <span className="inline-flex items-center rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 font-bold text-amber-500">
+                            {quickActivationState === "activated" ? "APP ativado" : "ativar no APP"}
+                          </span>
+                        )}
                         <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-background/25 px-2 py-0.5 text-muted-foreground">
                           <Clock3 className="h-3.5 w-3.5" />
                           {expiryLabel(bestCurrentOffer.flyer?.valid_to, today)}
@@ -2840,6 +2899,18 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                       {quickUnit && (
                         <p className="mt-1 text-[11px] font-extrabold text-primary/90">
                           {quickUnit}
+                        </p>
+                      )}
+                      {quickClubPrice !== null && quickRegularPrice > quickClubPrice && (
+                        <p className="mt-1 text-[9px] leading-tight text-muted-foreground">
+                          Normal {brl(quickRegularPrice)}
+                          {quickRegularNormalized.baseUnit !== "un"
+                            ? " · " +
+                              formatNormalizedPrice(
+                                quickRegularNormalized.normalizedPrice,
+                                quickRegularNormalized.baseUnit,
+                              )
+                            : ""}
                         </p>
                       )}
                     </div>
@@ -3035,9 +3106,10 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
             const VerdictIcon = ui.Icon;
             const regularPrice = Number(item.advertised_price) || 0;
             const clubPrice = validClubPrice(item);
-            const appActivationRequired =
-              clubPrice !== null &&
-              requiresAppActivation(flyer?.retailer, item.offer_notes);
+            const appActivationState =
+              clubPrice !== null
+                ? appOfferActivationState(flyer?.retailer, item.offer_notes)
+                : "none";
             const regularPackage = offerPackageInfo(
               item.raw_name,
               item.package_quantity,
@@ -3160,9 +3232,11 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                         <div className="min-w-[80px] max-w-[142px] shrink-0 text-right sm:min-w-[88px] sm:max-w-[150px]">
                           {clubPrice ? (
                             <>
-                              {appActivationRequired && (
+                              {appActivationState !== "none" && (
                                 <p className="mb-0.5 text-[8px] font-bold uppercase leading-tight text-amber-500">
-                                  * ativar desconto APP
+                                  {appActivationState === "activated"
+                                    ? "* desconto APP ativado"
+                                    : "* ativar desconto APP"}
                                 </p>
                               )}
                               <p className="text-lg font-extrabold leading-tight text-primary sm:text-xl">
@@ -3635,6 +3709,23 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                         bestCurrentOffer.flyer?.retailer ||
                         "Supermercado"}
                     </p>
+                    {validClubPrice(bestCurrentOffer.item) !== null && (
+                      <p className="mt-0.5 text-[8px] font-extrabold uppercase tracking-[0.08em] text-amber-500 sm:text-[9px]">
+                        {normalizeSearchText(
+                          canonicalRetailerName(bestCurrentOffer.flyer?.retailer) ||
+                            bestCurrentOffer.flyer?.retailer ||
+                            "",
+                        ) === "max atacadista"
+                          ? "Clube Max"
+                          : "Clube"}
+                        {appOfferActivationState(
+                          bestCurrentOffer.flyer?.retailer,
+                          bestCurrentOffer.item.offer_notes,
+                        ) === "activated"
+                          ? " · APP ativado"
+                          : ""}
+                      </p>
+                    )}
                   </button>
                 ) : (
                   <div className="min-w-0 rounded-2xl border border-border/80 bg-background/35 p-2.5 sm:p-3">
