@@ -180,6 +180,39 @@ export default function ProfilePage() {
     return { label: "não verificada", className: "text-muted-foreground" };
   };
 
+  const manualRetailerStatusLabel = (retailer: string) => {
+    const key = normalizeCitySearch(retailer);
+    const source = sourceConnectionMap.get(key) as any;
+    const sourceStatus = sourceStatusLabel(retailer);
+
+    if (
+      source?.source_status === "available" ||
+      retailerMap.some(
+        (entry: any) =>
+          normalizeCitySearch(String(entry.retailer || "")) === key &&
+          entry.status === "available",
+      )
+    ) {
+      return sourceStatus;
+    }
+
+    if (key === "max atacadista") {
+      return {
+        label: "importação manual disponível",
+        className: "font-semibold text-sky-500",
+      };
+    }
+
+    if (!source || source.source_status === "unverified") {
+      return {
+        label: "aguardando sincronização",
+        className: "text-muted-foreground",
+      };
+    }
+
+    return sourceStatus;
+  };
+
   const capturableRetailers = retailerCollectionList.filter((retailer) => {
     const key = normalizeCitySearch(retailer);
     const source = sourceConnectionMap.get(key) as any;
@@ -606,7 +639,7 @@ export default function ProfilePage() {
               {manualRetailers.length > 0 && (
                 <div className="mt-3 space-y-1">
                   {manualRetailers.map((entry: any) => {
-                    const status = sourceStatusLabel(entry.retailer);
+                    const status = manualRetailerStatusLabel(entry.retailer);
                     return (
                       <div key={entry.retailer} className="flex items-center justify-between gap-2 text-xs">
                         <span className="min-w-0 truncate">{entry.retailer}</span>
