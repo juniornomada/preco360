@@ -20,7 +20,7 @@ function norm(value:unknown){
 }
 
 function absoluteAsset(value:unknown){
-  const url=String(value??"").trim();
+  const url=String(value??"").trim().replace(/\\+\//g,"/");
   if(!url) return "";
   if(url.startsWith("//")) return "https:"+url;
   if(/^https?:\/\//i.test(url)) return url;
@@ -67,21 +67,34 @@ async function getJson(url:string, attempts=3){
       });
       const text=await r.text();
       if(!r.ok) throw new Error("HTTP "+r.status+" "+url);
-      try{
-        return JSON.parse(stripJsonp(text));
-      }catch{
-        const preview=text
-          .replace(/<script\b[\s\S]*?<\/script>/gi," ")
-          .replace(/<style\b[\s\S]*?<\/style>/gi," ")
-          .replace(/<[^>]+>/g," ")
-          .replace(/\s+/g," ")
-          .trim()
-          .slice(0,280);
-        throw new Error(
-          "Resposta inválida do serviço Max" +
-          (preview ? ": " + preview : ""),
-        );
+      const raw=stripJsonp(text).trim();
+      const candidates=[
+        raw,
+        raw.replace(/\\\"/g,'"'),
+        raw.replace(/\\\"/g,'"').replace(/\\\\+\//g,"\\/"),
+      ];
+
+      for(const candidate of candidates){
+        try{
+          const parsed=JSON.parse(candidate);
+          if(typeof parsed==="string"){
+            try{return JSON.parse(parsed)}catch{}
+          }
+          return parsed;
+        }catch{}
       }
+
+      const preview=text
+        .replace(/<script\b[\s\S]*?<\/script>/gi," ")
+        .replace(/<style\b[\s\S]*?<\/style>/gi," ")
+        .replace(/<[^>]+>/g," ")
+        .replace(/\s+/g," ")
+        .trim()
+        .slice(0,280);
+      throw new Error(
+        "Resposta inválida do serviço Max" +
+        (preview ? ": " + preview : ""),
+      );
     }catch(error){
       lastError=error;
       if(attempt<attempts) await new Promise(resolve=>setTimeout(resolve,250*attempt));
