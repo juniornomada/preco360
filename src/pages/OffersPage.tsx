@@ -528,7 +528,7 @@ function packageLabel(item: FlyerItemRow) {
       item.raw_name,
       item.package_quantity,
       item.package_unit,
-      item.offer_notes,
+      [],
       Number(item.advertised_price) || 0,
     );
 
@@ -1662,6 +1662,42 @@ function dedupeActiveOfferRows(items: SearchOfferItemRow[]) {
   return collapseEquivalentOfferRows([...bestByOffer.values()]);
 }
 
+function normalizedOfferPriceForItem(
+  item: FlyerItemRow,
+  price: number,
+) {
+  const regularPrice = Number(item.advertised_price) || 0;
+  const packageInfo = offerPackageInfo(
+    item.raw_name,
+    item.package_quantity,
+    item.package_unit,
+    item.offer_notes,
+    regularPrice,
+  );
+
+  if (packageInfo) {
+    return normalizedUnitPrice(price, packageInfo);
+  }
+
+  const storedNormalized = Number(item.normalized_price);
+  const storedBaseUnit = item.base_unit;
+  if (
+    Number.isFinite(storedNormalized) &&
+    storedNormalized > 0 &&
+    regularPrice > 0 &&
+    (storedBaseUnit === "kg" ||
+      storedBaseUnit === "l" ||
+      storedBaseUnit === "un")
+  ) {
+    return {
+      normalizedPrice: storedNormalized * (price / regularPrice),
+      baseUnit: storedBaseUnit,
+    };
+  }
+
+  return normalizedUnitPrice(price, null);
+}
+
 function candidateFromItem(item: FlyerItemRow): FlyerCandidate {
   const regularPrice = Number(item.advertised_price) || 0;
   const clubPrice = validClubPrice(item);
@@ -1673,7 +1709,7 @@ function candidateFromItem(item: FlyerItemRow): FlyerCandidate {
     item.offer_notes,
     regularPrice,
   );
-  const normalized = normalizedUnitPrice(effectivePrice, packageInfo);
+  const normalized = normalizedOfferPriceForItem(item, effectivePrice);
 
   return {
     rawName: item.raw_name,
@@ -2835,16 +2871,9 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                   quickItem.offer_notes,
                 )
               : "none";
-          const quickRegularPackage = offerPackageInfo(
-            quickItem.raw_name,
-            quickItem.package_quantity,
-            quickItem.package_unit,
-            quickItem.offer_notes,
+          const quickRegularNormalized = normalizedOfferPriceForItem(
+            quickItem,
             quickRegularPrice,
-          );
-          const quickRegularNormalized = normalizedUnitPrice(
-            quickRegularPrice,
-            quickRegularPackage,
           );
 
           return (
@@ -3136,16 +3165,9 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
               clubPrice !== null
                 ? appOfferActivationState(flyer?.retailer, item.offer_notes)
                 : "none";
-            const regularPackage = offerPackageInfo(
-              item.raw_name,
-              item.package_quantity,
-              item.package_unit,
-              item.offer_notes,
+            const regularNormalized = normalizedOfferPriceForItem(
+              item,
               regularPrice,
-            );
-            const regularNormalized = normalizedUnitPrice(
-              regularPrice,
-              regularPackage,
             );
             const displayTitle = standardizedOfferName(item, entry.family);
             const packLabel = packageLabel(item);
