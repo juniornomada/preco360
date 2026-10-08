@@ -243,6 +243,18 @@ async function collectMaxAtacadista(db:any, report:any[], onlyTitle=""){
     const r=await fetch(bridge,{headers:{"accept":"application/json","user-agent":UA}});
     if(!r.ok) throw new Error("Vercel bridge HTTP "+r.status);
     payload=await r.json();
+    if(payload?.capture_ready===false){
+      const detail=Array.isArray(payload?.store_errors) && payload.store_errors.length
+        ? payload.store_errors.map((item:any)=>String(item?.store_name||item?.store_id||"loja")+": "+String(item?.error||"indisponível")).join(" | ")
+        : String(payload?.detail||payload?.error||"Fonte automática temporariamente indisponível");
+      report.push({
+        retailer:"Max Atacadista",
+        endpoint:sourcePage,
+        result:"erro",
+        error:"Fonte automática do Max indisponível: "+detail,
+      });
+      return;
+    }
   }catch(e){
     report.push({retailer:"Max Atacadista",endpoint:sourcePage,result:"erro",error:String(e)});
     return;
