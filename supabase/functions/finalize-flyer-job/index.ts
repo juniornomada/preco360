@@ -107,6 +107,36 @@ function normalizedPricing(offer:any) {
   return { normalizedPrice:price/pkg.baseQuantity, baseUnit:pkg.baseUnit };
 }
 
+function structuredLimitAndNotes(offer:any) {
+  const rawNotes=Array.isArray(offer?.notes)?offer.notes:[];
+  const kept:string[]=[];
+  let inferredLimit="";
+
+  for (const raw of rawNotes) {
+    const note=String(raw??"").replace(/\s+/g," ").trim();
+    if (!note) continue;
+    const text=normalize(note);
+    const looksLikeLimit=
+      (
+        /\b(limite|limitado|limitada|maximo|maxima|max)\b/.test(text) ||
+        /\bpor (pessoa|cliente|cpf|compra)\b/.test(text)
+      ) &&
+      /\b\d+(?:[.,]\d+)?\s*(kg|g|l|ml|un|und|unid|unidade|unidades)\b/.test(text);
+
+    if (looksLikeLimit) {
+      if (!inferredLimit) inferredLimit=note;
+      continue;
+    }
+
+    kept.push(note);
+  }
+
+  return {
+    purchaseLimit:String(offer?.purchase_limit??"").trim()||inferredLimit||null,
+    notes:kept,
+  };
+}
+
 Deno.serve(async(req:Request)=>{
   if (req.method==="OPTIONS") return new Response("ok",{headers:corsHeaders});
   if (req.method!=="POST") return json(405,{error:"METHOD_NOT_ALLOWED"});
@@ -191,7 +221,8 @@ Deno.serve(async(req:Request)=>{
     }
 
     const rows=offers.map((offer:any)=>{
-      const paymentRestricted=isPaymentRestrictedPrice(offer?.notes);
+      const structured=structuredLimitAndNotes(offer);
+      const paymentRestricted=isPaymentRestrictedPrice(structured.notes);
       const extractedClub=positive(offer?.club_price);
 
       // If the only captured price is explicitly tied to a store payment method,
@@ -199,7 +230,7 @@ Deno.serve(async(req:Request)=>{
       if (
         paymentRestricted &&
         extractedClub===null &&
-        !hasExplicitAlternativePaymentPrice(offer?.notes,offer?.price)
+        !hasExplicitAlternativePaymentPrice(structured.notes,offer?.price)
       ) {
         console.warn("Skipping payment-restricted offer without verified regular price", {
           product_name: offer?.product_name,
@@ -230,8 +261,8 @@ Deno.serve(async(req:Request)=>{
         included_types:Array.isArray(offer?.included_types)?offer.included_types:[],
         excluded_types:Array.isArray(offer?.excluded_types)?offer.excluded_types:[],
         store_restrictions:Array.isArray(offer?.store_restrictions)?offer.store_restrictions:[],
-        purchase_limit:String(offer?.purchase_limit??"").trim()||null,
-        offer_notes:Array.isArray(offer?.notes)?offer.notes:[],
+        purchase_limit:structured.purchaseLimit,
+        offer_notes:structured.notes,
         extraction_confidence:Number(offer?.confidence)||null,
         price_basis_quantity:positive(offer?.price_basis_quantity)??1,
         price_basis_unit:String(offer?.price_basis_unit??"un").trim()||"un",
