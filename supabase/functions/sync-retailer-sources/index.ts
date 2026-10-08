@@ -65,8 +65,9 @@ const KNOWN: Record<string, any> = {
     retailer: "Max Atacadista",
     official_site_url: "https://www.maxatacadista.com.br/",
     offers_url: "https://www.maxatacadista.com.br/lojas/",
-    source_type: "web",
+    source_type: "api",
     collector_key: "Max Atacadista",
+    collector_probe_url: "https://preco360.vercel.app/api/max-flyers",
     capture_supported: true,
   },
   kawakami: {
@@ -462,6 +463,98 @@ async function syncRetailer(
   const known = knownSource(retailer, city.name);
 
   if (known) {
+    if (known.collector_probe_url) {
+      try {
+        const response = await fetchWithTimeout(
+          known.collector_probe_url,
+          15000,
+          { headers: { accept: "application/json" } },
+        );
+        const payload = await response.json().catch(() => ({}));
+        const captureReady =
+          response.ok &&
+          payload?.capture_ready !== false;
+        const flyerCount = Array.isArray(payload?.flyers)
+          ? payload.flyers.length
+          : 0;
+        const cityVerified =
+          normalize(payload?.city || city.name) === normalize(city.name);
+        const available =
+          captureReady &&
+          cityVerified &&
+          flyerCount > 0;
+        const storeErrors = Array.isArray(payload?.store_errors)
+          ? payload.store_errors
+          : [];
+
+        return {
+          retailer: known.retailer || retailer,
+          official_site_url: known.official_site_url,
+          offers_url: known.offers_url,
+          source_type: known.source_type,
+          source_status: !captureReady
+            ? "temporary_error"
+            : available
+              ? "available"
+              : "no_offer",
+          city_verified: cityVerified,
+          capture_supported: available,
+          collector_key: known.collector_key,
+          discovery_method: "collector_health_probe",
+          last_http_status: response.status,
+          last_sync_at: now,
+          last_offer_seen_at: available
+            ? now
+            : existing?.last_offer_seen_at ?? null,
+          last_error: captureReady
+            ? null
+            : String(
+                payload?.detail ||
+                  payload?.error ||
+                  storeErrors
+                    .map((item: any) =>
+                      String(item?.store_name || item?.store_id || "loja") +
+                      ": " +
+                      String(item?.error || "indisponível")
+                    )
+                    .join(" | ") ||
+                  "Coletor automático temporariamente indisponível.",
+              ),
+          metadata: {
+            collector_probe_url: known.collector_probe_url,
+            flyer_count: flyerCount,
+            stores: Array.isArray(payload?.stores) ? payload.stores : [],
+            successful_stores: Array.isArray(payload?.successful_stores)
+              ? payload.successful_stores
+              : [],
+            store_errors: storeErrors,
+          },
+        };
+      } catch (error) {
+        return {
+          retailer: known.retailer || retailer,
+          official_site_url: known.official_site_url,
+          offers_url: known.offers_url,
+          source_type: known.source_type,
+          source_status: "temporary_error",
+          city_verified: normalize(city.name) === "marilia",
+          capture_supported: false,
+          collector_key: known.collector_key,
+          discovery_method: "collector_health_probe",
+          last_http_status: null,
+          last_sync_at: now,
+          last_offer_seen_at: existing?.last_offer_seen_at ?? null,
+          last_error:
+            error instanceof Error
+              ? error.message
+              : String(error),
+          metadata: {
+            collector_probe_url: known.collector_probe_url,
+          },
+        };
+      }
+    }
+
     const inspection = await inspectUrl(
       retailer,
       city.name,
