@@ -48,6 +48,56 @@ function isFlyerCampaign(filename:string){
   return true;
 }
 
+function decodeJsonStringContent(value:string){
+  try{
+    return JSON.parse('"'+value+'"');
+  }catch{
+    return value
+      .replace(/\\+\//g,"/")
+      .replace(/\\\"/g,'"')
+      .replace(/\\\\/g,"\\");
+  }
+}
+
+function parseLooseOfferPayload(text:string){
+  const normalized=stripJsonp(text).trim();
+  const itemRe=/"id":"([^"]+)"[\s\S]{0,120}?"type":"([^"]+)"[\s\S]{0,240}?"image":"((?:\\.|[^"\\])*)"[\s\S]{0,160}?"isCover":(true|false)[\s\S]{0,120}?"width":"?([^",}]*)"?[\s\S]{0,120}?"height":"?([^",}]*)"?[\s\S]{0,120}?"position":"?([^",}]*)"?/g;
+  const grouped=new Map<string,any[]>();
+
+  for(const match of normalized.matchAll(itemRe)){
+    const id=String(match[1]??"").trim();
+    const type=String(match[2]??"").trim();
+    const image=decodeJsonStringContent(String(match[3]??"")).trim();
+    if(!id || type!=="1" || !image) continue;
+
+    const row={
+      id,
+      type,
+      image,
+      isCover:String(match[4])==="true",
+      width:Number(match[5])||null,
+      height:Number(match[6])||null,
+      position:Number(match[7])||0,
+    };
+    const current=grouped.get(id)??[];
+    current.push(row);
+    grouped.set(id,current);
+  }
+
+  if(!grouped.size) return null;
+
+  return {
+    offers:[...grouped.entries()].map(([id,items])=>({
+      flyer:[{
+        item:items
+          .sort((a:any,b:any)=>a.position-b.position)
+          .map((item:any)=>({...item,id})),
+      }],
+    })),
+    recovered_loose_json:true,
+  };
+}
+
 async function getJson(url:string, attempts=3){
   let lastError:unknown=null;
 
@@ -84,22 +134,19 @@ async function getJson(url:string, attempts=3){
         }catch{}
       }
 
+      const loose=parseLooseOfferPayload(text);
+      if(loose) return loose;
+
       const preview=text
         .replace(/<script\b[\s\S]*?<\/script>/gi," ")
         .replace(/<style\b[\s\S]*?<\/style>/gi," ")
         .replace(/<[^>]+>/g," ")
         .replace(/\s+/g," ")
         .trim()
-        .slice(0,280);
-      const previewB64=btoa(
-        Array.from(new TextEncoder().encode(text.slice(0,1200)))
-          .map((byte)=>String.fromCharCode(byte))
-          .join(""),
-      );
+        .slice(0,220);
       throw new Error(
         "Resposta inválida do serviço Max" +
-        (preview ? ": " + preview : "") +
-        " [b64:" + previewB64 + "]",
+        (preview ? ": " + preview : ""),
       );
     }catch(error){
       lastError=error;
