@@ -91,9 +91,15 @@ async function getJson(url:string, attempts=3){
         .replace(/\s+/g," ")
         .trim()
         .slice(0,280);
+      const previewB64=btoa(
+        Array.from(new TextEncoder().encode(text.slice(0,1200)))
+          .map((byte)=>String.fromCharCode(byte))
+          .join(""),
+      );
       throw new Error(
         "Resposta inválida do serviço Max" +
-        (preview ? ": " + preview : ""),
+        (preview ? ": " + preview : "") +
+        " [b64:" + previewB64 + "]",
       );
     }catch(error){
       lastError=error;
