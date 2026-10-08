@@ -70,7 +70,17 @@ async function getJson(url:string, attempts=3){
       try{
         return JSON.parse(stripJsonp(text));
       }catch{
-        throw new Error("Resposta inválida do serviço Max");
+        const preview=text
+          .replace(/<script\b[\s\S]*?<\/script>/gi," ")
+          .replace(/<style\b[\s\S]*?<\/style>/gi," ")
+          .replace(/<[^>]+>/g," ")
+          .replace(/\s+/g," ")
+          .trim()
+          .slice(0,280);
+        throw new Error(
+          "Resposta inválida do serviço Max" +
+          (preview ? ": " + preview : ""),
+        );
       }
     }catch(error){
       lastError=error;
