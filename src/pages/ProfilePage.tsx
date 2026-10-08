@@ -42,6 +42,9 @@ export default function ProfilePage() {
   const [manualRetailerName, setManualRetailerName] = useState("");
   const [savingManualRetailer, setSavingManualRetailer] = useState(false);
   const [syncingSources, setSyncingSources] = useState(false);
+  const [expandedImportJobId, setExpandedImportJobId] = useState<string | null>(null);
+  const [loadingImportJobId, setLoadingImportJobId] = useState<string | null>(null);
+  const [importJobOffers, setImportJobOffers] = useState<Record<string, any[]>>({});
 
   const { data: cityPreference } = useQuery<any>({
     queryKey: ["profile-city-preference-v1", user?.id],
@@ -69,6 +72,76 @@ export default function ProfilePage() {
   }, [citySearch]);
 
   const normalizedCitySearch = normalizeCitySearch(debouncedCitySearch.replace(/\s*-\s*[A-Z]{2}$/i, ""));
+
+  const { data: recentImportJobs = [] } = useQuery<any[]>({
+    queryKey: ["profile-recent-flyer-import-jobs-v1", user?.id],
+    queryFn: async () => {
+      const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+      const { data, error } = await db
+        .from("flyer_import_jobs")
+        .select("id,retailer,source_file_name,status,progress_current,progress_total,progress_label,error_message,created_at,updated_at,completed_at")
+        .eq("user_id", user!.id)
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!user,
+    refetchInterval: 4000,
+    refetchOnWindowFocus: true,
+  });
+
+  const activeImportJobs = recentImportJobs.filter((job: any) =>
+    ["queued", "processing", "refining"].includes(String(job.status || "")),
+  );
+  const completedImportJobs = recentImportJobs.filter(
+    (job: any) => String(job.status || "") === "completed",
+  );
+
+  const importJobOfferCount = (job: any) => {
+    const match = String(job?.progress_label || "").match(/(\d+)\s+ofertas?\s+importadas?/i);
+    return match ? Number(match[1]) : null;
+  };
+
+  const loadImportJobOffers = async (job: any) => {
+    const jobId = String(job?.id || "");
+    if (!jobId || !user) return;
+
+    if (expandedImportJobId === jobId) {
+      setExpandedImportJobId(null);
+      return;
+    }
+
+    if (importJobOffers[jobId]) {
+      setExpandedImportJobId(jobId);
+      return;
+    }
+
+    setLoadingImportJobId(jobId);
+    try {
+      const { data, error } = await db
+        .from("flyer_import_jobs")
+        .select("result")
+        .eq("id", jobId)
+        .eq("user_id", user.id)
+        .single();
+      if (error) throw error;
+
+      const offers = Array.isArray(data?.result?.offers) ? data.result.offers : [];
+      setImportJobOffers((current) => ({ ...current, [jobId]: offers }));
+      setExpandedImportJobId(jobId);
+    } catch (err: any) {
+      toast({
+        title: "Não consegui abrir os produtos",
+        description: err?.message || "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingImportJobId(null);
+    }
+  };
+
 
   const { data: cityResults = [], isFetching: searchingCities } = useQuery<any[]>({
     queryKey: ["profile-city-search-v2", normalizedCitySearch],
@@ -371,6 +444,9 @@ export default function ProfilePage() {
         }),
         queryClient.invalidateQueries({
           queryKey: ["profile-retailer-sources-v1", user?.id, selectedCityId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["profile-recent-flyer-import-jobs-v1", user?.id],
         }),
       ]);
 
@@ -748,6 +824,191 @@ export default function ProfilePage() {
         </Button>
         <Button type="button" variant="outline" className="mt-2 w-full gap-2" onClick={() => navigate("/radar?view=import")}><Upload className="h-4 w-4" />Importar ofertas, gôndola ou prints do app</Button>
         {collectionReport && <div className="mt-3 space-y-2">{collectionReport.map((row: any, i: number) => <div key={`${row.retailer}-${i}`} className="rounded-md border p-2 text-xs"><div className="flex items-center justify-between gap-2"><span className="font-medium">{row.retailer}</span><span className="text-muted-foreground">{row.result}</span></div>{formatValidity(row.validity?.to) && <p className="mt-1 text-muted-foreground">Validade até {formatValidity(row.validity?.to)}</p>}{row.result === "resumo" && <p className="mt-1 text-muted-foreground">{row.found ?? 0} encontrado(s) · {row.imported ?? 0} novo(s) · {row.unchanged ?? 0} já conhecido(s) · {row.failed ?? 0} falha(s)</p>}{row.error && row.error !== "HTTP 200" && <p className="mt-1 text-destructive">{row.error}</p>}</div>)}</div>}
+        {recentImportJobs.length > 0 && (
+          <div className="mt-3 rounded-md border p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">Processamento das importações</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {activeImportJobs.length > 0
+                    ? `${activeImportJobs.length} importação(ões) ainda em andamento. Esta área atualiza automaticamente.`
+                    : "As importações recentes terminaram. Você já pode abrir a lista de produtos importados."}
+                </p>
+              </div>
+              <span
+                className={
+                  activeImportJobs.length > 0
+                    ? "shrink-0 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[10px] font-bold text-amber-500"
+                    : "shrink-0 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-600"
+                }
+              >
+                {activeImportJobs.length > 0 ? "PROCESSANDO" : "CONCLUÍDO"}
+              </span>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              {recentImportJobs.map((job: any) => {
+                const status = String(job.status || "");
+                const isActive = ["queued", "processing", "refining"].includes(status);
+                const isCompleted = status === "completed";
+                const isFailed = status === "failed";
+                const offerCount = importJobOfferCount(job);
+                const expanded = expandedImportJobId === job.id;
+                const offers = importJobOffers[job.id] ?? [];
+
+                return (
+                  <div key={job.id} className="rounded-md border p-2.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate font-semibold">
+                        {job.retailer || "Supermercado"}
+                      </span>
+                      <span
+                        className={
+                          isCompleted
+                            ? "font-semibold text-emerald-600"
+                            : isFailed
+                              ? "font-semibold text-destructive"
+                              : "font-semibold text-amber-500"
+                        }
+                      >
+                        {isCompleted
+                          ? "concluído"
+                          : isFailed
+                            ? "falhou"
+                            : status === "queued"
+                              ? "na fila"
+                              : "processando"}
+                      </span>
+                    </div>
+
+                    <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                      {job.source_file_name || "Importação automática"}
+                    </p>
+
+                    {isActive && (
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                          <span className="truncate">{job.progress_label || "Processando…"}</span>
+                          {Number(job.progress_total) > 0 && (
+                            <span className="shrink-0">
+                              {Math.min(Number(job.progress_current) + 1, Number(job.progress_total))}/{Number(job.progress_total)}
+                            </span>
+                          )}
+                        </div>
+                        {Number(job.progress_total) > 0 && (
+                          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className="h-full rounded-full bg-primary transition-all"
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  Math.max(
+                                    4,
+                                    ((Number(job.progress_current) + 1) /
+                                      Number(job.progress_total)) *
+                                      100,
+                                  ),
+                                )}%`,
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {isCompleted && (
+                      <div className="mt-2">
+                        <p className="text-[11px] text-muted-foreground">
+                          {offerCount != null
+                            ? `${offerCount} produto(s) importado(s).`
+                            : job.progress_label || "Importação concluída."}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="mt-2 h-8 w-full text-xs"
+                          onClick={() => void loadImportJobOffers(job)}
+                          disabled={loadingImportJobId === job.id}
+                        >
+                          {loadingImportJobId === job.id ? (
+                            <>
+                              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                              Abrindo produtos…
+                            </>
+                          ) : expanded ? (
+                            "Ocultar produtos"
+                          ) : (
+                            `Ver produtos importados${offerCount != null ? ` (${offerCount})` : ""}`
+                          )}
+                        </Button>
+
+                        {expanded && (
+                          <div className="mt-2 max-h-72 space-y-1 overflow-y-auto rounded-md bg-muted/30 p-2">
+                            {offers.length > 0 ? (
+                              offers.map((offer: any, index: number) => {
+                                const productName = String(
+                                  offer?.product_name ||
+                                    offer?.raw_name ||
+                                    offer?.name ||
+                                    "Produto",
+                                ).trim();
+                                const price = Number(
+                                  offer?.promotional_price ??
+                                    offer?.advertised_price ??
+                                    offer?.price,
+                                );
+                                return (
+                                  <button
+                                    key={`${job.id}-${index}-${productName}`}
+                                    type="button"
+                                    className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left hover:bg-accent"
+                                    onClick={() =>
+                                      navigate(
+                                        `/offers?q=${encodeURIComponent(productName)}`,
+                                      )
+                                    }
+                                  >
+                                    <span className="min-w-0 truncate">{productName}</span>
+                                    {Number.isFinite(price) && price > 0 && (
+                                      <span className="shrink-0 font-semibold">
+                                        {price.toLocaleString("pt-BR", {
+                                          style: "currency",
+                                          currency: "BRL",
+                                        })}
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })
+                            ) : (
+                              <p className="py-2 text-center text-[11px] text-muted-foreground">
+                                O processamento terminou, mas não há uma lista detalhada de produtos neste job.
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {isFailed && (
+                      <p className="mt-2 text-[11px] text-destructive">
+                        {job.error_message || "A importação falhou."}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {activeImportJobs.length === 0 && completedImportJobs.length > 0 && (
+              <p className="mt-3 text-[11px] font-medium text-emerald-600">
+                Tudo concluído. Toque em “Ver produtos importados” para saber exatamente o que entrou e abrir qualquer item em Ofertas.
+              </p>
+            )}
+          </div>
+        )}
+
       </CardContent></Card>
       <Button variant="destructive" className="w-full" onClick={signOut}><LogOut className="h-4 w-4" />Sair da conta</Button>
     </div>
