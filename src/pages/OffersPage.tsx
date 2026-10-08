@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -1694,6 +1694,7 @@ type OffersPageProps = {
 export default function OffersPage({ betaVoice = false }: OffersPageProps) {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [packageFilters, setPackageFilters] = useState<string[]>([]);
@@ -1728,6 +1729,14 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
       return (data ?? []) as StoreReferenceRow[];
     },
   });
+
+
+  useEffect(() => {
+    const query = String(searchParams.get("q") || "").trim();
+    if (!query) return;
+    setSearchInput(query);
+    setSearch(query);
+  }, [searchParams]);
 
   useEffect(() => {
     return () => {
