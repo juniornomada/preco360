@@ -350,7 +350,14 @@ export function offerPackageInfo(
     return { quantity: 1, unit: "un", baseUnit: "un", baseQuantity: 1 };
   }
 
-  const combined = [rawName, ...(offerNotes ?? [])].join(" ");
+  const packagingNotes = (offerNotes ?? []).filter((note) => {
+    const text = normalizeSearchText(note);
+    return !(
+      /\b(limite|limitado|limitada|maximo|maxima|max)\b/.test(text) ||
+      /\bpor (pessoa|cliente|cpf|compra)\b/.test(text)
+    );
+  });
+  const combined = [rawName, ...packagingNotes].join(" ");
   let pkg =
     inferPackage(combined) ??
     packageInfoFromQuantity(packageQuantity, packageUnit);
