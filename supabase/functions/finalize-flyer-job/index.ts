@@ -46,29 +46,79 @@ function positive(value:unknown) {
   return Number.isFinite(n)&&n>0?n:null;
 }
 
-function paymentConditionText(notes:unknown) {
+function paymentConditionNotes(notes:unknown) {
   return (Array.isArray(notes)?notes:[])
-    .map((note)=>String(note??""))
-    .join(" ");
+    .map((note)=>String(note??"").trim())
+    .filter((note)=>(
+      /(taustepay|pagando.{0,40}cart[aã]o|cart[aã]o.{0,40}pagando|cart[aã]o\s+elo|credifatto|cart[aã]o.{0,30}muffato|muffato.{0,30}cart[aã]o|condicionado.{0,20}cart[aã]o|app\s*\+\s*cart[aã]o)/i.test(note)
+    ));
 }
 
-function isPaymentRestrictedPrice(notes:unknown) {
-  const text=paymentConditionText(notes);
-  return /(taustepay|pagando.{0,40}cart[aã]o|cart[aã]o.{0,40}pagando|cart[aã]o\s+elo|credifatto|cart[aã]o.{0,30}muffato|muffato.{0,30}cart[aã]o)/i.test(text);
+function moneyValues(value:unknown) {
+  return [...String(value??"").matchAll(/R\$\s*(\d{1,4}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)/gi)]
+    .map((match)=>{
+      const raw=String(match[1]??"");
+      const normalized=raw.includes(",")
+        ? raw.replace(/\./g,"").replace(",",".")
+        : raw;
+      return Number(normalized);
+    })
+    .filter((amount)=>Number.isFinite(amount)&&amount>0);
+}
+
+function paymentRestrictedForValue(notes:unknown, value:unknown) {
+  const amount=positive(value);
+  if (amount===null) return false;
+
+  const restricted=paymentConditionNotes(notes);
+  if (!restricted.length) return false;
+
+  const restrictedAmounts=restricted.flatMap(moneyValues);
+  if (!restrictedAmounts.length) return true;
+
+  return restrictedAmounts.some((candidate)=>Math.abs(candidate-amount)<=0.005);
 }
 
 function hasExplicitAlternativePaymentPrice(notes:unknown, advertisedPrice:unknown) {
   const advertised=positive(advertisedPrice);
   if (advertised===null) return false;
 
-  const amounts=[...paymentConditionText(notes).matchAll(/R\$\s*(\d{1,4}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)/gi)]
-    .map((match)=>{
-      const raw=String(match[1]??"").replace(/\./g,"").replace(",",".");
-      return Number(raw);
-    })
-    .filter((value)=>Number.isFinite(value)&&value>0);
-
+  const amounts=paymentConditionNotes(notes).flatMap(moneyValues);
   return amounts.some((value)=>Math.abs(value-advertised)>0.005);
+}
+
+function explicitNoAppPrice(notes:unknown) {
+  for (const raw of Array.isArray(notes)?notes:[]) {
+    const note=String(raw??"");
+    const match=note.match(/preço\s+r\$\s*([0-9]+(?:[.,][0-9]{1,2})?)\s+sem\s+oferta\s+app/i);
+    if (!match) continue;
+    const value=Number(match[1].replace(",","."));
+    if (Number.isFinite(value)&&value>0) return value;
+  }
+  return null;
+}
+
+function isCapacitySpecificationProduct(rawName:unknown) {
+  const text=normalize(rawName);
+  return /^(assadeira|caixa (?:organizadora|termica)|garrafa termica|mop\b|panela(?: de pressao)?|copo (?!descartavel)|jarra|frigideira|travessa|pote (?:tramontina|plasutil|plasvale|marinex|nadir))\b/.test(text);
+}
+
+function normalizedAtacadaoPricing(retailer:unknown, offer:any, notes:string[]) {
+  let advertised=positive(offer?.price);
+  let club=positive(offer?.club_price);
+
+  if (normalize(retailer)==="atacadao") {
+    const noApp=explicitNoAppPrice(notes);
+    if (noApp!==null && advertised!==null && noApp>advertised) {
+      // When the source explicitly states the higher value is "sem oferta APP",
+      // the immediately advertised value is the confirmed APP price. Any still
+      // lower extracted tier is not promoted without an explicit eligible label.
+      club=advertised;
+      advertised=noApp;
+    }
+  }
+
+  return {advertised,club};
 }
 
 function packageInfo(quantityValue:unknown, unitValue:unknown) {
@@ -97,8 +147,11 @@ function displayName(offer:any) {
   return name.replace(/\s+/g," ").trim();
 }
 
-function normalizedPricing(offer:any) {
-  const price=positive(offer?.price)!;
+function normalizedPricing(offer:any, price:number) {
+  if (isCapacitySpecificationProduct(offer?.product_name)) {
+    return { normalizedPrice:price, baseUnit:"un" };
+  }
+
   let pkg=packageInfo(offer?.package_quantity,offer?.package_unit);
   if (!pkg && normalize(offer?.price_basis_unit)!=="un") {
     pkg=packageInfo(offer?.price_basis_quantity,offer?.price_basis_unit);
@@ -135,6 +188,14 @@ function structuredLimitAndNotes(offer:any) {
     purchaseLimit:String(offer?.purchase_limit??"").trim()||inferredLimit||null,
     notes:kept,
   };
+}
+
+function previousIsoDate(value:string) {
+  const match=String(value??"").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const date=new Date(Date.UTC(Number(match[1]),Number(match[2])-1,Number(match[3])));
+  date.setUTCDate(date.getUTCDate()-1);
+  return date.toISOString().slice(0,10);
 }
 
 Deno.serve(async(req:Request)=>{
@@ -218,19 +279,50 @@ Deno.serve(async(req:Request)=>{
       }).select("id").single();
       if (createError) throw createError;
       flyerId=created.id;
+
+      // A later official revision of the same campaign supersedes the older
+      // snapshot from the day it is captured, while preserving earlier history.
+      const effectiveDate=String(job.created_at??new Date().toISOString()).slice(0,10);
+      const previousDay=previousIsoDate(effectiveDate);
+      if (previousDay && previousDay>=String(validFrom)) {
+        const {data:olderVersions}=await supabase.from("flyers")
+          .select("id,valid_from,valid_to")
+          .eq("user_id",job.user_id)
+          .eq("retailer",retailer)
+          .eq("source_file_name",job.source_file_name)
+          .eq("valid_from",validFrom)
+          .eq("valid_to",validTo)
+          .neq("id",flyerId);
+
+        for (const older of olderVersions??[]) {
+          if (String(older.valid_to)>=effectiveDate) {
+            await supabase.from("flyers")
+              .update({valid_to:previousDay})
+              .eq("id",older.id);
+          }
+        }
+      }
     }
 
     const rows=offers.map((offer:any)=>{
       const structured=structuredLimitAndNotes(offer);
-      const paymentRestricted=isPaymentRestrictedPrice(structured.notes);
-      const extractedClub=positive(offer?.club_price);
+      const extracted=normalizedAtacadaoPricing(retailer,offer,structured.notes);
+      const advertised=extracted.advertised;
+      let club=extracted.club;
 
-      // If the only captured price is explicitly tied to a store payment method,
-      // we do not know the user's eligible regular price and must not save it.
+      if (advertised===null) return null;
+
+      const priceRestricted=paymentRestrictedForValue(structured.notes,advertised);
+      const clubRestricted=club!==null
+        ? paymentRestrictedForValue(structured.notes,club)
+        : false;
+
+      // If the captured advertised value itself is tied to a payment method and
+      // there is no verified alternative, the offer is not usable.
       if (
-        paymentRestricted &&
-        extractedClub===null &&
-        !hasExplicitAlternativePaymentPrice(structured.notes,offer?.price)
+        priceRestricted &&
+        club===null &&
+        !hasExplicitAlternativePaymentPrice(structured.notes,advertised)
       ) {
         console.warn("Skipping payment-restricted offer without verified regular price", {
           product_name: offer?.product_name,
@@ -240,10 +332,10 @@ Deno.serve(async(req:Request)=>{
         return null;
       }
 
+      if (clubRestricted) club=null;
+
       const name=displayName(offer);
-      const pricing=normalizedPricing(offer);
-      // Payment-method discounts are never treated as club/member prices.
-      const club=paymentRestricted?null:extractedClub;
+      const pricing=normalizedPricing(offer,advertised);
 
       return {
         flyer_id:flyerId,
@@ -253,7 +345,7 @@ Deno.serve(async(req:Request)=>{
         brand:String(offer?.brand??"").trim()||null,
         package_quantity:positive(offer?.package_quantity),
         package_unit:String(offer?.package_unit??"").trim()||null,
-        advertised_price:Number(offer.price),
+        advertised_price:advertised,
         base_unit:pricing.baseUnit,
         normalized_price:pricing.normalizedPrice,
         club_price:club!==null,
