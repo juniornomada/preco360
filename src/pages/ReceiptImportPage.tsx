@@ -90,6 +90,19 @@ function brl(value: number) {
   });
 }
 
+function isReceiptCapacitySpecification(item: ParsedItem) {
+  const text = item.name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+  return /^(sc|saco) lixo\b|^(caixa organizadora|caixa termica|garrafa termica|mop\b|panela|frigideira|jarra|lixeira|balde|pote organizador)\b/.test(
+    text,
+  );
+}
+
 function normalizedReceiptPrice(item: ParsedItem) {
   const price = decimalValue(item.unitPrice ?? item.price);
   if (!price) return null;
@@ -99,6 +112,8 @@ function normalizedReceiptPrice(item: ParsedItem) {
   if (saleUnit === "L") return { value: price, unit: "L" };
   if (saleUnit === "G") return { value: price * 1000, unit: "kg" };
   if (saleUnit === "ML") return { value: price * 1000, unit: "L" };
+
+  if (isReceiptCapacitySpecification(item)) return null;
 
   const pkg = inferPackage(item.name);
   if (!pkg || pkg.baseQuantity <= 0) return null;
@@ -114,6 +129,8 @@ function packageMetadata(item: ParsedItem) {
   if (saleUnit === "L") return { package_size: 1, unit: "l" };
   if (saleUnit === "G") return { package_size: 1, unit: "g" };
   if (saleUnit === "ML") return { package_size: 1, unit: "ml" };
+
+  if (isReceiptCapacitySpecification(item)) return null;
 
   const pkg = inferPackage(item.name);
   return pkg ? { package_size: pkg.quantity, unit: pkg.unit } : null;
@@ -164,9 +181,14 @@ function receiptItemSummary(item: ParsedItem) {
 
 function receiptItemKey(item: ParsedItem) {
   return [
-    item.name.toLowerCase().replace(/\s+/g, " ").trim(),
+    item.name
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
     item.quantity ?? "",
-    String(item.unit ?? "").toUpperCase(),
     item.unitPrice ?? item.price ?? "",
     item.totalPrice ?? "",
   ].join("|");
