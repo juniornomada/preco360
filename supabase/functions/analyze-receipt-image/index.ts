@@ -13,13 +13,13 @@ const MODELS = [
 ] as const;
 
 const PROMPT = `
-Você analisa UMA captura de tela/foto de uma consulta oficial de NF-e/NFC-e/cupom fiscal brasileiro, normalmente aberta no portal da SEFAZ.
+Você analisa UM ARQUIVO de uma consulta oficial de NF-e/NFC-e/cupom fiscal brasileiro. O arquivo pode ser uma captura de tela/foto ou um PDF exportado/baixado do portal da SEFAZ.
 
 OBJETIVO
-Transcreva os dados da compra visíveis na imagem, principalmente estabelecimento, data e TODOS os itens legíveis.
+Transcreva os dados da compra presentes no arquivo, principalmente estabelecimento, data e TODOS os itens legíveis.
 
 REGRAS IMPORTANTES
-1. A imagem pode ser apenas uma parte de uma nota longa. Extraia somente o que estiver realmente visível; não invente itens ausentes.
+1. O arquivo pode conter a nota inteira ou apenas uma parte de uma nota longa. Em PDF, examine TODAS as páginas. Extraia somente o que estiver realmente presente; não invente itens ausentes.
 2. supermarket deve ser o nome/razão social ou nome fantasia do estabelecimento emissor quando legível. Não use "SEFAZ", "Receita", "NFC-e", "NF-e" ou o portal como supermercado.
 3. date deve ser a data de emissão/compra no formato YYYY-MM-DD. Se houver data e hora, use somente a data.
 4. Cada item deve conter o nome comercial/descrição legível em name.
@@ -36,7 +36,7 @@ REGRAS IMPORTANTES
 12. Não transforme código/EAN em nome do produto.
 13. Se algum campo do item não estiver legível, use null. Para aceitar um item, name e pelo menos unitPrice ou totalPrice precisam estar legíveis.
 14. confidence deve refletir a confiança real da leitura. Omita itens com confidence abaixo de 0,65.
-15. Examine toda a imagem, inclusive texto pequeno, linhas parcialmente visíveis e colunas de quantidade/valor.
+15. Examine todo o arquivo, inclusive todas as páginas do PDF, texto pequeno, linhas parcialmente visíveis e colunas de quantidade/valor.
 16. Retorne SOMENTE JSON válido, sem markdown.
 
 Estrutura exata:
@@ -96,7 +96,7 @@ function parseJson(text: string) {
     const start = clean.indexOf("{");
     const end = clean.lastIndexOf("}");
     if (start >= 0 && end > start) return JSON.parse(clean.slice(start, end + 1));
-    throw new Error("A leitura da imagem retornou JSON inválido.");
+    throw new Error("A leitura do arquivo retornou JSON inválido.");
   }
 }
 
@@ -192,18 +192,36 @@ Deno.serve(async (req: Request) => {
     const form = await req.formData();
     const file = form.get("file");
     if (!(file instanceof File)) {
-      return json(400, { error: "FILE_REQUIRED", message: "Envie um print da nota." });
+      return json(400, { error: "FILE_REQUIRED", message: "Envie uma imagem ou PDF da nota." });
     }
-    if (!file.type.startsWith("image/")) {
-      return json(415, { error: "IMAGE_REQUIRED", message: "O arquivo precisa ser uma imagem." });
+
+    const fileName = String(file.name || "").toLowerCase();
+    const mimeType = String(file.type || "").toLowerCase();
+    const isImage =
+      mimeType.startsWith("image/") ||
+      /\.(?:png|jpe?g|webp|gif|bmp|heic|heif)$/i.test(fileName);
+    const isPdf =
+      mimeType === "application/pdf" ||
+      /\.pdf$/i.test(fileName);
+
+    if (!isImage && !isPdf) {
+      return json(415, {
+        error: "UNSUPPORTED_FILE",
+        message: "Para esta leitura envie uma imagem ou PDF. Arquivos HTML são processados diretamente pelo importador.",
+      });
     }
     if (file.size <= 0 || file.size > 12 * 1024 * 1024) {
       return json(400, {
-        error: "INVALID_IMAGE_SIZE",
-        message: "Cada imagem precisa ter até 12 MB.",
+        error: "INVALID_FILE_SIZE",
+        message: "Cada arquivo precisa ter até 12 MB.",
       });
     }
 
+    const effectiveMimeType = isPdf
+      ? "application/pdf"
+      : mimeType.startsWith("image/")
+        ? mimeType
+        : "image/jpeg";
     const data = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
     const configured = String(Deno.env.get("GEMINI_MODEL") || "").trim();
     const allowed = new Set<string>(MODELS);
@@ -217,7 +235,7 @@ Deno.serve(async (req: Request) => {
         const { response, payload } = await callGemini(
           model,
           apiKey,
-          file.type || "image/jpeg",
+          effectiveMimeType,
           data,
         );
         attempts.push({ model, status: response.status });
@@ -290,8 +308,8 @@ Deno.serve(async (req: Request) => {
     });
   } catch (error) {
     return json(500, {
-      error: "RECEIPT_IMAGE_ANALYSIS_FAILED",
-      message: error instanceof Error ? error.message : "Falha ao analisar o print.",
+      error: "RECEIPT_FILE_ANALYSIS_FAILED",
+      message: error instanceof Error ? error.message : "Falha ao analisar o arquivo da nota.",
     });
   }
 });
