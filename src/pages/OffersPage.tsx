@@ -1426,20 +1426,54 @@ function comparableOfferIdentity(current: FlyerItemRow, previous: FlyerItemRow) 
   return true;
 }
 
-function validClubPrice(item: FlyerItemRow) {
-  // A discount requiring the Muffato/Credifatto payment card is not available to this user.
-  if (isCardOnlyPriceCondition(item.offer_notes)) return null;
+function noteMoneyValues(value: unknown) {
+  return [
+    ...String(value ?? "").matchAll(
+      /R\$\s*(\d{1,4}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)/gi,
+    ),
+  ]
+    .map((match) => {
+      const raw = String(match[1] ?? "");
+      const normalized = raw.includes(",")
+        ? raw.replace(/\./g, "").replace(",", ".")
+        : raw;
+      return Number(normalized);
+    })
+    .filter((amount) => Number.isFinite(amount) && amount > 0);
+}
 
-  const conditionalPromo = (item.offer_notes ?? []).some((note) =>
-    /cart[aã]o\\s+elo|com\\s+elo/i.test(String(note ?? "")),
+function clubPriceIsPaymentRestricted(item: FlyerItemRow, clubPrice: number) {
+  const restrictedNotes = (item.offer_notes ?? []).filter((note) => {
+    const text = String(note ?? "");
+    return (
+      isCardOnlyPriceCondition([text]) ||
+      /condicionado.{0,20}cart[aã]o|cart[aã]o.{0,20}condicionado|app\s*\+\s*cart[aã]o/i.test(
+        text,
+      )
+    );
+  });
+
+  if (!restrictedNotes.length) return false;
+
+  const restrictedAmounts = restrictedNotes.flatMap(noteMoneyValues);
+  if (!restrictedAmounts.length) {
+    // If the note is card-only but does not expose a separate value, stay conservative.
+    return true;
+  }
+
+  return restrictedAmounts.some(
+    (amount) => Math.abs(amount - clubPrice) <= 0.005,
   );
-  if (conditionalPromo) return null;
+}
 
+function validClubPrice(item: FlyerItemRow) {
   const regular = Number(item.advertised_price);
   const club = Number(item.club_advertised_price);
-  return Number.isFinite(club) &&
-    club > 0 &&
-    (!Number.isFinite(regular) || regular <= 0 || club <= regular)
+
+  if (!Number.isFinite(club) || club <= 0) return null;
+  if (clubPriceIsPaymentRestricted(item, club)) return null;
+
+  return !Number.isFinite(regular) || regular <= 0 || club <= regular
     ? club
     : null;
 }
