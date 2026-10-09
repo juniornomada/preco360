@@ -162,6 +162,138 @@ function receiptItemSummary(item: ParsedItem) {
   return [...new Set(parts)].join(" · ");
 }
 
+function receiptItemKey(item: ParsedItem) {
+  return [
+    item.name.toLowerCase().replace(/\s+/g, " ").trim(),
+    item.quantity ?? "",
+    String(item.unit ?? "").toUpperCase(),
+    item.unitPrice ?? item.price ?? "",
+    item.totalPrice ?? "",
+  ].join("|");
+}
+
+function mergeReceiptPageItems(current: ParsedItem[], next: ParsedItem[]) {
+  if (!current.length) return [...next];
+  if (!next.length) return current;
+
+  const maxOverlap = Math.min(8, current.length, next.length);
+  let overlap = 0;
+
+  for (let size = maxOverlap; size >= 1; size -= 1) {
+    const currentTail = current.slice(-size).map(receiptItemKey);
+    const nextHead = next.slice(0, size).map(receiptItemKey);
+    if (currentTail.every((key, index) => key === nextHead[index])) {
+      overlap = size;
+      break;
+    }
+  }
+
+  return [...current, ...next.slice(overlap)];
+}
+
+async function loadImageBitmap(file: File) {
+  if (typeof createImageBitmap === "function") {
+    return await createImageBitmap(file);
+  }
+
+  const url = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("Não foi possível abrir a imagem."));
+      element.src = url;
+    });
+    return image;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function canvasBlob(canvas: HTMLCanvasElement, type: string) {
+  return await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error("Falha ao preparar a imagem."))),
+      type,
+      type === "image/jpeg" ? 0.94 : undefined,
+    );
+  });
+}
+
+async function splitLongReceiptImage(file: File) {
+  const image = await loadImageBitmap(file);
+  const width = image.width;
+  const height = image.height;
+
+  if (!width || !height) return [file];
+
+  // Screenshots fiscais muito compridos perdem legibilidade quando enviados inteiros
+  // ao modelo de visão. Mantemos uma proporção próxima à tela do celular.
+  if (height / width <= 3.2) return [file];
+
+  const sourceSliceHeight = Math.max(320, Math.round(width * 2.55));
+  const sourceOverlap = Math.max(48, Math.round(width * 0.28));
+  const targetWidth = Math.min(1600, Math.max(1000, width));
+  const scale = targetWidth / width;
+  const slices: File[] = [];
+
+  let top = 0;
+  let index = 0;
+  while (top < height && slices.length < 24) {
+    const cropHeight = Math.min(sourceSliceHeight, height - top);
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = Math.max(1, Math.round(cropHeight * scale));
+
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("O navegador não conseguiu preparar o print.");
+
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(
+      image,
+      0,
+      top,
+      width,
+      cropHeight,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
+
+    const blob = await canvasBlob(canvas, "image/png");
+    const base = file.name.replace(/\.[^.]+$/, "") || "nota";
+    slices.push(
+      new File(
+        [blob],
+        `${base}-parte-${String(index + 1).padStart(2, "0")}.png`,
+        { type: "image/png" },
+      ),
+    );
+
+    if (top + cropHeight >= height) break;
+    top += Math.max(1, sourceSliceHeight - sourceOverlap);
+    index += 1;
+  }
+
+  return slices.length ? slices : [file];
+}
+
+async function edgeFunctionErrorMessage(error: any) {
+  try {
+    const response = error?.context;
+    if (response && typeof response.clone === "function") {
+      const payload = await response.clone().json();
+      const message = payload?.message || payload?.error;
+      if (message) return String(message);
+    }
+  } catch {
+    // Fall back to the SDK error below.
+  }
+  return String(error?.message || "Falha ao analisar a imagem.");
+}
+
 export default function ReceiptImportPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -252,37 +384,9 @@ export default function ReceiptImportPage() {
           item.name && Number(String(item.price).replace(",", ".")) > 0,
       );
 
-  const mergeReceiptItems = (current: ParsedItem[], next: ParsedItem[]) => {
-    const seen = new Set(
-      current.map((item) =>
-        [
-          item.name.toLowerCase().replace(/\s+/g, " ").trim(),
-          item.quantity ?? "",
-          item.unit ?? "",
-          item.unitPrice ?? item.price ?? "",
-          item.totalPrice ?? "",
-        ].join("|"),
-      ),
-    );
-    const merged = [...current];
-    for (const item of next) {
-      const key = [
-        item.name.toLowerCase().replace(/\s+/g, " ").trim(),
-        item.quantity ?? "",
-        item.unit ?? "",
-        item.unitPrice ?? item.price ?? "",
-        item.totalPrice ?? "",
-      ].join("|");
-      if (seen.has(key)) continue;
-      seen.add(key);
-      merged.push(item);
-    }
-    return merged;
-  };
-
   const importReceiptImages = async () => {
     if (!imageFiles.length) return;
-    const files = [...imageFiles];
+    const originals = [...imageFiles];
     setLoading(true);
     clearResult();
     setSource("image");
@@ -290,44 +394,69 @@ export default function ReceiptImportPage() {
     let merged: ParsedItem[] = [];
     let detectedSupermarket = "";
     let detectedDate = "";
-    const failed: string[] = [];
+    const failures: string[] = [];
 
     try {
-      for (let index = 0; index < files.length; index += 1) {
-        const file = files[index];
-        setImageProgress(`Lendo imagem ${index + 1} de ${files.length}…`);
+      setImageProgress("Preparando o(s) print(s)…");
+      const preparedGroups: File[][] = [];
+      for (const original of originals) {
+        preparedGroups.push(await splitLongReceiptImage(original));
+      }
+      const totalParts = preparedGroups.reduce((sum, group) => sum + group.length, 0);
+      let partNumber = 0;
 
-        const formData = new FormData();
-        formData.append("file", file);
+      for (const group of preparedGroups) {
+        let groupItems: ParsedItem[] = [];
 
-        const { data, error } = await supabase.functions.invoke(
-          "analyze-receipt-image",
-          { body: formData },
-        );
-        if (error) {
-          failed.push(file.name);
-          continue;
+        for (const file of group) {
+          partNumber += 1;
+          setImageProgress(
+            totalParts > originals.length
+              ? `Lendo trecho ${partNumber} de ${totalParts}…`
+              : `Lendo imagem ${partNumber} de ${totalParts}…`,
+          );
+
+          const formData = new FormData();
+          formData.append("file", file);
+
+          const { data, error } = await supabase.functions.invoke(
+            "analyze-receipt-image",
+            { body: formData },
+          );
+
+          if (error) {
+            failures.push(
+              `${file.name}: ${await edgeFunctionErrorMessage(error)}`,
+            );
+            continue;
+          }
+
+          const parsed = normalizeImageItems(data);
+          if (!parsed.length) {
+            failures.push(`${file.name}: nenhum item legível encontrado`);
+            continue;
+          }
+
+          groupItems = mergeReceiptPageItems(groupItems, parsed);
+
+          if (!detectedSupermarket && data?.supermarket) {
+            detectedSupermarket = String(data.supermarket).trim();
+          }
+          if (!detectedDate && data?.date) {
+            detectedDate = String(data.date).trim();
+          }
         }
 
-        const parsed = normalizeImageItems(data);
-        if (!parsed.length) {
-          failed.push(file.name);
-          continue;
-        }
-
-        merged = mergeReceiptItems(merged, parsed);
-        if (!detectedSupermarket && data?.supermarket) {
-          detectedSupermarket = String(data.supermarket).trim();
-        }
-        if (!detectedDate && data?.date) {
-          detectedDate = String(data.date).trim();
-        }
+        // Different user-selected screenshots may contain legitimate repeated
+        // purchases. Boundary deduplication happens only inside each split image.
+        merged = [...merged, ...groupItems];
       }
 
       if (!merged.length) {
         toast({
           title: "Não consegui ler os itens",
           description:
+            failures[0] ||
             "Tente um print mais nítido, com a lista de produtos, quantidades e valores visíveis.",
           variant: "destructive",
         });
@@ -342,9 +471,11 @@ export default function ReceiptImportPage() {
 
       toast({
         title: `${merged.length} itens encontrados`,
-        description: failed.length
-          ? `Revise antes de salvar. ${failed.length} imagem(ns) não puderam ser lidas por completo.`
-          : "Revise os produtos antes de salvar.",
+        description: failures.length
+          ? `Revise antes de salvar. ${failures.length} trecho(s) não puderam ser lidos por completo.`
+          : totalParts > originals.length
+            ? `Print longo dividido automaticamente em ${totalParts} trechos. Revise antes de salvar.`
+            : "Revise os produtos antes de salvar.",
       });
     } catch (error: any) {
       toast({
@@ -585,7 +716,7 @@ export default function ReceiptImportPage() {
                 <div className="flex-1">
                   <p className="font-semibold">Importar print da nota fiscal</p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Envie um ou vários prints da NF-e/NFC-e aberta no site da SEFAZ. Se a nota for longa, faça prints em sequência com pequena sobreposição.
+                    Envie um ou vários prints da NF-e/NFC-e aberta no site da SEFAZ. Prints muito longos são divididos automaticamente em trechos legíveis.
                   </p>
                 </div>
               </div>
@@ -629,7 +760,7 @@ export default function ReceiptImportPage() {
               </Button>
 
               <p className="text-xs text-muted-foreground">
-                O sistema tenta extrair estabelecimento, data, produto, quantidade, unidade, preço unitário e total do item. Nada é salvo antes da sua revisão.
+                O sistema tenta extrair estabelecimento, data, produto, quantidade, unidade, preço unitário e total do item. Em prints longos, ele divide a imagem automaticamente e junta os trechos. Nada é salvo antes da sua revisão.
               </p>
             </CardContent>
           </Card>
