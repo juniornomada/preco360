@@ -1,6 +1,7 @@
 import { normalizeSearchText } from "@/lib/flyerAnalysis";
 
 const MAX_ATACADISTA = "max atacadista";
+const ATACADAO = "atacadao";
 export const APP_ACTIVATION_NOTE = "Ativar desconto no app";
 
 function normalizedRetailer(retailer?: string | null) {
@@ -11,7 +12,8 @@ export function requiresAppActivation(
   retailer?: string | null,
   offerNotes?: string[] | null,
 ) {
-  if (normalizedRetailer(retailer) === MAX_ATACADISTA) return true;
+  const retailerKey = normalizedRetailer(retailer);
+  if (retailerKey === MAX_ATACADISTA || retailerKey === ATACADAO) return true;
 
   return (offerNotes ?? []).some((note) =>
     /ativ(?:e|ar|acao|ação)?.*app|app.*ativ/i.test(note),
