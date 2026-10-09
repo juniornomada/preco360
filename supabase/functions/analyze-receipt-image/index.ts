@@ -24,7 +24,10 @@ REGRAS IMPORTANTES
 3. date deve ser a data de emissão/compra no formato YYYY-MM-DD. Se houver data e hora, use somente a data.
 4. Cada item deve conter o nome comercial/descrição legível em name.
 5. quantity é a quantidade comprada. Preserve decimais, por exemplo 0.742 para produto vendido por kg.
-6. unit é a unidade de venda: UN, KG, G, L, ML, CX, PCT, PC etc. Padronize UND/UNID como UN e LT como L.
+6. unit é EXCLUSIVAMENTE a unidade de venda exibida na linha fiscal/coluna de unidade: UN, KG, G, L, ML, CX, PCT, PC etc. Padronize UND/UNID como UN e LT como L.
+   - NÃO use peso, volume ou capacidade que faça parte da descrição do produto como unit.
+   - Exemplo: "REF FANTA ... 1L" comprado como 1 UN => quantity=1 e unit="UN", não "L".
+   - Exemplo: "SC LIXO ECOLIX 100L" comprado como 1 PC/UN => unit="PC" ou "UN"; "100L" é capacidade do saco, não unidade de venda.
 7. unitPrice é o valor unitário cobrado. Em item vendido por KG, é o preço por kg mostrado na nota.
 8. totalPrice é o total daquele item/linha após quantidade × preço unitário, quando legível.
 9. price deve repetir unitPrice quando unitPrice existir; caso contrário use totalPrice. Nunca use o total geral da nota como preço de um produto.
