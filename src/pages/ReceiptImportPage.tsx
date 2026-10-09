@@ -242,6 +242,29 @@ async function canvasBlob(canvas: HTMLCanvasElement, type: string) {
   });
 }
 
+function receiptFileKind(file: File) {
+  const name = String(file.name || "").toLowerCase();
+  const type = String(file.type || "").toLowerCase();
+
+  if (
+    type.startsWith("image/") ||
+    /\.(?:png|jpe?g|webp|gif|bmp|heic|heif)$/i.test(name)
+  ) {
+    return "image" as const;
+  }
+  if (type === "application/pdf" || /\.pdf$/i.test(name)) {
+    return "pdf" as const;
+  }
+  if (
+    type === "text/html" ||
+    type === "application/xhtml+xml" ||
+    /\.html?$/i.test(name)
+  ) {
+    return "html" as const;
+  }
+  return "unsupported" as const;
+}
+
 async function splitLongReceiptImage(file: File) {
   const image = await loadImageBitmap(file);
   const width = image.width;
@@ -331,8 +354,8 @@ export default function ReceiptImportPage() {
   const [blocked, setBlocked] = useState<BlockedState | null>(null);
   const [pageText, setPageText] = useState("");
   const [lastUrl, setLastUrl] = useState("");
-  const [imageFiles, setImageFiles] = useState<File[]>([]);
-  const [imageProgress, setImageProgress] = useState("");
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
+  const [fileProgress, setFileProgress] = useState("");
 
   const keyCheck = useMemo(() => validateAccessKey(accessKey), [accessKey]);
 
@@ -342,7 +365,7 @@ export default function ReceiptImportPage() {
     setReceiptDate("");
     setBlocked(null);
     setPageText("");
-    setImageProgress("");
+    setFileProgress("");
   };
 
   const applyResult = (data: any, importSource: ImportSource) => {
@@ -391,7 +414,7 @@ export default function ReceiptImportPage() {
   };
 
 
-  const normalizeImageItems = (data: any) =>
+  const normalizeReceiptItems = (data: any) =>
     (Array.isArray(data?.items) ? data.items : [])
       .map((item: any) => ({
         name: String(item?.name ?? "").trim(),
@@ -406,9 +429,9 @@ export default function ReceiptImportPage() {
           item.name && Number(String(item.price).replace(",", ".")) > 0,
       );
 
-  const importReceiptImages = async () => {
-    if (!imageFiles.length) return;
-    const originals = [...imageFiles];
+  const importReceiptFiles = async () => {
+    if (!receiptFiles.length) return;
+    const originals = [...receiptFiles];
     setLoading(true);
     clearResult();
     setSource("image");
@@ -419,32 +442,88 @@ export default function ReceiptImportPage() {
     const failures: string[] = [];
 
     try {
-      setImageProgress("Preparando o(s) print(s)…");
-      const preparedGroups: File[][] = [];
+      setFileProgress("Preparando arquivo(s)…");
+
+      const groups: Array<{
+        kind: "image" | "pdf" | "html";
+        original: File;
+        parts: File[];
+      }> = [];
+
       for (const original of originals) {
-        preparedGroups.push(await splitLongReceiptImage(original));
+        const kind = receiptFileKind(original);
+        if (kind === "unsupported") {
+          failures.push(
+            `${original.name}: formato não suportado. Use imagem, PDF ou HTML.`,
+          );
+          continue;
+        }
+
+        groups.push({
+          kind,
+          original,
+          parts:
+            kind === "image"
+              ? await splitLongReceiptImage(original)
+              : [original],
+        });
       }
-      const totalParts = preparedGroups.reduce((sum, group) => sum + group.length, 0);
+
+      const totalParts = groups.reduce((sum, group) => sum + group.parts.length, 0);
       let partNumber = 0;
 
-      for (const group of preparedGroups) {
+      for (const group of groups) {
         let groupItems: ParsedItem[] = [];
 
-        for (const file of group) {
+        for (const file of group.parts) {
           partNumber += 1;
-          setImageProgress(
-            totalParts > originals.length
-              ? `Lendo trecho ${partNumber} de ${totalParts}…`
-              : `Lendo imagem ${partNumber} de ${totalParts}…`,
+          const label =
+            group.kind === "image" && group.parts.length > 1
+              ? "trecho"
+              : group.kind === "pdf"
+                ? "PDF"
+                : group.kind === "html"
+                  ? "HTML"
+                  : "imagem";
+
+          setFileProgress(
+            `Lendo ${label} ${partNumber} de ${totalParts}…`,
           );
 
-          const formData = new FormData();
-          formData.append("file", file);
+          let data: any = null;
+          let error: any = null;
 
-          const { data, error } = await supabase.functions.invoke(
-            "analyze-receipt-image",
-            { body: formData },
-          );
+          if (group.kind === "html") {
+            const pageText = await file.text();
+            if (pageText.trim().length < 40) {
+              failures.push(`${file.name}: HTML vazio ou sem conteúdo legível`);
+              continue;
+            }
+
+            const response = await supabase.functions.invoke(
+              "fetch-receipt-url",
+              { body: { pageText } },
+            );
+            data = response.data;
+            error = response.error;
+
+            if (!error && data?.error) {
+              failures.push(
+                `${file.name}: ${String(data?.error || "HTML não reconhecido")}`,
+              );
+              continue;
+            }
+          } else {
+            const formData = new FormData();
+            formData.append("file", file);
+
+            const response = await supabase.functions.invoke(
+              "analyze-receipt-image",
+              { body: formData },
+            );
+            data = response.data;
+            error = response.error;
+          }
 
           if (error) {
             failures.push(
@@ -453,13 +532,16 @@ export default function ReceiptImportPage() {
             continue;
           }
 
-          const parsed = normalizeImageItems(data);
+          const parsed = normalizeReceiptItems(data);
           if (!parsed.length) {
             failures.push(`${file.name}: nenhum item legível encontrado`);
             continue;
           }
 
-          groupItems = mergeReceiptPageItems(groupItems, parsed);
+          groupItems =
+            group.kind === "image" && group.parts.length > 1
+              ? mergeReceiptPageItems(groupItems, parsed)
+              : [...groupItems, ...parsed];
 
           if (!detectedSupermarket && data?.supermarket) {
             detectedSupermarket = String(data.supermarket).trim();
@@ -469,8 +551,6 @@ export default function ReceiptImportPage() {
           }
         }
 
-        // Different user-selected screenshots may contain legitimate repeated
-        // purchases. Boundary deduplication happens only inside each split image.
         merged = [...merged, ...groupItems];
       }
 
@@ -479,7 +559,7 @@ export default function ReceiptImportPage() {
           title: "Não consegui ler os itens",
           description:
             failures[0] ||
-            "Tente um print mais nítido, com a lista de produtos, quantidades e valores visíveis.",
+            "Tente outro arquivo ou confirme se a nota contém a lista de produtos e valores.",
           variant: "destructive",
         });
         return;
@@ -489,26 +569,28 @@ export default function ReceiptImportPage() {
       setSupermarket(detectedSupermarket);
       setReceiptDate(detectedDate || new Date().toISOString().slice(0, 10));
       setBlocked(null);
-      setImageProgress("");
+      setFileProgress("");
 
       toast({
         title: `${merged.length} itens encontrados`,
         description: failures.length
-          ? `Revise antes de salvar. ${failures.length} trecho(s) não puderam ser lidos por completo.`
-          : totalParts > originals.length
-            ? `Print longo dividido automaticamente em ${totalParts} trechos. Revise antes de salvar.`
+          ? `Revise antes de salvar. ${failures.length} arquivo(s)/trecho(s) não puderam ser lidos por completo.`
+          : groups.some(
+                (group) => group.kind === "image" && group.parts.length > 1,
+              )
+            ? "Print longo dividido automaticamente em trechos. Revise antes de salvar."
             : "Revise os produtos antes de salvar.",
       });
     } catch (error: any) {
       toast({
-        title: "Erro ao ler o print",
+        title: "Erro ao ler o arquivo",
         description:
-          error?.message ?? "Não foi possível analisar a imagem da nota.",
+          error?.message ?? "Não foi possível analisar a nota fiscal.",
         variant: "destructive",
       });
     } finally {
       setLoading(false);
-      setImageProgress("");
+      setFileProgress("");
     }
   };
 
@@ -642,7 +724,7 @@ export default function ReceiptImportPage() {
             ? "Importado via QR Code NFC-e"
             : source === "key"
               ? "Importado via chave NFC-e"
-              : "Importado via print/imagem da nota fiscal",
+              : "Importado via arquivo da nota fiscal (imagem/PDF/HTML)",
           quantity && unit ? `quantidade ${quantity} ${unit}` : null,
           unit ? `preço unitário ${price.toFixed(2)}/${unit}` : null,
           total ? `total do item ${total.toFixed(2)}` : null,
@@ -681,14 +763,14 @@ export default function ReceiptImportPage() {
       <div className="mb-5">
         <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><ReceiptText className="h-5 w-5" /></div>
         <h1 className="text-2xl font-extrabold tracking-tight">Importar cupom fiscal</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Leia o QR Code, informe a chave de 44 dígitos ou envie prints da consulta da SEFAZ. Você revisa tudo antes de salvar.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Leia o QR Code, informe a chave de 44 dígitos ou envie imagem, PDF ou HTML da consulta da SEFAZ. Você revisa tudo antes de salvar.</p>
       </div>
 
       <Tabs value={tab} onValueChange={(value) => { clearResult(); setTab(value as ImportSource); }}>
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="qr"><QrCode className="mr-2 h-4 w-4" />QR Code</TabsTrigger>
           <TabsTrigger value="key"><Key className="mr-2 h-4 w-4" />Chave</TabsTrigger>
-          <TabsTrigger value="image"><Upload className="mr-2 h-4 w-4" />Print</TabsTrigger>
+          <TabsTrigger value="image"><Upload className="mr-2 h-4 w-4" />Arquivo</TabsTrigger>
         </TabsList>
 
         <TabsContent value="qr" className="mt-4 space-y-3">
@@ -736,32 +818,32 @@ export default function ReceiptImportPage() {
                   <Upload className="h-5 w-5" />
                 </div>
                 <div className="flex-1">
-                  <p className="font-semibold">Importar print da nota fiscal</p>
+                  <p className="font-semibold">Importar arquivo da nota fiscal</p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Envie um ou vários prints da NF-e/NFC-e aberta no site da SEFAZ. Prints muito longos são divididos automaticamente em trechos legíveis.
+                    Envie imagem, PDF ou HTML da NF-e/NFC-e consultada na SEFAZ. Prints muito longos são divididos automaticamente em trechos legíveis.
                   </p>
                 </div>
               </div>
 
               <Input
                 type="file"
-                accept="image/*"
+                accept="image/*,.pdf,.html,.htm,application/pdf,text/html"
                 multiple
                 disabled={loading}
                 onChange={(event) => {
                   const files = Array.from(event.target.files ?? []).slice(0, 10);
-                  setImageFiles(files);
+                  setReceiptFiles(files);
                   clearResult();
                 }}
               />
 
-              {imageFiles.length > 0 && (
+              {receiptFiles.length > 0 && (
                 <div className="rounded-lg border bg-muted/20 p-3">
                   <p className="text-xs font-semibold">
-                    {imageFiles.length} imagem(ns) selecionada(s)
+                    {receiptFiles.length} arquivo(s) selecionado(s)
                   </p>
                   <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">
-                    {imageFiles.map((file) => (
+                    {receiptFiles.map((file) => (
                       <p key={file.name} className="truncate">{file.name}</p>
                     ))}
                   </div>
@@ -770,19 +852,19 @@ export default function ReceiptImportPage() {
 
               <Button
                 className="w-full"
-                onClick={() => void importReceiptImages()}
-                disabled={loading || imageFiles.length === 0}
+                onClick={() => void importReceiptFiles()}
+                disabled={loading || receiptFiles.length === 0}
               >
                 {loading ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   <Upload className="mr-2 h-4 w-4" />
                 )}
-                {imageProgress || "Ler print(s) da nota"}
+                {fileProgress || "Ler arquivo(s) da nota"}
               </Button>
 
               <p className="text-xs text-muted-foreground">
-                O sistema tenta extrair estabelecimento, data, produto, quantidade, unidade, preço unitário e total do item. Em prints longos, ele divide a imagem automaticamente e junta os trechos. Nada é salvo antes da sua revisão.
+                O sistema aceita imagem, PDF e HTML e tenta extrair estabelecimento, data, produto, quantidade, unidade, preço unitário e total do item. Em prints longos, divide a imagem automaticamente e junta os trechos. Nada é salvo antes da sua revisão.
               </p>
             </CardContent>
           </Card>
