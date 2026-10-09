@@ -288,7 +288,7 @@ export function inferPackage(value: string): PackageInfo | null {
 
 export function isCapacitySpecificationProduct(rawName: string) {
   const text = normalizeSearchText(rawName);
-  return /^(assadeira|caixa (?:organizadora|termica)|panela(?: de pressao)?|copo (?!descartavel)|jarra|frigideira|travessa|pote (?:tramontina|plasutil|plasvale|marinex|nadir))\b/.test(
+  return /^(assadeira|caixa (?:organizadora|termica)|garrafa termica|mop\b|panela(?: de pressao)?|copo (?!descartavel)|jarra|frigideira|travessa|pote (?:tramontina|plasutil|plasvale|marinex|nadir))\b/.test(
     text,
   );
 }
