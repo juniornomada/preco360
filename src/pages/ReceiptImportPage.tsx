@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertCircle, Camera, CheckCircle2, ExternalLink, Key, Loader2, QrCode, ReceiptText, RefreshCw, Save, Trash2 } from "lucide-react";
+import { AlertCircle, Camera, CheckCircle2, ExternalLink, Key, Loader2, QrCode, ReceiptText, RefreshCw, Save, Trash2, Upload } from "lucide-react";
 
 const db = supabase as any;
 
@@ -22,7 +22,7 @@ type ParsedItem = {
   unitPrice?: string;
   totalPrice?: string;
 };
-type ImportSource = "qr" | "key";
+type ImportSource = "qr" | "key" | "image";
 type Diagnostics = {
   htmlLength?: number;
   lineCount?: number;
@@ -177,6 +177,8 @@ export default function ReceiptImportPage() {
   const [blocked, setBlocked] = useState<BlockedState | null>(null);
   const [pageText, setPageText] = useState("");
   const [lastUrl, setLastUrl] = useState("");
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imageProgress, setImageProgress] = useState("");
 
   const keyCheck = useMemo(() => validateAccessKey(accessKey), [accessKey]);
 
@@ -186,6 +188,7 @@ export default function ReceiptImportPage() {
     setReceiptDate("");
     setBlocked(null);
     setPageText("");
+    setImageProgress("");
   };
 
   const applyResult = (data: any, importSource: ImportSource) => {
@@ -231,6 +234,129 @@ export default function ReceiptImportPage() {
     setSource(importSource);
     setBlocked(null);
     toast({ title: `${parsed.length} itens encontrados`, description: "Revise os produtos antes de salvar." });
+  };
+
+
+  const normalizeImageItems = (data: any) =>
+    (Array.isArray(data?.items) ? data.items : [])
+      .map((item: any) => ({
+        name: String(item?.name ?? "").trim(),
+        price: String(item?.price ?? item?.unitPrice ?? item?.totalPrice ?? ""),
+        quantity: item?.quantity ? String(item.quantity) : undefined,
+        unit: item?.unit ? String(item.unit) : undefined,
+        unitPrice: item?.unitPrice ? String(item.unitPrice) : undefined,
+        totalPrice: item?.totalPrice ? String(item.totalPrice) : undefined,
+      }))
+      .filter(
+        (item: ParsedItem) =>
+          item.name && Number(String(item.price).replace(",", ".")) > 0,
+      );
+
+  const mergeReceiptItems = (current: ParsedItem[], next: ParsedItem[]) => {
+    const seen = new Set(
+      current.map((item) =>
+        [
+          item.name.toLowerCase().replace(/\s+/g, " ").trim(),
+          item.quantity ?? "",
+          item.unit ?? "",
+          item.unitPrice ?? item.price ?? "",
+          item.totalPrice ?? "",
+        ].join("|"),
+      ),
+    );
+    const merged = [...current];
+    for (const item of next) {
+      const key = [
+        item.name.toLowerCase().replace(/\s+/g, " ").trim(),
+        item.quantity ?? "",
+        item.unit ?? "",
+        item.unitPrice ?? item.price ?? "",
+        item.totalPrice ?? "",
+      ].join("|");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+    return merged;
+  };
+
+  const importReceiptImages = async () => {
+    if (!imageFiles.length) return;
+    const files = [...imageFiles];
+    setLoading(true);
+    clearResult();
+    setSource("image");
+
+    let merged: ParsedItem[] = [];
+    let detectedSupermarket = "";
+    let detectedDate = "";
+    const failed: string[] = [];
+
+    try {
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        setImageProgress(`Lendo imagem ${index + 1} de ${files.length}…`);
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const { data, error } = await supabase.functions.invoke(
+          "analyze-receipt-image",
+          { body: formData },
+        );
+        if (error) {
+          failed.push(file.name);
+          continue;
+        }
+
+        const parsed = normalizeImageItems(data);
+        if (!parsed.length) {
+          failed.push(file.name);
+          continue;
+        }
+
+        merged = mergeReceiptItems(merged, parsed);
+        if (!detectedSupermarket && data?.supermarket) {
+          detectedSupermarket = String(data.supermarket).trim();
+        }
+        if (!detectedDate && data?.date) {
+          detectedDate = String(data.date).trim();
+        }
+      }
+
+      if (!merged.length) {
+        toast({
+          title: "Não consegui ler os itens",
+          description:
+            "Tente um print mais nítido, com a lista de produtos, quantidades e valores visíveis.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setItems(merged);
+      setSupermarket(detectedSupermarket);
+      setReceiptDate(detectedDate || new Date().toISOString().slice(0, 10));
+      setBlocked(null);
+      setImageProgress("");
+
+      toast({
+        title: `${merged.length} itens encontrados`,
+        description: failed.length
+          ? `Revise antes de salvar. ${failed.length} imagem(ns) não puderam ser lidas por completo.`
+          : "Revise os produtos antes de salvar.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Erro ao ler o print",
+        description:
+          error?.message ?? "Não foi possível analisar a imagem da nota.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+      setImageProgress("");
+    }
   };
 
   const importUrl = async (url: string, importSource: ImportSource) => {
@@ -287,7 +413,13 @@ export default function ReceiptImportPage() {
 
   const updateItem = (index: number, field: keyof ParsedItem, value: string) => {
     setItems((current) =>
-      current.map((item, i) => (i === index ? { ...item, [field]: value } : item))
+      current.map((item, i) => {
+        if (i !== index) return item;
+        if (field === "price") {
+          return { ...item, price: value, unitPrice: value };
+        }
+        return { ...item, [field]: value };
+      }),
     );
   };
 
@@ -355,7 +487,9 @@ export default function ReceiptImportPage() {
         const details = [
           source === "qr"
             ? "Importado via QR Code NFC-e"
-            : "Importado via chave NFC-e",
+            : source === "key"
+              ? "Importado via chave NFC-e"
+              : "Importado via print/imagem da nota fiscal",
           quantity && unit ? `quantidade ${quantity} ${unit}` : null,
           unit ? `preço unitário ${price.toFixed(2)}/${unit}` : null,
           total ? `total do item ${total.toFixed(2)}` : null,
@@ -394,13 +528,14 @@ export default function ReceiptImportPage() {
       <div className="mb-5">
         <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><ReceiptText className="h-5 w-5" /></div>
         <h1 className="text-2xl font-extrabold tracking-tight">Importar cupom fiscal</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Leia o QR Code da NFC-e ou informe a chave de 44 dígitos. Você revisa tudo antes de salvar.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Leia o QR Code, informe a chave de 44 dígitos ou envie prints da consulta da SEFAZ. Você revisa tudo antes de salvar.</p>
       </div>
 
       <Tabs value={tab} onValueChange={(value) => { clearResult(); setTab(value as ImportSource); }}>
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="qr"><QrCode className="mr-2 h-4 w-4" />QR Code</TabsTrigger>
-          <TabsTrigger value="key"><Key className="mr-2 h-4 w-4" />Chave de acesso</TabsTrigger>
+          <TabsTrigger value="key"><Key className="mr-2 h-4 w-4" />Chave</TabsTrigger>
+          <TabsTrigger value="image"><Upload className="mr-2 h-4 w-4" />Print</TabsTrigger>
         </TabsList>
 
         <TabsContent value="qr" className="mt-4 space-y-3">
@@ -436,6 +571,66 @@ export default function ReceiptImportPage() {
                 {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ReceiptText className="mr-2 h-4 w-4" />}
                 Consultar cupom
               </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="image" className="mt-4 space-y-3">
+          <Card>
+            <CardContent className="space-y-4 p-5">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl bg-primary/10 p-2.5 text-primary">
+                  <Upload className="h-5 w-5" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-semibold">Importar print da nota fiscal</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Envie um ou vários prints da NF-e/NFC-e aberta no site da SEFAZ. Se a nota for longa, faça prints em sequência com pequena sobreposição.
+                  </p>
+                </div>
+              </div>
+
+              <Input
+                type="file"
+                accept="image/*"
+                multiple
+                disabled={loading}
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? []).slice(0, 10);
+                  setImageFiles(files);
+                  clearResult();
+                }}
+              />
+
+              {imageFiles.length > 0 && (
+                <div className="rounded-lg border bg-muted/20 p-3">
+                  <p className="text-xs font-semibold">
+                    {imageFiles.length} imagem(ns) selecionada(s)
+                  </p>
+                  <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">
+                    {imageFiles.map((file) => (
+                      <p key={file.name} className="truncate">{file.name}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <Button
+                className="w-full"
+                onClick={() => void importReceiptImages()}
+                disabled={loading || imageFiles.length === 0}
+              >
+                {loading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="mr-2 h-4 w-4" />
+                )}
+                {imageProgress || "Ler print(s) da nota"}
+              </Button>
+
+              <p className="text-xs text-muted-foreground">
+                O sistema tenta extrair estabelecimento, data, produto, quantidade, unidade, preço unitário e total do item. Nada é salvo antes da sua revisão.
+              </p>
             </CardContent>
           </Card>
         </TabsContent>
