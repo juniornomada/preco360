@@ -1206,15 +1206,54 @@ Deno.serve(async(req)=>{
      const retailer=String(source?.retailer||"").replace(/\s+/g," ").trim();
      const urls=Array.from(new Set([
        String(source?.offers_url||"").trim(),
+       String(source?.official_site_url||"").trim(),
        ...(Array.isArray(source?.asset_urls)?source.asset_urls.map((value:any)=>String(value||"").trim()):[]),
      ].filter(Boolean)));
-     return retailer&&urls.length?{retailer,urls,city:"Marília"}:null;
+     return retailer?{retailer,urls,city:"Marília"}:null;
    })
    .filter(Boolean) as Array<{retailer:string;urls:string[];city:string}>;
 
+ // The source of truth is the user's Profile. A scheduled/manual "all" run must
+ // never silently include a retailer merely because it exists in the collector code.
+ const {data:mariliaCity,error:cityError}=await db.from("cities")
+   .select("id")
+   .eq("name","Marília")
+   .eq("state","SP")
+   .maybeSingle();
+ if(cityError) throw cityError;
+
+ let connectedSources:Array<{retailer:string;urls:string[];city:string}>=[];
+ if(mariliaCity?.id){
+   const {data:connected,error:connectedError}=await db
+     .from("user_city_retailer_sources")
+     .select("retailer,official_site_url,offers_url,metadata")
+     .eq("user_id",USER_ID)
+     .eq("city_id",mariliaCity.id)
+     .eq("source_status","available")
+     .eq("city_verified",true)
+     .eq("capture_supported",true)
+     .order("retailer");
+   if(connectedError) throw connectedError;
+
+   connectedSources=(connected??[])
+     .map((source:any)=>{
+       const retailer=String(source?.retailer||"").replace(/\s+/g," ").trim();
+       const metadataAssets=Array.isArray(source?.metadata?.asset_urls)
+         ? source.metadata.asset_urls.map((value:any)=>String(value||"").trim())
+         : [];
+       const urls=Array.from(new Set([
+         String(source?.offers_url||"").trim(),
+         String(source?.official_site_url||"").trim(),
+         ...metadataAssets,
+       ].filter(Boolean)));
+       return retailer?{retailer,urls,city:"Marília"}:null;
+     })
+     .filter(Boolean) as Array<{retailer:string;urls:string[];city:string}>;
+ }
+
  const runtimeSources=Array.from(new Map(
    [
-     ...SOURCES.map((source:any)=>[retailerKey(source.retailer),source] as const),
+     ...connectedSources.map((source:any)=>[retailerKey(source.retailer),source] as const),
      ...dynamicSources.map((source:any)=>[retailerKey(source.retailer),source] as const),
    ]
  ).values());
@@ -1325,6 +1364,7 @@ Deno.serve(async(req)=>{
    city:"Marília",
    ran_at:new Date().toISOString(),
    requested_retailers:requestedRetailers,
+   connected_retailers:runtimeSources.map((source:any)=>source.retailer),
    report,
  }),{headers:{...corsHeaders,"content-type":"application/json"}});
 });
