@@ -170,6 +170,79 @@ function receiptItemKey(item: ParsedItem) {
   ].join("|");
 }
 
+function consolidateReceiptItemsForSave(items: ParsedItem[]) {
+  const grouped = new Map<
+    string,
+    ParsedItem & { __quantityTotal?: number; __itemTotal?: number }
+  >();
+
+  const normalizedSaleUnit = (value?: string) => {
+    const unit = String(value ?? "").trim().toUpperCase();
+    if (unit === "UND" || unit === "UNID") return "UN";
+    if (unit === "LT") return "L";
+    return unit;
+  };
+
+  for (const item of items) {
+    const name = item.name.trim();
+    const unitPrice = decimalValue(item.unitPrice ?? item.price);
+    if (!name || !unitPrice) continue;
+
+    const normalizedName = name
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+    const saleUnit = normalizedSaleUnit(item.unit);
+    const key = [
+      normalizedName,
+      unitPrice.toFixed(6),
+      saleUnit,
+    ].join("|");
+
+    const quantity = decimalValue(item.quantity);
+    const total = decimalValue(item.totalPrice);
+    const existing = grouped.get(key);
+
+    if (!existing) {
+      grouped.set(key, {
+        ...item,
+        unit: saleUnit || item.unit,
+        __quantityTotal: quantity ?? undefined,
+        __itemTotal:
+          total ??
+          (quantity ? quantity * unitPrice : undefined),
+      });
+      continue;
+    }
+
+    const nextQuantity =
+      (existing.__quantityTotal ?? 0) + (quantity ?? 0);
+    const nextTotal =
+      (existing.__itemTotal ?? 0) +
+      (total ?? (quantity ? quantity * unitPrice : 0));
+
+    existing.__quantityTotal =
+      nextQuantity > 0 ? nextQuantity : undefined;
+    existing.__itemTotal =
+      nextTotal > 0 ? nextTotal : undefined;
+  }
+
+  return [...grouped.values()].map((item) => ({
+    name: item.name,
+    price: item.price,
+    unitPrice: item.unitPrice,
+    unit: item.unit,
+    quantity: item.__quantityTotal
+      ? String(Number(item.__quantityTotal.toFixed(4)))
+      : item.quantity,
+    totalPrice: item.__itemTotal
+      ? item.__itemTotal.toFixed(2)
+      : item.totalPrice,
+  }));
+}
+
 function mergeReceiptPageItems(current: ParsedItem[], next: ParsedItem[]) {
   if (!current.length) return [...next];
   if (!next.length) return current;
@@ -869,7 +942,8 @@ export default function ReceiptImportPage() {
     setSaving(true);
     try {
       const date = receiptDate || new Date().toISOString().slice(0, 10);
-      for (const item of items) {
+      const itemsToSave = consolidateReceiptItemsForSave(items);
+      for (const item of itemsToSave) {
         const name = item.name.trim();
         const price = decimalValue(item.unitPrice ?? item.price);
         if (!name || !price) continue;
@@ -952,7 +1026,14 @@ export default function ReceiptImportPage() {
         });
         if (priceError) throw priceError;
       }
-      toast({ title: "Cupom importado", description: `${items.length} preços foram adicionados ao seu histórico.` });
+      const consolidatedCount = items.length - itemsToSave.length;
+      toast({
+        title: "Cupom importado",
+        description:
+          consolidatedCount > 0
+            ? `${items.length} linhas do cupom foram consolidadas em ${itemsToSave.length} preços. ${consolidatedCount} repetição(ões) do mesmo produto não geraram preços duplicados.`
+            : `${itemsToSave.length} preços foram adicionados ao seu histórico.`,
+      });
       clearResult();
       setAccessKey("");
     } catch (error: any) {
