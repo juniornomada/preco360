@@ -698,7 +698,7 @@ export default function ReceiptImportPage() {
       }),
     );
 
-    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    const opened = window.open(url, "_blank");
     if (!opened) {
       toast({
         title: "O navegador bloqueou a nova aba",
@@ -706,6 +706,11 @@ export default function ReceiptImportPage() {
         variant: "destructive",
       });
       return;
+    }
+    try {
+      opened.opener = null;
+    } catch {
+      // Alguns navegadores móveis não permitem alterar opener entre domínios.
     }
 
     toast({
