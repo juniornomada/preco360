@@ -647,7 +647,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
         current >= Math.min(2.2, range.max) - 0.05;
       // A stalled read is itself evidence that more local illumination
       // could help with fine print, even when average brightness looks OK.
-      const stalledOnSmallQr = elapsed >= 4600 && zoomEnough;
+      const stalledOnSmallQr = elapsed >= 4600 && (zoomEnough || elapsed >= 7500);
       const shouldOfferLight = lowLightSamplesRef.current >= 2 || stalledOnSmallQr;
       if (shouldOfferLight) {
         setLowLightDetected(lowLightSamplesRef.current >= 2);
@@ -745,7 +745,9 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       if (session !== scanSessionRef.current) return;
       scanStartedAtRef.current = performance.now();
       lastZoomStepRef.current = scanStartedAtRef.current;
-      lastDeepScanRef.current = scanStartedAtRef.current;
+      // Zero allows the first heavier pass after ~6.8 seconds; subsequent
+      // full passes are throttled to avoid blocking the live preview.
+      lastDeepScanRef.current = 0;
 
       setMessage(
         "Centralize o QR e aproxime até ele ocupar boa parte do quadro",
