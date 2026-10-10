@@ -13,6 +13,7 @@ type Item = {
   unit?: string;
   unitPrice?: string;
   totalPrice?: string;
+  barcode?: string;
 };
 type Diagnostics = {
   htmlLength?: number;
@@ -194,6 +195,28 @@ function normalizeUnit(raw?: string | null) {
   return unit;
 }
 
+function validGtin(raw?: string | null) {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (![8, 12, 13, 14].includes(digits.length)) return null;
+
+  let sum = 0;
+  let weight = 3;
+  for (let i = digits.length - 2; i >= 0; i -= 1) {
+    sum += Number(digits[i]) * weight;
+    weight = weight === 3 ? 1 : 3;
+  }
+  const check = (10 - (sum % 10)) % 10;
+  return check === Number(digits[digits.length - 1]) ? digits : null;
+}
+
+function gtinFromText(text: string) {
+  const code =
+    text.match(/\(\s*C[oó]digo\s*:\s*([^)]+)\)/i)?.[1] ??
+    text.match(/\b(?:GTIN|EAN)\s*:?\s*(\d{8,14})\b/i)?.[1] ??
+    null;
+  return validGtin(code);
+}
+
 function itemDetailsFromText(text: string) {
   const multiplied = text.match(
     /\b(\d{1,6}(?:[.,]\d{1,4})?)\s*(KG|G|UN|UND|UNID|L|LT|ML|CX|PCT|PC)\s*(?:X|×)\s*(?:R\$\s*)?(\d{1,7}(?:\.\d{3})*[.,]\d{2})/i,
@@ -240,10 +263,11 @@ function parseRenderedItems(lines: string[]): Item[] {
   const items: Item[] = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const codeMatch = lines[i].match(/^(.*?)\(\s*C[oó]digo\s*:\s*[^)]+\)/i);
+    const codeMatch = lines[i].match(/^(.*?)\(\s*C[oó]digo\s*:\s*([^)]+)\)/i);
     if (!codeMatch) continue;
 
     let name = normalizeName(codeMatch[1] || "");
+    const barcode = validGtin(codeMatch[2]);
     if (!name) {
       for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
         const candidate = normalizeName(lines[j]);
@@ -266,7 +290,14 @@ function parseRenderedItems(lines: string[]): Item[] {
 
     const block = lines.slice(i, end).join(" ");
     const details = itemDetailsFromText(block);
-    if (details.price) items.push({ name, ...details, price: details.price });
+    if (details.price) {
+      items.push({
+        name,
+        ...details,
+        price: details.price,
+        ...(barcode ? { barcode } : {}),
+      });
+    }
   }
 
   return dedupe(items);
@@ -294,6 +325,7 @@ function parseNfceRows(markup: string): Item[] {
     const rowText = strip(row).replace(/\s+/g, " ");
     const unitHtml = spanByClass(row, "RvlUnit");
     const details = itemDetailsFromText(rowText);
+    const barcode = gtinFromText(rowText);
     const htmlUnitPrice = money(unitHtml ? strip(unitHtml) : null);
     const unitPrice = details.unitPrice ?? htmlUnitPrice ?? undefined;
     const price = unitPrice ?? details.totalPrice ?? null;
@@ -304,6 +336,7 @@ function parseNfceRows(markup: string): Item[] {
         ...details,
         unitPrice,
         price,
+        ...(barcode ? { barcode } : {}),
       });
     }
   }
@@ -325,7 +358,15 @@ function parseTitleBlocks(markup: string): Item[] {
     const end = hits[index + 1]?.start ?? Math.min(markup.length, hit.end + 5000);
     const block = strip(markup.slice(hit.end, end)).replace(/\s+/g, " ");
     const details = itemDetailsFromText(block);
-    if (details.price) items.push({ name: hit.name, ...details, price: details.price });
+    const barcode = gtinFromText(block);
+    if (details.price) {
+      items.push({
+        name: hit.name,
+        ...details,
+        price: details.price,
+        ...(barcode ? { barcode } : {}),
+      });
+    }
   });
 
   return dedupe(items);
