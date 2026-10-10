@@ -118,18 +118,47 @@ function isBadName(name: string) {
 }
 
 function dedupe(items: Item[]) {
-  const seen = new Set<string>();
-  const out: Item[] = [];
+  // Em NFC-e, o mesmo produto pode aparecer legitimamente mais de uma vez
+  // com o mesmo preço. Portanto, nunca deduplicamos linhas isoladas por
+  // nome/preço. Primeiro apenas limpamos/validamos cada ocorrência.
+  const cleaned: Item[] = [];
   for (const raw of items) {
     const name = normalizeName(raw.name);
     const price = money(raw.price);
     if (!name || name.length < 2 || isBadName(name) || !price) continue;
-    const key = `${name.toLowerCase()}|${price}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ ...raw, name, price });
+    cleaned.push({ ...raw, name, price });
   }
-  return out.slice(0, 300);
+
+  // Alguns layouts podem repetir a lista inteira em blocos visível/oculto.
+  // Nesse caso específico, removemos apenas cópias completas idênticas da
+  // sequência, preservando repetições legítimas de produtos dentro da nota.
+  const fingerprint = (item: Item) =>
+    [
+      item.name.toLowerCase(),
+      item.price,
+      item.quantity ?? "",
+      item.unit ?? "",
+      item.unitPrice ?? "",
+      item.totalPrice ?? "",
+    ].join("|");
+
+  const fingerprints = cleaned.map(fingerprint);
+  for (let period = 5; period <= Math.floor(cleaned.length / 2); period += 1) {
+    if (cleaned.length % period !== 0) continue;
+    const copies = cleaned.length / period;
+    if (copies < 2) continue;
+
+    let repeated = true;
+    for (let i = period; i < fingerprints.length; i += 1) {
+      if (fingerprints[i] !== fingerprints[i % period]) {
+        repeated = false;
+        break;
+      }
+    }
+    if (repeated) return cleaned.slice(0, period).slice(0, 300);
+  }
+
+  return cleaned.slice(0, 300);
 }
 
 function unitPriceFromText(text: string) {
