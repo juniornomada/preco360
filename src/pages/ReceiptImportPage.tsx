@@ -948,83 +948,98 @@ export default function ReceiptImportPage() {
   const saveAll = async () => {
     if (!user || !items.length) return;
     setSaving(true);
+
     try {
       const date = receiptDate || new Date().toISOString().slice(0, 10);
       const itemsToSave = consolidateReceiptItemsForSave(items);
-      for (const item of itemsToSave) {
-        const name = item.name.trim();
-        const price = decimalValue(item.unitPrice ?? item.price);
-        if (!name || !price) continue;
 
-        const metadata = packageMetadata(item);
-        const normalizedFromItem = normalizedReceiptPrice(item);
+      const batchItems = itemsToSave
+        .map((item) => {
+          const name = item.name.trim();
+          const price = decimalValue(item.unitPrice ?? item.price);
+          if (!name || !price) return null;
 
-        const { data: resolved, error: resolveError } = await db.rpc(
-          "resolve_or_create_product_identity",
-          {
-            p_name: name,
-            p_package_size: metadata?.package_size ?? null,
-            p_unit: metadata?.unit ?? null,
-            p_barcode: item.barcode ?? null,
-            p_retailer: supermarket.trim() || null,
-            p_source: "receipt",
-          },
-        );
-        if (resolveError) throw resolveError;
+          const metadata = packageMetadata(item);
+          const normalizedFromItem = normalizedReceiptPrice(item);
+          const normalized =
+            normalizedFromItem ??
+            normalizedPriceFromPackage(price, metadata);
 
-        const productId = resolved?.[0]?.product_id;
-        if (!productId) {
-          throw new Error(`Não consegui identificar o produto "${name}".`);
-        }
+          const quantity = decimalValue(item.quantity);
+          const total = decimalValue(item.totalPrice);
+          const unit = String(item.unit ?? "").toUpperCase();
+          const details = [
+            source === "qr"
+              ? "Importado via QR Code NFC-e"
+              : source === "key"
+                ? "Importado via chave NFC-e"
+                : "Importado via arquivo da nota fiscal (imagem/PDF/HTML)",
+            quantity && unit ? `quantidade ${quantity} ${unit}` : null,
+            unit ? `preço unitário ${price.toFixed(2)}/${unit}` : null,
+            total ? `total do item ${total.toFixed(2)}` : null,
+            item.barcode ? `GTIN ${item.barcode}` : null,
+          ]
+            .filter(Boolean)
+            .join(" | ");
 
-        const effectiveMetadata = metadata;
-        const normalized =
-          normalizedFromItem ??
-          normalizedPriceFromPackage(price, effectiveMetadata);
+          return {
+            name,
+            price: price.toFixed(6),
+            barcode: item.barcode ?? null,
+            package_quantity: metadata?.package_size ?? null,
+            package_unit: metadata?.unit ?? null,
+            normalized_price: normalized?.value ?? null,
+            base_unit:
+              normalized?.unit === "L" ? "l" : normalized?.unit ?? null,
+            receipt_text: details,
+          };
+        })
+        .filter(Boolean);
 
-        const quantity = decimalValue(item.quantity);
-        const total = decimalValue(item.totalPrice);
-        const unit = String(item.unit ?? "").toUpperCase();
-        const details = [
-          source === "qr"
-            ? "Importado via QR Code NFC-e"
-            : source === "key"
-              ? "Importado via chave NFC-e"
-              : "Importado via arquivo da nota fiscal (imagem/PDF/HTML)",
-          quantity && unit ? `quantidade ${quantity} ${unit}` : null,
-          unit ? `preço unitário ${price.toFixed(2)}/${unit}` : null,
-          total ? `total do item ${total.toFixed(2)}` : null,
-          item.barcode ? `GTIN ${item.barcode}` : null,
-        ].filter(Boolean).join(" | ");
-
-        const { error: priceError } = await db.from("prices").insert({
-          product_id: productId,
-          supermarket: supermarket.trim() || "Não informado",
-          price,
-          date,
-          user_id: user.id,
-          source: "receipt",
-          package_quantity: effectiveMetadata?.package_size ?? null,
-          package_unit: effectiveMetadata?.unit ?? null,
-          normalized_price: normalized?.value ?? null,
-          base_unit:
-            normalized?.unit === "L" ? "l" : normalized?.unit ?? null,
-          receipt_text: details,
-        });
-        if (priceError) throw priceError;
+      if (!batchItems.length) {
+        throw new Error("Nenhum item válido para salvar.");
       }
+
+      const { data: saved, error: saveError } = await db.rpc(
+        "save_receipt_price_batch",
+        {
+          p_supermarket: supermarket.trim() || "Não informado",
+          p_date: date,
+          p_items: batchItems,
+        },
+      );
+      if (saveError) throw saveError;
+
+      const result = saved?.[0];
+      const savedCount = Number(result?.saved_prices ?? batchItems.length);
+      const createdCount = Number(result?.created_products ?? 0);
+      const reusedCount = Number(result?.reused_products ?? 0);
       const consolidatedCount = items.length - itemsToSave.length;
+
       toast({
         title: "Cupom importado",
-        description:
+        description: [
+          `${savedCount} preços salvos em uma única transação`,
+          `${createdCount} produto(s) novo(s)`,
+          `${reusedCount} produto(s) reaproveitado(s)`,
           consolidatedCount > 0
-            ? `${items.length} linhas do cupom foram consolidadas em ${itemsToSave.length} preços. ${consolidatedCount} repetição(ões) do mesmo produto não geraram preços duplicados.`
-            : `${itemsToSave.length} preços foram adicionados ao seu histórico.`,
+            ? `${consolidatedCount} repetição(ões) do cupom consolidadas`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
       });
+
       clearResult();
       setAccessKey("");
     } catch (error: any) {
-      toast({ title: "Erro ao salvar", description: error?.message ?? "Não foi possível salvar os preços.", variant: "destructive" });
+      toast({
+        title: "Erro ao salvar",
+        description:
+          (error?.message ?? "Não foi possível salvar os preços.") +
+          " Nenhum item deste lote deve ser gravado se a transação falhar.",
+        variant: "destructive",
+      });
     } finally {
       setSaving(false);
     }
