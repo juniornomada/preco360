@@ -33,7 +33,7 @@ export function retailerLogoPath(value?: string | null) {
     case "Tauste":
       return "/retailer-logos/tauste.webp";
     case "Kawakami":
-      return "/retailer-logos/kawakami.webp?v=kawakami-correct-20261010";
+      return "/retailer-logos/kawakami-user-provided.png";
     case "Swift":
       return "/retailer-logos/swift.svg";
     case "Confiança":

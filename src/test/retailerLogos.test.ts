@@ -6,7 +6,7 @@ describe("identificação das logos de supermercado", () => {
     "identifica variação do Kawakami: %s",
     (name) => {
       expect(canonicalRetailerName(name)).toBe("Kawakami");
-      expect(retailerLogoPath(name)).toContain("/retailer-logos/kawakami.webp");
+      expect(retailerLogoPath(name)).toBe("/retailer-logos/kawakami-user-provided.png");
     },
   );
 
