@@ -545,35 +545,6 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
         Ler QR Code do cupom
       </div>
 
-      <div className="relative h-[220px] overflow-hidden rounded-md bg-muted sm:h-[280px]">
-        <video
-          ref={videoRef}
-          className="h-full w-full object-cover"
-          autoPlay
-          muted
-          playsInline
-        />
-
-        {!active && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-5 text-center text-sm text-muted-foreground">
-            <Camera className="h-7 w-7" />
-            {message}
-          </div>
-        )}
-
-        {active && (
-          <>
-            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[68%] aspect-square -translate-x-1/2 -translate-y-1/2 rounded-md border-2 border-primary" />
-            <div className="absolute inset-x-3 bottom-3 rounded bg-background/90 px-3 py-2 text-center text-xs">
-              {status === "reading" && (
-                <Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" />
-              )}
-              {message}
-            </div>
-          </>
-        )}
-      </div>
-
       <div className="flex flex-wrap gap-2">
         {active ? (
           <>
@@ -642,6 +613,35 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
           >
             Fechar
           </Button>
+        )}
+      </div>
+
+      <div className={`relative overflow-hidden rounded-md bg-muted ${active ? "h-[220px] sm:h-[280px]" : "h-[160px] sm:h-[280px]"}`}>
+        <video
+          ref={videoRef}
+          className="h-full w-full object-cover"
+          autoPlay
+          muted
+          playsInline
+        />
+
+        {!active && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-5 text-center text-sm text-muted-foreground">
+            <Camera className="h-7 w-7" />
+            {message}
+          </div>
+        )}
+
+        {active && (
+          <>
+            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[68%] aspect-square -translate-x-1/2 -translate-y-1/2 rounded-md border-2 border-primary" />
+            <div className="absolute inset-x-3 bottom-3 rounded bg-background/90 px-3 py-2 text-center text-xs">
+              {status === "reading" && (
+                <Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" />
+              )}
+              {message}
+            </div>
+          </>
         )}
       </div>
 
