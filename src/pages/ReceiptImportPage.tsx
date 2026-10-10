@@ -612,61 +612,6 @@ export default function ReceiptImportPage() {
     toast({ title: "QR Code não reconhecido", description: check.error ?? "Não encontrei uma NFC-e válida.", variant: "destructive" });
   };
 
-  const tryContinueAfterCaptcha = async (automatic = false) => {
-    if (!assistedKeyUrl || loading) return;
-
-    setLoading(true);
-    setAssistedKeyStatus("checking");
-    setBlocked(null);
-
-    try {
-      const { data, error } = await supabase.functions.invoke(
-        "fetch-receipt-url",
-        { body: { url: assistedKeyUrl } },
-      );
-      if (error) throw error;
-
-      if (data?.error) {
-        if (data?.code === "CAPTCHA_REQUIRED" || data?.code === "BLOCKED") {
-          setAssistedKeyStatus("session-required");
-          setBlocked({
-            message:
-              "O resultado da consulta ficou vinculado aos cookies da aba da SEFAZ. O Preço 360 web não consegue ler essa sessão de outro domínio. Para este navegador, use Arquivo (PDF/HTML/imagem) como contingência.",
-            code: "CAPTCHA_REQUIRED",
-            url: assistedKeyUrl,
-            traceId: data?.traceId,
-            diagnostics: data?.diagnostics,
-          });
-          if (!automatic) {
-            toast({
-              title: "A sessão da SEFAZ ficou isolada",
-              description:
-                "O CAPTCHA foi resolvido na outra aba, mas o navegador não liberou essa sessão para o Preço 360.",
-            });
-          }
-          return;
-        }
-
-        applyResult(data, "key");
-        return;
-      }
-
-      applyResult(data, "key");
-      setAssistedKeyStatus("success");
-      setAssistedKeyPending(false);
-      sessionStorage.removeItem("preco360.receipt.assisted");
-    } catch (error: any) {
-      setAssistedKeyStatus("waiting");
-      toast({
-        title: "Não consegui continuar a consulta",
-        description: error?.message ?? "Tente novamente.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const openAssistedKeyConsultation = () => {
     if (!keyCheck.valid || keyKind === "unknown") return;
 
@@ -755,16 +700,16 @@ export default function ReceiptImportPage() {
       if (
         !assistedKeyPending ||
         !assistedKeyUrl ||
-        assistedAttemptedRef.current ||
         Date.now() - assistedOpenedAtRef.current < 2500
       ) {
         return;
       }
 
-      assistedAttemptedRef.current = true;
-      window.setTimeout(() => {
-        void tryContinueAfterCaptcha(true);
-      }, 450);
+      // A sessão do CAPTCHA pertence ao domínio da SEFAZ e não é compartilhada
+      // com o Preço 360. Portanto, ao retornar da aba oficial, apenas preservamos
+      // o estado da consulta; não repetimos uma chamada que inevitavelmente
+      // receberia outro CAPTCHA e pareceria um erro para o usuário.
+      setAssistedKeyStatus("session-required");
     };
 
     window.addEventListener("focus", resume);
@@ -974,33 +919,15 @@ export default function ReceiptImportPage() {
               {assistedKeyPending && (
                 <div className="rounded-lg border bg-muted/20 p-3">
                   <p className="text-sm font-semibold">
-                    {assistedKeyStatus === "checking"
-                      ? "Tentando continuar a consulta…"
-                      : assistedKeyStatus === "session-required"
-                        ? "CAPTCHA concluído, mas a sessão ficou presa à aba da SEFAZ"
-                        : "Consulta oficial aberta"}
+                    {assistedKeyStatus === "session-required"
+                      ? "Consulta aberta na SEFAZ"
+                      : "Consulta oficial aberta"}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Depois de concluir o CAPTCHA e visualizar a NF-e/NFC-e, volte para esta tela. O Preço 360 tenta continuar automaticamente.
+                    {assistedKeyStatus === "session-required"
+                      ? "A validação do CAPTCHA fica na sessão da SEFAZ e não pode ser lida automaticamente pelo Preço 360 web. Se a nota já abriu corretamente, use a aba Arquivo para importar PDF, HTML ou imagem."
+                      : "Resolva o CAPTCHA e consulte a nota na página oficial. Ao voltar, esta chave continuará preenchida no Preço 360."}
                   </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="mt-3 w-full"
-                    disabled={loading}
-                    onClick={() => {
-                      assistedAttemptedRef.current = true;
-                      void tryContinueAfterCaptcha(false);
-                    }}
-                  >
-                    {loading ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                    )}
-                    Já concluí o CAPTCHA — tentar agora
-                  </Button>
                 </div>
               )}
             </CardContent>
