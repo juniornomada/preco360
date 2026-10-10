@@ -623,6 +623,12 @@ export default function ReceiptImportPage() {
       keyKind === "nfce" && keyCheck.clean.startsWith("35");
 
     if (isSpNfce) {
+      sessionStorage.removeItem("preco360.receipt.assisted");
+      try {
+        localStorage.removeItem("preco360.receipt.import-result");
+      } catch {
+        // sem impacto se o armazenamento local estiver indisponível
+      }
       setAssistedKeyPending(true);
       setAssistedKeyStatus("waiting");
       assistedOpenedAtRef.current = Date.now();
@@ -688,6 +694,8 @@ export default function ReceiptImportPage() {
   };
 
   useEffect(() => {
+    const seenResultIds = new Set<string>();
+
     const receive = (message: any) => {
       if (
         !message ||
@@ -696,6 +704,10 @@ export default function ReceiptImportPage() {
       ) {
         return;
       }
+
+      const resultId = String(message.resultId || "");
+      if (resultId && seenResultIds.has(resultId)) return;
+      if (resultId) seenResultIds.add(resultId);
 
       applyResult(message.payload, "key");
       setAssistedKeyPending(false);
