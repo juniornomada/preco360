@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   accessKeyDigitsFromTranscript,
   sanitizeAccessKeyDigits,
+  removeInterimEcho,
+  speechReplayOverlap,
 } from "@/lib/accessKeyVoice";
 
 type SpeechAlternative = { transcript: string };
@@ -104,6 +106,8 @@ export function useAccessKeyVoice() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const restartTimerRef = useRef<number | null>(null);
   const committedDigitsRef = useRef("");
+  const generationRef = useRef(0);
+  const replayGuardRef = useRef<{ digits: string; savedAt: number } | null>(null);
   const listeningRequestedRef = useRef(false);
   const onDigitsRef = useRef<
     ((digits: string, complete: boolean) => void) | null
@@ -122,8 +126,11 @@ export function useAccessKeyVoice() {
 
   const stopListening = useCallback(() => {
     listeningRequestedRef.current = false;
+    generationRef.current += 1;
+    replayGuardRef.current = null;
     clearRestartTimer();
-    recognitionRef.current?.stop();
+    // Aborting ignores stale interim callbacks after the user presses Parar.
+    recognitionRef.current?.abort();
     recognitionRef.current = null;
     setIsListening(false);
   }, [clearRestartTimer]);
@@ -141,14 +148,23 @@ export function useAccessKeyVoice() {
 
     clearRestartTimer();
 
+    const generation = generationRef.current;
     const sessionBaseDigits = committedDigitsRef.current;
     let lastSessionDigits = "";
+    let lastInterimDigits = "";
+    // The browser may echo the final interim hypothesis after auto-restart.
+    // Only reconcile this immediately following session, never historical digits.
+    const replayGuard = replayGuardRef.current;
+    // Keep this guard if recognition.start() is temporarily rejected:
+    // Android can replay the same hypothesis on a later successful retry.
 
     const recognition = new Recognition();
     recognition.lang = "pt-BR";
     recognition.interimResults = true;
     recognition.continuous = true;
-    recognition.maxAlternatives = 5;
+    // First alternative is the recognizer's preferred hypothesis. Selecting
+    // the longest of several alternatives can introduce repeated words.
+    recognition.maxAlternatives = 1;
 
     const speechWindow = getSpeechWindow();
     if (speechWindow?.SpeechRecognitionPhrase) {
@@ -161,24 +177,16 @@ export function useAccessKeyVoice() {
       }
     }
 
-    const digitsForResult = (result?: SpeechResult) => {
-      if (!result?.length) return "";
+    const digitsForResult = (result?: SpeechResult) =>
+      accessKeyDigitsFromTranscript(result?.[0]?.transcript ?? "");
 
-      const candidates = Array.from({ length: result.length }, (_, index) =>
-        accessKeyDigitsFromTranscript(result[index]?.transcript ?? ""),
-      ).filter(Boolean);
-
-      return (
-        candidates.sort((a, b) => b.length - a.length)[0] ??
-        ""
-      );
-    };
-
-    const publishDigits = (sessionDigits: string) => {
+    const publishDigits = (sessionDigits: string, confirmed: boolean) => {
       const displayed = sanitizeAccessKeyDigits(
         sessionBaseDigits + sessionDigits,
       );
-      const complete = displayed.length >= ACCESS_KEY_LENGTH;
+      // Interim speech can be revised; never finish a 44-digit key based
+      // solely on an unconfirmed hypothesis.
+      const complete = confirmed && displayed.length >= ACCESS_KEY_LENGTH;
 
       lastSessionDigits = displayed.slice(sessionBaseDigits.length);
       onDigitsRef.current?.(displayed, complete);
@@ -194,18 +202,25 @@ export function useAccessKeyVoice() {
     };
 
     recognition.onstart = () => {
+      if (generation !== generationRef.current) {
+        recognition.abort();
+        return;
+      }
       recognitionRef.current = recognition;
       setError(null);
       setIsListening(true);
     };
 
     recognition.onresult = (event) => {
+      if (generation !== generationRef.current) return;
+      // The next native session has finally delivered data. Its local
+      // replayGuard stays valid for revisions within this one session.
+      if (replayGuardRef.current === replayGuard) replayGuardRef.current = null;
       let finalDigits = "";
       let interimDigits = "";
 
-      // Rebuild the complete current recognition session every time.
-      // This avoids duplicating final hypotheses and preserves the latest
-      // interim hypothesis if Android/Chrome closes the native session.
+      // Results is a snapshot: intermediate hypotheses replace their prior
+      // text. Never append each onresult event to the access key.
       for (let index = 0; index < event.results.length; index += 1) {
         const result = event.results[index];
         const digits = digitsForResult(result);
@@ -218,6 +233,25 @@ export function useAccessKeyVoice() {
         }
       }
 
+      // A final segment followed by the same interim text is an echo from
+      // Chrome's streaming recognizer, not a new 4-digit group.
+      interimDigits = removeInterimEcho(finalDigits, interimDigits);
+
+      // On Android, speech from a provisional segment retained at onend may
+      // reappear after the browser starts a fresh recognition instance.
+      // Reconcile only that one fragment within a short replay window.
+      const candidate = finalDigits + interimDigits;
+      let overlap = 0;
+      if (replayGuard && performance.now() - replayGuard.savedAt <= 3500) {
+        overlap = speechReplayOverlap(replayGuard.digits, candidate);
+      }
+      if (overlap > 0) {
+        const removedFromFinal = Math.min(overlap, finalDigits.length);
+        const removedFromInterim = Math.max(0, overlap - removedFromFinal);
+        finalDigits = finalDigits.slice(removedFromFinal);
+        interimDigits = interimDigits.slice(removedFromInterim);
+      }
+
       const remaining = Math.max(
         0,
         ACCESS_KEY_LENGTH - sessionBaseDigits.length,
@@ -227,19 +261,22 @@ export function useAccessKeyVoice() {
         0,
         Math.max(0, remaining - finalWithinLimit.length),
       );
+      lastInterimDigits = interimWithinLimit;
 
-      // Final recognition is safe to persist immediately. Interim recognition
-      // is displayed live and is committed in onend if the browser ends the
-      // session before promoting it to final.
+      // Final recognition is persisted immediately. Interim text stays
+      // provisional until onend, so revised hypotheses cannot duplicate it.
       committedDigitsRef.current = sanitizeAccessKeyDigits(
         sessionBaseDigits + finalWithinLimit,
       );
 
-      publishDigits(finalWithinLimit + interimWithinLimit);
+      publishDigits(
+        finalWithinLimit + interimWithinLimit,
+        interimWithinLimit.length === 0,
+      );
     };
 
     recognition.onerror = (event) => {
-      if (event.error === "aborted") return;
+      if (generation !== generationRef.current || event.error === "aborted") return;
 
       if (isFatalRecognitionError(event.error)) {
         listeningRequestedRef.current = false;
@@ -256,14 +293,15 @@ export function useAccessKeyVoice() {
     };
 
     recognition.onend = () => {
+      if (generation !== generationRef.current) return;
       if (recognitionRef.current === recognition) {
         recognitionRef.current = null;
       }
 
-      // Chrome/Android may finish a recognition session while its latest
-      // hypothesis is still interim. Preserve it before restarting so the
-      // user never loses the digits already visible in the field.
-      if (lastSessionDigits) {
+      // A session can end before Chrome promotes its last hypothesis.
+      // Preserve the visible digits, but protect them from being replayed by
+      // the next native session.
+      if (listeningRequestedRef.current && lastSessionDigits) {
         committedDigitsRef.current = sanitizeAccessKeyDigits(
           sessionBaseDigits + lastSessionDigits,
         );
@@ -271,6 +309,12 @@ export function useAccessKeyVoice() {
           committedDigitsRef.current,
           committedDigitsRef.current.length >= ACCESS_KEY_LENGTH,
         );
+        if (lastInterimDigits.length >= 3) {
+          replayGuardRef.current = {
+            digits: lastInterimDigits.slice(-16),
+            savedAt: performance.now(),
+          };
+        }
       }
 
       const complete =
@@ -322,6 +366,8 @@ export function useAccessKeyVoice() {
       }
 
       clearRestartTimer();
+      generationRef.current += 1;
+      replayGuardRef.current = null;
       recognitionRef.current?.abort();
       recognitionRef.current = null;
 
@@ -349,6 +395,8 @@ export function useAccessKeyVoice() {
   useEffect(() => {
     return () => {
       listeningRequestedRef.current = false;
+      generationRef.current += 1;
+      replayGuardRef.current = null;
       clearRestartTimer();
       recognitionRef.current?.abort();
       recognitionRef.current = null;
