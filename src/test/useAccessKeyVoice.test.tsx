@@ -6,6 +6,7 @@ type Chunk = { transcript: string; final: boolean };
 
 class MockSpeechRecognition {
   static instances: MockSpeechRecognition[] = [];
+  static nextStartsToReject = 0;
   lang = "";
   interimResults = false;
   continuous = false;
@@ -20,6 +21,10 @@ class MockSpeechRecognition {
   }
 
   start() {
+    if (MockSpeechRecognition.nextStartsToReject > 0) {
+      MockSpeechRecognition.nextStartsToReject--;
+      throw new Error("Native recognizer is restarting");
+    }
     this.onstart?.(new Event("start"));
   }
 
@@ -49,6 +54,7 @@ describe("useAccessKeyVoice no Android", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     MockSpeechRecognition.instances.length = 0;
+    MockSpeechRecognition.nextStartsToReject = 0;
     Object.defineProperty(window, "webkitSpeechRecognition", {
       configurable: true,
       value: MockSpeechRecognition,
@@ -107,6 +113,24 @@ describe("useAccessKeyVoice no Android", () => {
       second.emit([{ transcript: "3 5 2 6 1 0", final: true }]);
     });
     expect(updates[updates.length - 1]).toBe("352610");
+    unmount();
+  });
+
+  it("keeps replay protection even if one Android restart is rejected", () => {
+    const { updates, unmount } = start();
+    const first = MockSpeechRecognition.instances[0];
+    act(() => {
+      first.emit([{ transcript: "3 5 2 6", final: false }]);
+      MockSpeechRecognition.nextStartsToReject = 1;
+      first.finish();
+      vi.advanceTimersByTime(130); // one native start() fails
+      vi.advanceTimersByTime(250); // following start() succeeds
+    });
+    expect(MockSpeechRecognition.instances).toHaveLength(3);
+    act(() => MockSpeechRecognition.instances[2].emit([
+      { transcript: "3 5 2 6 1 8", final: true },
+    ]));
+    expect(updates[updates.length - 1]).toBe("352618");
     unmount();
   });
 
