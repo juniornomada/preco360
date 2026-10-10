@@ -16,6 +16,7 @@ export function canonicalRetailerName(value?: string | null) {
   const normalized = normalizedRetailerName(original);
 
   if (/\bkawakami\b/.test(normalized)) return "Kawakami";
+  if (/\bswift\b/.test(normalized)) return "Swift";
   if (/\bconfianca\b/.test(normalized)) return "Confiança";
   if (/\btauste\b/.test(normalized)) return "Tauste";
   if (/\bmax atacadista\b/.test(normalized)) return "Max Atacadista";
@@ -32,7 +33,9 @@ export function retailerLogoPath(value?: string | null) {
     case "Tauste":
       return "/retailer-logos/tauste.webp";
     case "Kawakami":
-      return "/retailer-logos/kawakami.webp?v=kawakami-correct-20260927";
+      return "/retailer-logos/kawakami.webp?v=kawakami-correct-20261010";
+    case "Swift":
+      return "/retailer-logos/swift.svg";
     case "Confiança":
       return "/retailer-logos/confianca.webp";
     case "Max Atacadista":

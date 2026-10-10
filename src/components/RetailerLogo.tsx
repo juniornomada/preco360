@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   canonicalRetailerName,
@@ -11,6 +12,56 @@ type RetailerLogoProps = {
   nameClassName?: string;
   showName?: boolean;
 };
+
+type RetailerArtworkProps = {
+  logo: string | null;
+  name: string;
+};
+
+function RetailerArtwork({ logo, name }: RetailerArtworkProps) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const kawakami = name === "Kawakami";
+
+  if (!logo || imageFailed) {
+    return (
+      <span
+        className="flex h-full w-full items-center justify-center rounded-md bg-slate-100 px-1 text-center text-[10px] font-extrabold leading-none text-slate-800 dark:bg-slate-800 dark:text-slate-100"
+        aria-label={name}
+      >
+        {name.slice(0, 2).toUpperCase()}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={cn(
+        "relative flex h-full w-full min-w-0 items-center justify-center",
+        kawakami && "rounded-md bg-white px-0.5 py-0.5 ring-1 ring-slate-200/70",
+      )}
+    >
+      <img
+        src={logo}
+        alt=""
+        className={cn(
+          "h-full w-full object-contain",
+          kawakami && "pb-2",
+        )}
+        loading="lazy"
+        decoding="async"
+        onError={() => setImageFailed(true)}
+      />
+      {kawakami && (
+        <span
+          className="pointer-events-none absolute inset-x-0 bottom-0 truncate text-center text-[8px] font-extrabold leading-none tracking-tight text-emerald-800"
+          aria-hidden="true"
+        >
+          Kawakami
+        </span>
+      )}
+    </span>
+  );
+}
 
 export default function RetailerLogo({
   retailer,
@@ -28,23 +79,12 @@ export default function RetailerLogo({
     <span className={cn("inline-flex min-w-0 items-center gap-2", className)}>
       <span
         className={cn(
-          "flex h-7 w-12 shrink-0 items-center justify-center overflow-visible bg-transparent px-1 py-0.5",
+          "flex h-7 w-12 shrink-0 items-center justify-center overflow-hidden bg-transparent p-0",
           imageClassName,
         )}
-        aria-hidden="true"
+        aria-label={showName ? undefined : name}
       >
-        {logo ? (
-          <img
-            src={logo}
-            alt=""
-            className="h-full w-full object-contain"
-            loading="lazy"
-          />
-        ) : (
-          <span className="text-[10px] font-extrabold text-slate-700">
-            {name.slice(0, 2).toUpperCase()}
-          </span>
-        )}
+        <RetailerArtwork key={logo ?? name} logo={logo} name={name} />
       </span>
       {showName && (
         <span

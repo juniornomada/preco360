@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 140" role="img" aria-label="Swift">
+  <title>Swift</title>
+  <path d="M16 94c-9-34-4-58 12-73C41 9 61 7 87 7h91c30 0 47 13 53 36 7 28-5 58-29 67-24 9-57 5-89 5H41c-3 0-6 3-8 8l-7 11c-4 7-10 1-10-7V94Z" fill="#b43223" />
+  <path d="M12 86c-8-31-4-55 12-69C38 5 59 4 86 4h93c30 0 47 12 51 34 6 26-6 54-29 63-24 9-56 4-89 4H39c-4 0-6 4-9 9l-8 12c-5 7-9 0-9-8l-1-32Z" fill="#f34b28" />
+  <text x="120" y="76" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="69" font-style="italic" font-weight="900" letter-spacing="-3" text-anchor="middle" textLength="178" lengthAdjust="spacingAndGlyphs">Swift</text>
+</svg>
