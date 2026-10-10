@@ -6,12 +6,14 @@ import { useToast } from "@/hooks/use-toast";
 import { QrScanner } from "@/components/QrScanner";
 import { buildOfficialConsultationUrl, extractAccessKey, fiscalDocumentKind, fiscalDocumentLabel, validateAccessKey, validateNfceUrl } from "@/lib/nfceKey";
 import { inferPackage } from "@/lib/flyerAnalysis";
+import { sanitizeAccessKeyDigits } from "@/lib/accessKeyVoice";
+import { useAccessKeyVoice } from "@/hooks/useAccessKeyVoice";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertCircle, Camera, CheckCircle2, ExternalLink, Key, Loader2, QrCode, ReceiptText, RefreshCw, Save, Trash2, Upload } from "lucide-react";
+import { AlertCircle, Camera, CheckCircle2, ExternalLink, Key, Loader2, Mic, QrCode, ReceiptText, RefreshCw, Save, Trash2, Upload } from "lucide-react";
 
 const db = supabase as any;
 
@@ -399,6 +401,14 @@ export default function ReceiptImportPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const {
+    isSupported: isKeyVoiceSupported,
+    isListening: isKeyVoiceListening,
+    error: keyVoiceError,
+    clearError: clearKeyVoiceError,
+    startListening: startKeyVoiceListening,
+    stopListening: stopKeyVoiceListening,
+  } = useAccessKeyVoice();
   const [tab, setTab] = useState<ImportSource>("qr");
   const [scannerOpen, setScannerOpen] = useState(false);
   const [accessKey, setAccessKey] = useState("");
@@ -424,6 +434,10 @@ export default function ReceiptImportPage() {
   const keyCheck = useMemo(() => validateAccessKey(accessKey), [accessKey]);
   const keyKind = useMemo(
     () => fiscalDocumentKind(accessKey),
+    [accessKey],
+  );
+  const accessKeyDigits = useMemo(
+    () => sanitizeAccessKeyDigits(accessKey),
     [accessKey],
   );
 
@@ -1095,7 +1109,64 @@ export default function ReceiptImportPage() {
                 <p className="font-semibold">Chave de acesso da NFC-e</p>
                 <p className="mt-1 text-sm text-muted-foreground">Cole os 44 dígitos impressos no cupom.</p>
               </div>
-              <Input value={accessKey} onChange={(e) => setAccessKey(extractAccessKey(e.target.value) ?? e.target.value)} placeholder="44 dígitos da chave de acesso" className="font-mono" />
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <Input
+                    value={accessKey}
+                    onChange={(e) => {
+                      clearKeyVoiceError();
+                      setAccessKey(
+                        extractAccessKey(e.target.value) ??
+                          sanitizeAccessKeyDigits(e.target.value),
+                      );
+                    }}
+                    inputMode="numeric"
+                    autoComplete="off"
+                    placeholder="44 dígitos da chave de acesso"
+                    className="min-w-0 flex-1 font-mono"
+                  />
+                  <Button
+                    type="button"
+                    variant={isKeyVoiceListening ? "default" : "outline"}
+                    className={isKeyVoiceListening ? "animate-pulse shrink-0" : "shrink-0"}
+                    disabled={!isKeyVoiceSupported || loading}
+                    onClick={() => {
+                      if (isKeyVoiceListening) {
+                        stopKeyVoiceListening();
+                        return;
+                      }
+
+                      startKeyVoiceListening(accessKeyDigits, (digits, complete) => {
+                        setAccessKey(digits);
+                        if (complete) {
+                          toast({
+                            title: "44 dígitos capturados",
+                            description: "A chave foi preenchida por voz. Confira a validação abaixo.",
+                          });
+                        }
+                      });
+                    }}
+                  >
+                    <Mic className="mr-2 h-4 w-4" />
+                    {isKeyVoiceListening ? "Parar" : "Falar chave"}
+                  </Button>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <span>
+                    {isKeyVoiceListening
+                      ? "Ouvindo… fale um número por vez."
+                      : isKeyVoiceSupported
+                        ? "Você também pode ditar a chave, um número por vez."
+                        : "Ditado por voz indisponível neste navegador."}
+                  </span>
+                  <span className="shrink-0 font-mono font-semibold">
+                    {accessKeyDigits.length}/44
+                  </span>
+                </div>
+                {keyVoiceError && (
+                  <p className="text-xs text-destructive">{keyVoiceError}</p>
+                )}
+              </div>
               {accessKey && !keyCheck.valid && <p className="flex gap-2 text-sm text-destructive"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{keyCheck.error}</p>}
               {keyCheck.valid && (
                 <p className="flex gap-2 text-sm text-primary">
