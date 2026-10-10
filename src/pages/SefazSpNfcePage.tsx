@@ -271,7 +271,11 @@ export default function SefazSpNfcePage() {
                   </div>
                 </div>
 
-                <Input
+                <div className="space-y-2 rounded-xl border border-primary/20 bg-primary/[0.03] p-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-primary">
+                    Digite o CAPTCHA aqui
+                  </p>
+                  <Input
                   value={captcha}
                   onChange={(event) => setCaptcha(event.target.value)}
                   onKeyDown={(event) => {
@@ -279,10 +283,11 @@ export default function SefazSpNfcePage() {
                   }}
                   autoComplete="off"
                   autoCapitalize="characters"
-                  className="text-center font-mono text-lg uppercase tracking-widest"
+                  className="h-14 border-2 border-primary/60 bg-primary/5 text-center font-mono text-xl font-bold uppercase tracking-[0.3em] shadow-sm focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30"
                   placeholder="CAPTCHA"
                   disabled={status === "submitting"}
                 />
+                </div>
 
                 {message && (
                   <p className="text-sm text-destructive">{message}</p>
