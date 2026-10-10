@@ -21,6 +21,7 @@ type ParsedItem = {
   unit?: string;
   unitPrice?: string;
   totalPrice?: string;
+  barcode?: string;
 };
 type ImportSource = "qr" | "key" | "image";
 const RECEIPT_CHANNEL = "preco360-receipt-import";
@@ -195,8 +196,12 @@ function consolidateReceiptItemsForSave(items: ParsedItem[]) {
       .replace(/\s+/g, " ")
       .trim();
     const saleUnit = normalizedSaleUnit(item.unit);
+    const identity =
+      item.barcode?.trim()
+        ? `gtin:${item.barcode.trim()}`
+        : normalizedName;
     const key = [
-      normalizedName,
+      identity,
       unitPrice.toFixed(6),
       saleUnit,
     ].join("|");
@@ -240,6 +245,7 @@ function consolidateReceiptItemsForSave(items: ParsedItem[]) {
     totalPrice: item.__itemTotal
       ? item.__itemTotal.toFixed(2)
       : item.totalPrice,
+    barcode: item.barcode,
   }));
 }
 
@@ -455,6 +461,7 @@ export default function ReceiptImportPage() {
             unit: item?.unit ? String(item.unit) : undefined,
             unitPrice: item?.unitPrice ? String(item.unitPrice) : undefined,
             totalPrice: item?.totalPrice ? String(item.totalPrice) : undefined,
+            barcode: item?.barcode ? String(item.barcode) : undefined,
           }))
           .filter((item: ParsedItem) => item.name && Number(item.price.replace(",", ".")) > 0)
       : [];
@@ -483,6 +490,7 @@ export default function ReceiptImportPage() {
         unit: item?.unit ? String(item.unit) : undefined,
         unitPrice: item?.unitPrice ? String(item.unitPrice) : undefined,
         totalPrice: item?.totalPrice ? String(item.totalPrice) : undefined,
+        barcode: item?.barcode ? String(item.barcode) : undefined,
       }))
       .filter(
         (item: ParsedItem) =>
@@ -950,48 +958,26 @@ export default function ReceiptImportPage() {
 
         const metadata = packageMetadata(item);
         const normalizedFromItem = normalizedReceiptPrice(item);
-        const { data: found, error: findError } = await supabase
-          .from("products")
-          .select("id,package_size,unit")
-          .eq("user_id", user.id)
-          .ilike("name", name)
-          .limit(1);
-        if (findError) throw findError;
 
-        let productId = found?.[0]?.id;
+        const { data: resolved, error: resolveError } = await db.rpc(
+          "resolve_or_create_product_identity",
+          {
+            p_name: name,
+            p_package_size: metadata?.package_size ?? null,
+            p_unit: metadata?.unit ?? null,
+            p_barcode: item.barcode ?? null,
+            p_retailer: supermarket.trim() || null,
+            p_source: "receipt",
+          },
+        );
+        if (resolveError) throw resolveError;
+
+        const productId = resolved?.[0]?.product_id;
         if (!productId) {
-          const { data: created, error: createError } = await supabase
-            .from("products")
-            .insert({
-              name,
-              category: "Geral",
-              user_id: user.id,
-              ...(metadata ?? {}),
-            })
-            .select("id")
-            .single();
-          if (createError) throw createError;
-          productId = created.id;
-        } else if (
-          metadata &&
-          (!found?.[0]?.package_size || !found?.[0]?.unit)
-        ) {
-          const { error: metadataError } = await supabase
-            .from("products")
-            .update(metadata)
-            .eq("id", productId)
-            .eq("user_id", user.id);
-          if (metadataError) throw metadataError;
+          throw new Error(`Não consegui identificar o produto "${name}".`);
         }
 
-        const existingMetadata =
-          found?.[0]?.package_size && found?.[0]?.unit
-            ? {
-                package_size: found[0].package_size,
-                unit: found[0].unit,
-              }
-            : null;
-        const effectiveMetadata = metadata ?? existingMetadata;
+        const effectiveMetadata = metadata;
         const normalized =
           normalizedFromItem ??
           normalizedPriceFromPackage(price, effectiveMetadata);
@@ -1008,6 +994,7 @@ export default function ReceiptImportPage() {
           quantity && unit ? `quantidade ${quantity} ${unit}` : null,
           unit ? `preço unitário ${price.toFixed(2)}/${unit}` : null,
           total ? `total do item ${total.toFixed(2)}` : null,
+          item.barcode ? `GTIN ${item.barcode}` : null,
         ].filter(Boolean).join(" | ");
 
         const { error: priceError } = await db.from("prices").insert({
