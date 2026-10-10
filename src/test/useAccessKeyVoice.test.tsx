@@ -130,6 +130,18 @@ describe("useAccessKeyVoice no Android", () => {
     unmount();
   });
 
+  it("does not stop prematurely on an interim 44-digit hypothesis", () => {
+    const { result, updates, unmount } = start();
+    const speech = MockSpeechRecognition.instances[0];
+    act(() => speech.emit([{ transcript: "3".repeat(44), final: false }]));
+    expect(updates[updates.length - 1]).toBe("3".repeat(44));
+    expect(result.current.isListening).toBe(true);
+    act(() => speech.emit([{ transcript: "3".repeat(43) + "5", final: true }]));
+    expect(updates[updates.length - 1]).toBe("3".repeat(43) + "5");
+    expect(result.current.isListening).toBe(false);
+    unmount();
+  });
+
   it("stops once exactly 44 digits are recognized", () => {
     const { result, updates, unmount } = start();
     const speech = MockSpeechRecognition.instances[0];
