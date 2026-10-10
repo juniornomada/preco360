@@ -20,7 +20,6 @@ type RetailerArtworkProps = {
 
 function RetailerArtwork({ logo, name }: RetailerArtworkProps) {
   const [imageFailed, setImageFailed] = useState(false);
-  const kawakami = name === "Kawakami";
 
   if (!logo || imageFailed) {
     return (
@@ -34,12 +33,7 @@ function RetailerArtwork({ logo, name }: RetailerArtworkProps) {
   }
 
   return (
-    <span
-      className={cn(
-        "relative flex h-full w-full min-w-0 items-center justify-center",
-        kawakami && "rounded-md bg-white px-0.5 py-0.5 ring-1 ring-slate-200/70",
-      )}
-    >
+    <span className="relative flex h-full w-full min-w-0 items-center justify-center bg-transparent">
       <img
         src={logo}
         alt=""
@@ -48,7 +42,6 @@ function RetailerArtwork({ logo, name }: RetailerArtworkProps) {
         decoding="async"
         onError={() => setImageFailed(true)}
       />
-      {/* The supplied logo already contains the full Kawakami wordmark. */}
     </span>
   );
 }
