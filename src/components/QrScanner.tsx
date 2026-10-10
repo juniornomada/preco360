@@ -325,7 +325,6 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
   );
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
-  const [zoomApplied, setZoomApplied] = useState(false);
   const [zoomRange, setZoomRange] = useState<CameraZoomRange | null>(null);
   const [zoomValue, setZoomValue] = useState<number | null>(null);
   const zoomUpdatingRef = useRef(false);
@@ -333,6 +332,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
   const zoomValueRef = useRef<number | null>(null);
   const torchSupportedRef = useRef(false);
   const torchOnRef = useRef(false);
+  const autoTorchOnRef = useRef(false);
   const manualTorchRef = useRef(false);
   const manualZoomRef = useRef(false);
   const autoLightRef = useRef(false);
@@ -371,13 +371,13 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     setStatus("idle");
     setTorchSupported(false);
     setTorchOn(false);
-    setZoomApplied(false);
     setZoomRange(null);
     setZoomValue(null);
     zoomRangeRef.current = null;
     zoomValueRef.current = null;
     torchSupportedRef.current = false;
     torchOnRef.current = false;
+    autoTorchOnRef.current = false;
     manualTorchRef.current = false;
     manualZoomRef.current = false;
     lowLightSamplesRef.current = 0;
@@ -531,7 +531,6 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       const applied = (track.getSettings() as ExtendedTrackSettings).zoom ?? target;
       zoomValueRef.current = applied;
       setZoomValue(applied);
-      setZoomApplied(applied > 1.05);
     } catch {
       // Se o zoom programático for rejeitado, segue em 1× sem bloquear a leitura.
       setZoomRange(null);
@@ -558,7 +557,6 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       const applied = (track.getSettings() as ExtendedTrackSettings).zoom ?? target;
       zoomValueRef.current = applied;
       setZoomValue(applied);
-      setZoomApplied(applied > 1.05);
       setMessage("Mantenha o QR inteiro e nítido dentro do quadro.");
     } catch {
       setMessage("O navegador não permitiu alterar o zoom. Aproxime ou afaste o cupom.");
@@ -601,8 +599,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
             const applied = (track.getSettings() as ExtendedTrackSettings).zoom ?? quantized;
             zoomValueRef.current = applied;
             setZoomValue(applied);
-            setZoomApplied(applied > 1.05);
-            setMessage("Ajustando zoom automaticamente para encontrar um QR pequeno…");
+                  setMessage("Ajustando zoom automaticamente para encontrar um QR pequeno…");
           } catch {
             // The browser may report zoom support but reject changes at runtime.
             manualZoomRef.current = true;
@@ -639,6 +636,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
             await track.applyConstraints({ advanced: [{ torch: true } as ExtendedTrackConstraintSet] });
             if (session !== scanSessionRef.current) return;
             torchOnRef.current = true;
+            autoTorchOnRef.current = true;
             setTorchOn(true);
             setMessage("Pouca luz detectada: lanterna ativada automaticamente.");
           } catch {
@@ -665,6 +663,22 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       window.localStorage.setItem("preco360.qr.auto-light.v1", next ? "1" : "0");
     } catch {
       // Persisting the user's choice is optional.
+    }
+    if (!next && autoTorchOnRef.current) {
+      const track = streamRef.current?.getVideoTracks()[0];
+      autoTorchOnRef.current = false;
+      if (track) {
+        const session = scanSessionRef.current;
+        void track.applyConstraints({ advanced: [{ torch: false } as ExtendedTrackConstraintSet] })
+          .then(() => {
+            if (session !== scanSessionRef.current) return;
+            torchOnRef.current = false;
+            setTorchOn(false);
+          })
+          .catch(() => {
+            // The manual light button remains available.
+          });
+      }
     }
     if (next && lowLightSamplesRef.current >= 2) void checkCameraAssist();
   };
@@ -731,6 +745,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
         if (session === scanSessionRef.current) void checkCameraAssist();
       }, 1800);
     } catch (error) {
+      if (session !== scanSessionRef.current) return;
       stop();
       const denied =
         error instanceof DOMException && error.name === "NotAllowedError";
@@ -749,6 +764,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
 
     const next = !torchOnRef.current;
     manualTorchRef.current = true;
+    autoTorchOnRef.current = false;
 
     try {
       await track.applyConstraints({
