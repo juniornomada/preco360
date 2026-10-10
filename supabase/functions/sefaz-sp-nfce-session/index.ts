@@ -11,6 +11,45 @@ const PAGE_URL =
 const CAPTCHA_URL =
   "https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Captcha/RandomImageHandler.ashx";
 
+
+function bytesToBase64Url(bytes: Uint8Array) {
+  return bytesToBase64(bytes)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+async function hmac(value: string) {
+  const secret = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!secret) throw new Error("Segredo do servidor indisponível.");
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(value),
+  );
+  return bytesToBase64Url(new Uint8Array(sig));
+}
+
+async function issueLiveTicket() {
+  const payload = bytesToBase64Url(
+    new TextEncoder().encode(
+      JSON.stringify({
+        exp: Date.now() + 5 * 60 * 1000,
+        nonce: crypto.randomUUID(),
+      }),
+    ),
+  );
+  const signature = await hmac(payload);
+  return `${payload}.${signature}`;
+}
+
 type SessionState = {
   cookies: string;
   hidden: Record<string, string>;
@@ -187,6 +226,14 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action || "start");
+
+    if (action === "ticket") {
+      return reply(200, {
+        ok: true,
+        ticket: await issueLiveTicket(),
+        expires_in_seconds: 300,
+      });
+    }
 
     if (action === "start") {
       const { state, captchaImage } = await startSession();
