@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Loader2, RefreshCw, ReceiptText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { validateAccessKey } from "@/lib/nfceKey";
@@ -46,30 +46,140 @@ export default function SefazSpNfcePage() {
 
   const [status, setStatus] = useState<Status>("loading");
   const [captchaImage, setCaptchaImage] = useState("");
-  const [sessionToken, setSessionToken] = useState("");
   const [captcha, setCaptcha] = useState("");
   const [message, setMessage] = useState("");
+  const socketRef = useRef<WebSocket | null>(null);
+  const finishedRef = useRef(false);
+
+  const finishWithHtml = async (html: string) => {
+    const parsed = await supabase.functions.invoke("fetch-receipt-url", {
+      body: { pageText: html },
+    });
+    if (parsed.error) throw parsed.error;
+    if (
+      parsed.data?.error ||
+      !Array.isArray(parsed.data?.items) ||
+      !parsed.data.items.length
+    ) {
+      throw new Error(
+        parsed.data?.error ??
+          "A nota abriu, mas não consegui identificar os produtos.",
+      );
+    }
+
+    const resultMessage = {
+      type: "preco360:receipt-import",
+      resultId: crypto.randomUUID(),
+      key,
+      payload: parsed.data,
+    };
+
+    sendResult(resultMessage);
+    finishedRef.current = true;
+    setStatus("done");
+    setMessage(
+      `${parsed.data.items.length} itens enviados para o Preço 360. Esta aba pode ser fechada.`,
+    );
+
+    window.setTimeout(() => {
+      try {
+        window.close();
+      } catch {
+        // Se o navegador não permitir fechar, o usuário verá a confirmação.
+      }
+    }, 900);
+  };
 
   const startSession = async () => {
     if (!supported) return;
 
+    finishedRef.current = false;
+    socketRef.current?.close();
+    socketRef.current = null;
     setStatus("loading");
     setMessage("");
     setCaptcha("");
+    setCaptchaImage("");
 
     try {
       const { data, error } = await supabase.functions.invoke(
         "sefaz-sp-nfce-session",
-        { body: { action: "start" } },
+        { body: { action: "ticket" } },
       );
       if (error) throw error;
-      if (!data?.captcha_image || !data?.session_token) {
-        throw new Error(data?.message || "A SEFAZ-SP não retornou o CAPTCHA.");
+      if (!data?.ticket) {
+        throw new Error(data?.message || "Não consegui criar a sessão da SEFAZ-SP.");
       }
 
-      setCaptchaImage(String(data.captcha_image));
-      setSessionToken(String(data.session_token));
-      setStatus("ready");
+      const baseUrl = String(import.meta.env.VITE_SUPABASE_URL || "");
+      if (!baseUrl) throw new Error("Configuração do servidor indisponível.");
+      const wsUrl =
+        baseUrl.replace(/^http/i, "ws") +
+        "/functions/v1/sefaz-sp-nfce-live?ticket=" +
+        encodeURIComponent(String(data.ticket));
+
+      const socket = new WebSocket(wsUrl);
+      socketRef.current = socket;
+
+      socket.onmessage = (event) => {
+        void (async () => {
+          try {
+            const payload = JSON.parse(String(event.data || "{}"));
+
+            if (payload?.type === "captcha") {
+              setCaptchaImage(String(payload.captcha_image || ""));
+              setCaptcha("");
+              setMessage(String(payload.message || ""));
+              setStatus("ready");
+              return;
+            }
+
+            if (payload?.type === "retry") {
+              setMessage(
+                String(
+                  payload.message ||
+                    "A SEFAZ não aceitou a consulta. Tente novamente.",
+                ),
+              );
+              setStatus("ready");
+              return;
+            }
+
+            if (payload?.type === "result" && payload?.html) {
+              setStatus("submitting");
+              setMessage("NFC-e encontrada. Importando os itens…");
+              await finishWithHtml(String(payload.html));
+              socket.close();
+              return;
+            }
+
+            if (payload?.type === "error") {
+              setStatus("error");
+              setMessage(
+                String(payload.message || "A sessão da SEFAZ-SP apresentou erro."),
+              );
+            }
+          } catch (error: any) {
+            setStatus("error");
+            setMessage(
+              error?.message ?? "Não foi possível processar a resposta da SEFAZ-SP.",
+            );
+          }
+        })();
+      };
+
+      socket.onerror = () => {
+        if (finishedRef.current) return;
+        setStatus("error");
+        setMessage(
+          "A conexão contínua com a SEFAZ-SP foi interrompida. Tente novamente.",
+        );
+      };
+
+      socket.onclose = () => {
+        if (finishedRef.current) return;
+        socketRef.current = null;
+      };
     } catch (error: any) {
       setStatus("error");
       setMessage(
@@ -85,85 +195,34 @@ export default function SefazSpNfcePage() {
       return;
     }
     void startSession();
+
+    return () => {
+      socketRef.current?.close();
+      socketRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supported]);
 
   const submit = async () => {
-    if (!captcha.trim() || !sessionToken || status === "submitting") return;
+    if (!captcha.trim() || status === "submitting") return;
+
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setStatus("error");
+      setMessage("A sessão expirou. Gere um novo CAPTCHA.");
+      return;
+    }
 
     setStatus("submitting");
-    setMessage("");
+    setMessage("Validando na SEFAZ-SP…");
 
-    try {
-      const { data, error } = await supabase.functions.invoke(
-        "sefaz-sp-nfce-session",
-        {
-          body: {
-            action: "submit",
-            key,
-            captcha: captcha.trim(),
-            session_token: sessionToken,
-          },
-        },
-      );
-      if (error) throw error;
-
-      if (!data?.ok) {
-        if (data?.captcha_image && data?.session_token) {
-          setCaptchaImage(String(data.captcha_image));
-          setSessionToken(String(data.session_token));
-          setCaptcha("");
-          setStatus("ready");
-        } else {
-          setStatus("error");
-        }
-        setMessage(
-          data?.message ?? "O CAPTCHA não foi aceito. Digite a nova imagem.",
-        );
-        return;
-      }
-
-      if (!data?.html) {
-        throw new Error("A SEFAZ respondeu sem os dados da NFC-e.");
-      }
-
-      const parsed = await supabase.functions.invoke("fetch-receipt-url", {
-        body: { pageText: String(data.html) },
-      });
-      if (parsed.error) throw parsed.error;
-      if (parsed.data?.error || !Array.isArray(parsed.data?.items) || !parsed.data.items.length) {
-        throw new Error(
-          parsed.data?.error ??
-            "A nota abriu, mas não consegui identificar os produtos.",
-        );
-      }
-
-      const resultMessage = {
-        type: "preco360:receipt-import",
-        resultId: crypto.randomUUID(),
+    socket.send(
+      JSON.stringify({
+        type: "submit",
         key,
-        payload: parsed.data,
-      };
-
-      sendResult(resultMessage);
-      setStatus("done");
-      setMessage(
-        `${parsed.data.items.length} itens enviados para o Preço 360. Esta aba pode ser fechada.`,
-      );
-
-      window.setTimeout(() => {
-        try {
-          window.close();
-        } catch {
-          // Se o navegador não permitir fechar, o usuário verá a confirmação.
-        }
-      }, 900);
-    } catch (error: any) {
-      setStatus("error");
-      setMessage(
-        error?.message ?? "Não foi possível concluir a consulta da NFC-e.",
-      );
-    }
+        captcha: captcha.trim(),
+      }),
+    );
   };
 
   return (
@@ -175,7 +234,7 @@ export default function SefazSpNfcePage() {
           </div>
           <h1 className="text-xl font-extrabold">Validar NFC-e na SEFAZ-SP</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            A aba principal do Preço 360 continua aberta. Digite apenas o CAPTCHA para consultar esta NFC-e.
+            A aba principal do Preço 360 continua aberta. Esta tela mantém uma sessão contínua com a SEFAZ-SP enquanto você lê e digita o CAPTCHA.
           </p>
         </div>
 
