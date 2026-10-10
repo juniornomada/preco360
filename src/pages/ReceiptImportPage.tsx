@@ -336,6 +336,12 @@ export default function ReceiptImportPage() {
   const [assistedKeyStatus, setAssistedKeyStatus] = useState<
     "idle" | "waiting" | "checking" | "session-required" | "success"
   >("idle");
+  const [inlineCaptchaImage, setInlineCaptchaImage] = useState("");
+  const [inlineCaptchaToken, setInlineCaptchaToken] = useState("");
+  const [inlineCaptchaCode, setInlineCaptchaCode] = useState("");
+  const [inlineCaptchaStatus, setInlineCaptchaStatus] = useState<
+    "idle" | "loading" | "ready" | "submitting"
+  >("idle");
   const assistedOpenedAtRef = useRef(0);
   const assistedAttemptedRef = useRef(false);
 
@@ -352,6 +358,10 @@ export default function ReceiptImportPage() {
     setBlocked(null);
     setPageText("");
     setFileProgress("");
+    setInlineCaptchaImage("");
+    setInlineCaptchaToken("");
+    setInlineCaptchaCode("");
+    setInlineCaptchaStatus("idle");
   };
 
   const applyResult = (data: any, importSource: ImportSource) => {
@@ -610,6 +620,121 @@ export default function ReceiptImportPage() {
       return;
     }
     toast({ title: "QR Code não reconhecido", description: check.error ?? "Não encontrei uma NFC-e válida.", variant: "destructive" });
+  };
+
+  const isInlineSpNfce =
+    keyCheck.valid &&
+    keyKind === "nfce" &&
+    keyCheck.clean.startsWith("35");
+
+  const startInlineSpNfce = async () => {
+    if (!isInlineSpNfce) return;
+
+    setLoading(true);
+    setInlineCaptchaStatus("loading");
+    setBlocked(null);
+    setItems([]);
+    setSource("key");
+
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "sefaz-sp-nfce-session",
+        { body: { action: "start" } },
+      );
+      if (error) throw error;
+      if (!data?.captcha_image || !data?.session_token) {
+        throw new Error(data?.message || "A SEFAZ não retornou o CAPTCHA.");
+      }
+
+      setInlineCaptchaImage(String(data.captcha_image));
+      setInlineCaptchaToken(String(data.session_token));
+      setInlineCaptchaCode("");
+      setInlineCaptchaStatus("ready");
+      setAssistedKeyPending(false);
+      sessionStorage.removeItem("preco360.receipt.assisted");
+    } catch (error: any) {
+      setInlineCaptchaStatus("idle");
+      toast({
+        title: "Não consegui abrir o CAPTCHA",
+        description:
+          error?.message ?? "A consulta da SEFAZ-SP não pôde ser iniciada.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitInlineSpNfce = async () => {
+    if (
+      !isInlineSpNfce ||
+      !inlineCaptchaToken ||
+      !inlineCaptchaCode.trim()
+    ) {
+      return;
+    }
+
+    setLoading(true);
+    setInlineCaptchaStatus("submitting");
+
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "sefaz-sp-nfce-session",
+        {
+          body: {
+            action: "submit",
+            key: keyCheck.clean,
+            captcha: inlineCaptchaCode.trim(),
+            session_token: inlineCaptchaToken,
+          },
+        },
+      );
+      if (error) throw error;
+
+      if (!data?.ok) {
+        if (data?.captcha_image && data?.session_token) {
+          setInlineCaptchaImage(String(data.captcha_image));
+          setInlineCaptchaToken(String(data.session_token));
+          setInlineCaptchaCode("");
+          setInlineCaptchaStatus("ready");
+        } else {
+          setInlineCaptchaStatus("idle");
+        }
+        toast({
+          title: "CAPTCHA não validado",
+          description:
+            data?.message ??
+            "A SEFAZ não aceitou o código. Tente novamente.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (!data?.html) {
+        throw new Error("A SEFAZ validou a consulta, mas não retornou a nota.");
+      }
+
+      const parsed = await supabase.functions.invoke("fetch-receipt-url", {
+        body: { pageText: String(data.html) },
+      });
+      if (parsed.error) throw parsed.error;
+
+      applyResult(parsed.data, "key");
+      setInlineCaptchaImage("");
+      setInlineCaptchaToken("");
+      setInlineCaptchaCode("");
+      setInlineCaptchaStatus("idle");
+    } catch (error: any) {
+      setInlineCaptchaStatus("ready");
+      toast({
+        title: "Erro ao consultar a NFC-e",
+        description:
+          error?.message ?? "Não foi possível concluir a consulta na SEFAZ-SP.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const tryContinueAfterCaptcha = async (automatic = false) => {
@@ -949,7 +1074,18 @@ export default function ReceiptImportPage() {
                 <p className="font-semibold">Chave de acesso da NFC-e</p>
                 <p className="mt-1 text-sm text-muted-foreground">Cole os 44 dígitos impressos no cupom.</p>
               </div>
-              <Input value={accessKey} onChange={(e) => setAccessKey(extractAccessKey(e.target.value) ?? e.target.value)} placeholder="44 dígitos da chave de acesso" className="font-mono" />
+              <Input
+                value={accessKey}
+                onChange={(e) => {
+                  setAccessKey(extractAccessKey(e.target.value) ?? e.target.value);
+                  setInlineCaptchaImage("");
+                  setInlineCaptchaToken("");
+                  setInlineCaptchaCode("");
+                  setInlineCaptchaStatus("idle");
+                }}
+                placeholder="44 dígitos da chave de acesso"
+                className="font-mono"
+              />
               {accessKey && !keyCheck.valid && <p className="flex gap-2 text-sm text-destructive"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{keyCheck.error}</p>}
               {keyCheck.valid && (
                 <p className="flex gap-2 text-sm text-primary">
@@ -960,48 +1096,124 @@ export default function ReceiptImportPage() {
               {keyCheck.warning && (
                 <p className="text-sm text-amber-600">{keyCheck.warning}</p>
               )}
-              <Button
-                onClick={openAssistedKeyConsultation}
-                disabled={!keyCheck.valid || keyKind === "unknown" || loading}
-              >
-                <ExternalLink className="mr-2 h-4 w-4" />
-                Abrir SEFAZ e validar CAPTCHA
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                A chave já vai preenchida. Resolva o CAPTCHA na página oficial, consulte a nota e volte ao Preço 360.
-              </p>
+              {isInlineSpNfce ? (
+                <>
+                  {!inlineCaptchaImage && (
+                    <Button
+                      onClick={() => void startInlineSpNfce()}
+                      disabled={!keyCheck.valid || loading}
+                    >
+                      {loading || inlineCaptchaStatus === "loading" ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <ReceiptText className="mr-2 h-4 w-4" />
+                      )}
+                      Mostrar CAPTCHA da SEFAZ-SP
+                    </Button>
+                  )}
 
-              {assistedKeyPending && (
-                <div className="rounded-lg border bg-muted/20 p-3">
-                  <p className="text-sm font-semibold">
-                    {assistedKeyStatus === "checking"
-                      ? "Tentando continuar a consulta…"
-                      : assistedKeyStatus === "session-required"
-                        ? "CAPTCHA concluído, mas a sessão ficou presa à aba da SEFAZ"
-                        : "Consulta oficial aberta"}
+                  {inlineCaptchaImage && (
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <p className="text-sm font-semibold">
+                        Validação da SEFAZ-SP
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Digite os caracteres abaixo. A consulta continua sem sair do Preço 360.
+                      </p>
+                      <div className="mt-3 flex justify-center rounded-md bg-white p-3">
+                        <img
+                          src={inlineCaptchaImage}
+                          alt="CAPTCHA da SEFAZ-SP"
+                          className="max-h-24 max-w-full object-contain"
+                        />
+                      </div>
+                      <Input
+                        className="mt-3 text-center font-mono uppercase"
+                        value={inlineCaptchaCode}
+                        onChange={(event) =>
+                          setInlineCaptchaCode(event.target.value)
+                        }
+                        placeholder="Digite o CAPTCHA"
+                        autoCapitalize="characters"
+                        autoComplete="off"
+                      />
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={loading}
+                          onClick={() => void startInlineSpNfce()}
+                        >
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Nova imagem
+                        </Button>
+                        <Button
+                          type="button"
+                          disabled={loading || !inlineCaptchaCode.trim()}
+                          onClick={() => void submitInlineSpNfce()}
+                        >
+                          {loading ||
+                          inlineCaptchaStatus === "submitting" ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                          )}
+                          Consultar
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-xs text-muted-foreground">
+                    Para NFC-e modelo 65 de São Paulo, a chave e o CAPTCHA são enviados à SEFAZ-SP mantendo a sessão no servidor. Você não precisa abrir outra guia.
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Depois de concluir o CAPTCHA e visualizar a NF-e/NFC-e, volte para esta tela. O Preço 360 tenta continuar automaticamente.
-                  </p>
+                </>
+              ) : (
+                <>
                   <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="mt-3 w-full"
-                    disabled={loading}
-                    onClick={() => {
-                      assistedAttemptedRef.current = true;
-                      void tryContinueAfterCaptcha(false);
-                    }}
+                    onClick={openAssistedKeyConsultation}
+                    disabled={!keyCheck.valid || keyKind === "unknown" || loading}
                   >
-                    {loading ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                    )}
-                    Já concluí o CAPTCHA — tentar agora
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Abrir SEFAZ e validar CAPTCHA
                   </Button>
-                </div>
+                  <p className="text-xs text-muted-foreground">
+                    Para este estado/modelo, a consulta ainda usa a página oficial em outra guia.
+                  </p>
+
+                  {assistedKeyPending && (
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <p className="text-sm font-semibold">
+                        {assistedKeyStatus === "checking"
+                          ? "Tentando continuar a consulta…"
+                          : assistedKeyStatus === "session-required"
+                            ? "CAPTCHA concluído, mas a sessão ficou presa à aba da SEFAZ"
+                            : "Consulta oficial aberta"}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Depois de concluir o CAPTCHA e visualizar a NF-e/NFC-e, volte para esta tela. O Preço 360 tenta continuar automaticamente.
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 w-full"
+                        disabled={loading}
+                        onClick={() => {
+                          assistedAttemptedRef.current = true;
+                          void tryContinueAfterCaptcha(false);
+                        }}
+                      >
+                        {loading ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                        )}
+                        Já concluí o CAPTCHA — tentar agora
+                      </Button>
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
