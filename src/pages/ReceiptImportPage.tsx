@@ -1109,7 +1109,10 @@ export default function ReceiptImportPage() {
                 <p className="font-semibold">Chave de acesso da NFC-e</p>
                 <p className="mt-1 text-sm text-muted-foreground">Cole os 44 dígitos impressos no cupom.</p>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 rounded-xl border border-primary/20 bg-primary/[0.03] p-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-primary">
+                  Digite ou fale a chave aqui
+                </p>
                 <div className="flex gap-2">
                   <Input
                     value={accessKey}
@@ -1123,7 +1126,7 @@ export default function ReceiptImportPage() {
                     inputMode="numeric"
                     autoComplete="off"
                     placeholder="44 dígitos da chave de acesso"
-                    className="min-w-0 flex-1 font-mono"
+                    className="h-12 min-w-0 flex-1 border-2 border-primary/50 bg-primary/5 font-mono text-base shadow-sm focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30"
                   />
                   <Button
                     type="button"
