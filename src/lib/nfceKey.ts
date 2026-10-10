@@ -196,6 +196,20 @@ export function buildOfficialConsultationUrl(raw: string) {
   if (!check.valid) return null;
 
   if (check.model === "55") {
+    const ufCode = check.clean.slice(0, 2);
+
+    // Para SP, prioriza a SEFAZ que autorizou o documento. Ela aceita
+    // `chaveAcesso` na URL e já abre a consulta pública com os 44 dígitos
+    // preenchidos; o usuário resolve apenas o CAPTCHA.
+    if (ufCode === "35") {
+      const url = new URL(
+        "https://www.nfe.fazenda.sp.gov.br/ConsultaNFe/consulta/publica/ConsultarNFe.aspx",
+      );
+      url.searchParams.set("chaveAcesso", check.clean);
+      return url.toString();
+    }
+
+    // Fallback oficial enquanto não houver uma rota estadual validada para a UF.
     const url = new URL(
       "https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx",
     );
