@@ -1167,10 +1167,10 @@ export default function ReceiptImportPage() {
 
   return (
     <div className="page-container mx-auto w-full max-w-3xl">
-      <div className="mb-5">
-        <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><ReceiptText className="h-5 w-5" /></div>
+      <div className="mb-3 sm:mb-5">
+        <div className="mb-1 flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary sm:mb-2 sm:h-10 sm:w-10"><ReceiptText className="h-5 w-5" /></div>
         <h1 className="text-2xl font-extrabold tracking-tight">Importar cupom fiscal</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Leia o QR Code, informe a chave de 44 dígitos ou envie imagem, PDF ou HTML da consulta da SEFAZ. Você revisa tudo antes de salvar.</p>
+        <p className="mt-1 text-sm text-muted-foreground">{scannerOpen && tab === "qr" ? "Enquadre o QR Code na câmera para consultar o cupom automaticamente." : "Leia o QR Code, informe a chave de 44 dígitos ou envie imagem, PDF ou HTML da consulta da SEFAZ. Você revisa tudo antes de salvar."}</p>
       </div>
 
       <Tabs value={tab} onValueChange={(value) => { clearResult(); setTab(value as ImportSource); }}>
@@ -1180,15 +1180,15 @@ export default function ReceiptImportPage() {
           <TabsTrigger value="image"><Upload className="mr-2 h-4 w-4" />Arquivo</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="qr" className="mt-4 space-y-3">
+        <TabsContent value="qr" className="mt-2 space-y-2 sm:mt-4 sm:space-y-3">
           <Card>
-            <CardContent className="p-5">
+            <CardContent className={scannerOpen ? "p-3 sm:p-5" : "p-4 sm:p-5"}>
               <div className="flex items-start gap-3">
-                <div className="rounded-xl bg-primary/10 p-2.5 text-primary"><Camera className="h-5 w-5" /></div>
+                <div className="rounded-xl bg-primary/10 p-2 text-primary sm:p-2.5"><Camera className="h-5 w-5" /></div>
                 <div className="flex-1">
-                  <p className="font-semibold">Aponte a câmera para o QR Code do cupom</p>
-                  <p className="mt-1 text-sm text-muted-foreground">Quando o código for lido, a consulta começa automaticamente.</p>
-                  <Button className="mt-4" onClick={() => setScannerOpen((open) => !open)} disabled={loading}>
+                  <p className="font-semibold">{scannerOpen ? "Leitor de QR Code" : "Aponte a câmera para o QR Code do cupom"}</p>
+                  {!scannerOpen && <p className="mt-1 text-sm text-muted-foreground">Quando o código for lido, a consulta começa automaticamente.</p>}
+                  <Button className={scannerOpen ? "mt-2 h-9" : "mt-3 sm:mt-4"} onClick={() => setScannerOpen((open) => !open)} disabled={loading}>
                     {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <QrCode className="mr-2 h-4 w-4" />}
                     {scannerOpen ? "Fechar leitor" : "Ler QR Code"}
                   </Button>
