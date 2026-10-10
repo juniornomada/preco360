@@ -77,7 +77,7 @@ describe("useAccessKeyVoice no Android", () => {
       instance.emit([{ transcript: "3 5 2 6", final: false }]);
       instance.emit([{ transcript: "3 5 2 6", final: false }]);
     });
-    expect(updates.at(-1)).toBe("3526");
+    expect(updates[updates.length - 1]).toBe("3526");
     unmount();
   });
 
@@ -87,7 +87,7 @@ describe("useAccessKeyVoice no Android", () => {
       { transcript: "3 5 2 6", final: true },
       { transcript: "3 5 2 6", final: false },
     ]));
-    expect(updates.at(-1)).toBe("3526");
+    expect(updates[updates.length - 1]).toBe("3526");
     unmount();
   });
 
@@ -106,7 +106,7 @@ describe("useAccessKeyVoice no Android", () => {
       second.emit([{ transcript: "3 5 2 6 1 0", final: false }]);
       second.emit([{ transcript: "3 5 2 6 1 0", final: true }]);
     });
-    expect(updates.at(-1)).toBe("352610");
+    expect(updates[updates.length - 1]).toBe("352610");
     unmount();
   });
 
@@ -117,7 +117,7 @@ describe("useAccessKeyVoice no Android", () => {
       { transcript: "três cinco dois seis", final: true },
       { transcript: "três cinco dois seis", final: true },
     ]));
-    expect(updates.at(-1)).toBe("0033335263526");
+    expect(updates[updates.length - 1]).toBe("0033335263526");
     unmount();
   });
 
@@ -134,7 +134,7 @@ describe("useAccessKeyVoice no Android", () => {
     const { result, updates, unmount } = start();
     const speech = MockSpeechRecognition.instances[0];
     act(() => speech.emit([{ transcript: "3".repeat(44) + "55555", final: true }]));
-    expect(updates.at(-1)).toBe("3".repeat(44));
+    expect(updates[updates.length - 1]).toBe("3".repeat(44));
     expect(result.current.isListening).toBe(false);
     unmount();
   });
