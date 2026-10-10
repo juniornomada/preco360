@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -397,6 +398,7 @@ async function edgeFunctionErrorMessage(error: any) {
 export default function ReceiptImportPage() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<ImportSource>("qr");
   const [scannerOpen, setScannerOpen] = useState(false);
   const [accessKey, setAccessKey] = useState("");
@@ -1017,14 +1019,15 @@ export default function ReceiptImportPage() {
       const consolidatedCount = items.length - itemsToSave.length;
 
       toast({
-        title: "Cupom importado",
+        title: "Produtos salvos com sucesso",
         description: [
-          `${savedCount} preços salvos em uma única transação`,
+          `${savedCount} preço(s) gravado(s)`,
           `${createdCount} produto(s) novo(s)`,
           `${reusedCount} produto(s) reaproveitado(s)`,
           consolidatedCount > 0
-            ? `${consolidatedCount} repetição(ões) do cupom consolidadas`
+            ? `${consolidatedCount} repetição(ões) consolidadas`
             : null,
+          "Voltando para o Início…",
         ]
           .filter(Boolean)
           .join(" · "),
@@ -1032,6 +1035,10 @@ export default function ReceiptImportPage() {
 
       clearResult();
       setAccessKey("");
+
+      window.setTimeout(() => {
+        navigate("/", { replace: true });
+      }, 1200);
     } catch (error: any) {
       toast({
         title: "Erro ao salvar",
