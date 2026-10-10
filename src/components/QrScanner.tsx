@@ -329,6 +329,23 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
   const [zoomRange, setZoomRange] = useState<CameraZoomRange | null>(null);
   const [zoomValue, setZoomValue] = useState<number | null>(null);
   const zoomUpdatingRef = useRef(false);
+  const zoomRangeRef = useRef<CameraZoomRange | null>(null);
+  const zoomValueRef = useRef<number | null>(null);
+  const torchSupportedRef = useRef(false);
+  const torchOnRef = useRef(false);
+  const manualTorchRef = useRef(false);
+  const manualZoomRef = useRef(false);
+  const autoLightRef = useRef(false);
+  const scanSessionRef = useRef(0);
+  const scanStartedAtRef = useRef(0);
+  const lastZoomStepRef = useRef(0);
+  const lastDeepScanRef = useRef(0);
+  const lowLightSamplesRef = useRef(0);
+  const assistBusyRef = useRef(false);
+  const assistTimerRef = useRef<number | null>(null);
+  const startupTimeoutRef = useRef<number | null>(null);
+  const [lowLightDetected, setLowLightDetected] = useState(false);
+  const [autoLightEnabled, setAutoLightEnabled] = useState(false);
 
   const stop = () => {
     if (timerRef.current !== null) {
@@ -337,9 +354,14 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     if (thoroughTimerRef.current !== null) {
       window.clearInterval(thoroughTimerRef.current);
     }
+    if (assistTimerRef.current !== null) window.clearInterval(assistTimerRef.current);
+    if (startupTimeoutRef.current !== null) window.clearTimeout(startupTimeoutRef.current);
 
     timerRef.current = null;
     thoroughTimerRef.current = null;
+    assistTimerRef.current = null;
+    startupTimeoutRef.current = null;
+    scanSessionRef.current += 1;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
 
@@ -352,14 +374,42 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     setZoomApplied(false);
     setZoomRange(null);
     setZoomValue(null);
+    zoomRangeRef.current = null;
+    zoomValueRef.current = null;
+    torchSupportedRef.current = false;
+    torchOnRef.current = false;
+    manualTorchRef.current = false;
+    manualZoomRef.current = false;
+    lowLightSamplesRef.current = 0;
+    assistBusyRef.current = false;
+    setLowLightDetected(false);
     zoomUpdatingRef.current = false;
   };
 
-  useEffect(() => () => stop(), []);
+  useEffect(() => {
+    try {
+      const enabled = window.localStorage.getItem("preco360.qr.auto-light.v1") === "1";
+      autoLightRef.current = enabled;
+      setAutoLightEnabled(enabled);
+    } catch {
+      // Private browsing may disable persistent preferences.
+    }
+    return () => stop();
+  }, []);
 
   const finish = (value: string) => {
     if (finishedRef.current) return;
     finishedRef.current = true;
+    // Remember only the effective zoom, not the QR data.
+    const trackSettings = streamRef.current?.getVideoTracks()[0]?.getSettings() as ExtendedTrackSettings | undefined;
+    const successfulZoom = trackSettings?.zoom;
+    if (successfulZoom && Number.isFinite(successfulZoom) && successfulZoom >= 1 && successfulZoom <= 8) {
+      try {
+        window.localStorage.setItem("preco360.qr.successful-zoom.v1", String(successfulZoom));
+      } catch {
+        // Saving a preference is optional.
+      }
+    }
     stop();
     onResult(value);
   };
@@ -376,22 +426,27 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     }
 
     readingRef.current = true;
-    if (thorough) setStatus("reading");
+    const session = scanSessionRef.current;
+    if (useExtraDecoders) setStatus("reading");
+    const now = performance.now();
+    const deep = useExtraDecoders || (thorough &&
+      now - scanStartedAtRef.current > 4800 &&
+      now - lastDeepScanRef.current > 9000);
+    if (deep) lastDeepScanRef.current = now;
 
     try {
-      const value = await readQr(video, thorough, useExtraDecoders);
+      const value = await readQr(video, thorough, deep);
+      if (session !== scanSessionRef.current || finishedRef.current) return;
       if (value) {
         finish(value);
-      } else if (thorough) {
-        setMessage(
-          zoomApplied
-            ? "Ainda não li. Mantenha o QR inteiro, reto e nítido dentro do quadro."
-            : "Ainda não li. Aproxime até o QR ocupar boa parte do quadro e mantenha a imagem nítida.",
-        );
+      } else if (useExtraDecoders) {
+        setMessage(zoomValueRef.current && zoomValueRef.current > 1
+          ? "Ainda não li. Mantenha o QR inteiro, reto e nítido dentro do quadro."
+          : "Ainda não li. Aproxime até o QR ocupar boa parte do quadro e mantenha a imagem nítida.");
         setStatus("scanning");
       }
     } catch {
-      if (thorough) {
+      if (useExtraDecoders && session === scanSessionRef.current) {
         setMessage("Não consegui analisar esse quadro. Tente novamente.");
         setStatus("scanning");
       }
@@ -436,7 +491,8 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     const capabilities =
       track.getCapabilities?.() as ExtendedTrackCapabilities | undefined;
 
-    setTorchSupported(Boolean(capabilities?.torch));
+    torchSupportedRef.current = Boolean(capabilities?.torch);
+    setTorchSupported(torchSupportedRef.current);
 
     // Foco e zoom são aplicados separadamente: um foco não suportado
     // não deve impedir o zoom de um QR impresso muito pequeno.
@@ -454,9 +510,18 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     }
 
     const step = zoom.step && zoom.step > 0 ? zoom.step : 0.1;
-    setZoomRange({ min: zoom.min, max: zoom.max, step });
+    const range = { min: zoom.min, max: zoom.max, step };
+    zoomRangeRef.current = range;
+    setZoomRange(range);
 
-    const desired = Math.max(zoom.min, Math.min(zoom.max, 1.7));
+    let remembered = 1.7;
+    try {
+      const previous = Number(window.localStorage.getItem("preco360.qr.successful-zoom.v1"));
+      if (previous >= 1 && previous <= 8 && Number.isFinite(previous)) remembered = previous;
+    } catch {
+      // Camera works without storage.
+    }
+    const desired = Math.max(zoom.min, Math.min(zoom.max, remembered));
     const target = Math.min(zoom.max, Math.max(zoom.min,
       Math.round((desired - zoom.min) / step) * step + zoom.min,
     ));
@@ -464,16 +529,20 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     try {
       await track.applyConstraints({ advanced: [{ zoom: target }] });
       const applied = (track.getSettings() as ExtendedTrackSettings).zoom ?? target;
+      zoomValueRef.current = applied;
       setZoomValue(applied);
       setZoomApplied(applied > 1.05);
     } catch {
       // Se o zoom programático for rejeitado, segue em 1× sem bloquear a leitura.
       setZoomRange(null);
       setZoomValue(null);
+      zoomRangeRef.current = null;
+      zoomValueRef.current = null;
     }
   };
 
   const adjustZoom = async (direction: -1 | 1) => {
+    manualZoomRef.current = true;
     const track = streamRef.current?.getVideoTracks()[0];
     if (!track || !zoomRange || zoomValue === null || zoomUpdatingRef.current) return;
 
@@ -487,6 +556,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     try {
       await track.applyConstraints({ advanced: [{ zoom: target }] });
       const applied = (track.getSettings() as ExtendedTrackSettings).zoom ?? target;
+      zoomValueRef.current = applied;
       setZoomValue(applied);
       setZoomApplied(applied > 1.05);
       setMessage("Mantenha o QR inteiro e nítido dentro do quadro.");
@@ -558,12 +628,14 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     const track = streamRef.current?.getVideoTracks()[0];
     if (!track) return;
 
-    const next = !torchOn;
+    const next = !torchOnRef.current;
+    manualTorchRef.current = true;
 
     try {
       await track.applyConstraints({
         advanced: [{ torch: next } as ExtendedTrackConstraintSet],
       });
+      torchOnRef.current = next;
       setTorchOn(next);
       setMessage(next ? "Lanterna ligada" : "Lanterna desligada");
     } catch {
