@@ -234,16 +234,16 @@ begin
     matched_by := 'created';
     canonical_key := v_canonical;
   else
-    update public.products
+    update public.products as p
     set
-      canonical_key = coalesce(nullif(canonical_key, ''), v_canonical),
+      canonical_key = coalesce(nullif(p.canonical_key, ''), v_canonical),
       barcode = case
-        when (barcode is null or btrim(barcode) = '') and v_barcode is not null then v_barcode
-        else barcode
+        when (p.barcode is null or btrim(p.barcode) = '') and v_barcode is not null then v_barcode
+        else p.barcode
       end,
-      package_size = coalesce(package_size, p_package_size),
-      unit = coalesce(unit, p_unit)
-    where id = product_id and user_id = v_uid;
+      package_size = coalesce(p.package_size, p_package_size),
+      unit = coalesce(p.unit, p_unit)
+    where p.id = v_product.id and p.user_id = v_uid;
   end if;
 
   insert into public.product_aliases (
@@ -271,5 +271,168 @@ $$;
 grant execute on function public.resolve_or_create_product_identity(
   text, numeric, text, text, text, text
 ) to authenticated;
+
+create or replace function public.save_receipt_price_batch(
+  p_supermarket text,
+  p_date date,
+  p_items jsonb
+)
+returns table (
+  saved_prices integer,
+  created_products integer,
+  reused_products integer,
+  matched_by_barcode integer,
+  matched_by_alias integer,
+  matched_by_canonical integer
+)
+language plpgsql
+security invoker
+set search_path = public, extensions
+as $
+declare
+  v_uid uuid := auth.uid();
+  v_item jsonb;
+  v_name text;
+  v_price numeric;
+  v_package_size numeric;
+  v_package_unit text;
+  v_normalized_price numeric;
+  v_base_unit text;
+  v_product_id uuid;
+  v_created boolean;
+  v_matched_by text;
+  v_canonical_key text;
+  v_existing_package_size numeric;
+  v_existing_unit text;
+  v_effective_package_size numeric;
+  v_effective_unit text;
+  v_saved integer := 0;
+  v_created_count integer := 0;
+  v_reused_count integer := 0;
+  v_barcode_count integer := 0;
+  v_alias_count integer := 0;
+  v_canonical_count integer := 0;
+begin
+  if v_uid is null then
+    raise exception 'Authentication required';
+  end if;
+  if p_date is null then
+    raise exception 'Receipt date is required';
+  end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' then
+    raise exception 'Receipt items must be an array';
+  end if;
+
+  for v_item in select value from jsonb_array_elements(p_items)
+  loop
+    v_name := btrim(coalesce(v_item->>'name', ''));
+    v_price := nullif(v_item->>'price', '')::numeric;
+    if v_name = '' or v_price is null or v_price <= 0 then
+      continue;
+    end if;
+
+    v_package_size := nullif(v_item->>'package_quantity', '')::numeric;
+    v_package_unit := nullif(btrim(coalesce(v_item->>'package_unit', '')), '');
+    v_normalized_price := nullif(v_item->>'normalized_price', '')::numeric;
+    v_base_unit := nullif(btrim(coalesce(v_item->>'base_unit', '')), '');
+
+    select r.product_id, r.created, r.matched_by, r.canonical_key
+      into v_product_id, v_created, v_matched_by, v_canonical_key
+    from public.resolve_or_create_product_identity(
+      p_name => v_name,
+      p_package_size => v_package_size,
+      p_unit => v_package_unit,
+      p_barcode => nullif(v_item->>'barcode', ''),
+      p_retailer => nullif(btrim(coalesce(p_supermarket, '')), ''),
+      p_source => 'receipt'
+    ) r;
+
+    if v_product_id is null then
+      raise exception 'Could not resolve product identity for %', v_name;
+    end if;
+
+    select p.package_size, p.unit
+      into v_existing_package_size, v_existing_unit
+    from public.products p
+    where p.id = v_product_id and p.user_id = v_uid;
+
+    v_effective_package_size := coalesce(v_package_size, v_existing_package_size);
+    v_effective_unit := coalesce(v_package_unit, v_existing_unit);
+
+    if v_normalized_price is null
+       and v_effective_package_size is not null
+       and v_effective_package_size > 0
+       and v_effective_unit is not null then
+      case lower(v_effective_unit)
+        when 'g' then
+          v_normalized_price := v_price / (v_effective_package_size / 1000.0);
+          v_base_unit := 'kg';
+        when 'kg' then
+          v_normalized_price := v_price / v_effective_package_size;
+          v_base_unit := 'kg';
+        when 'ml' then
+          v_normalized_price := v_price / (v_effective_package_size / 1000.0);
+          v_base_unit := 'l';
+        when 'l' then
+          v_normalized_price := v_price / v_effective_package_size;
+          v_base_unit := 'l';
+        when 'lt' then
+          v_normalized_price := v_price / v_effective_package_size;
+          v_base_unit := 'l';
+        when 'un' then
+          v_normalized_price := v_price / v_effective_package_size;
+          v_base_unit := 'un';
+        when 'und' then
+          v_normalized_price := v_price / v_effective_package_size;
+          v_base_unit := 'un';
+        when 'unid' then
+          v_normalized_price := v_price / v_effective_package_size;
+          v_base_unit := 'un';
+        else
+          null;
+      end case;
+    end if;
+
+    insert into public.prices (
+      product_id, supermarket, price, date, user_id, source,
+      package_quantity, package_unit, normalized_price, base_unit, receipt_text
+    )
+    values (
+      v_product_id,
+      coalesce(nullif(btrim(coalesce(p_supermarket, '')), ''), 'Não informado'),
+      v_price, p_date, v_uid, 'receipt',
+      v_effective_package_size, v_effective_unit,
+      v_normalized_price, v_base_unit,
+      nullif(v_item->>'receipt_text', '')
+    );
+
+    v_saved := v_saved + 1;
+    if v_created then
+      v_created_count := v_created_count + 1;
+    else
+      v_reused_count := v_reused_count + 1;
+    end if;
+
+    if v_matched_by = 'barcode' then
+      v_barcode_count := v_barcode_count + 1;
+    elsif v_matched_by like 'alias%' then
+      v_alias_count := v_alias_count + 1;
+    elsif v_matched_by = 'canonical' then
+      v_canonical_count := v_canonical_count + 1;
+    end if;
+  end loop;
+
+  saved_prices := v_saved;
+  created_products := v_created_count;
+  reused_products := v_reused_count;
+  matched_by_barcode := v_barcode_count;
+  matched_by_alias := v_alias_count;
+  matched_by_canonical := v_canonical_count;
+  return next;
+end;
+$;
+
+grant execute on function public.save_receipt_price_batch(text, date, jsonb)
+to authenticated;
 
 commit;
