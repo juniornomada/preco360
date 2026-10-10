@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Camera, CameraOff, Image as ImageIcon, Loader2, ScanLine, Zap, ZapOff } from "lucide-react";
+import {
+  Camera,
+  CameraOff,
+  Image as ImageIcon,
+  Loader2,
+  ScanLine,
+  Zap,
+  ZapOff,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface QrScannerProps {
@@ -8,15 +16,75 @@ interface QrScannerProps {
 }
 
 type Status = "idle" | "starting" | "scanning" | "reading";
-type JsQr = (data: Uint8ClampedArray, width: number, height: number, options?: unknown) => { data: string } | null;
+type JsQr = (
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  options?: unknown,
+) => { data: string } | null;
 type Source = HTMLVideoElement | HTMLImageElement;
 
+type ExtendedTrackCapabilities = MediaTrackCapabilities & {
+  torch?: boolean;
+  focusMode?: string[];
+  zoom?: {
+    min: number;
+    max: number;
+    step?: number;
+  };
+};
+
+type ExtendedTrackConstraintSet = MediaTrackConstraintSet & {
+  torch?: boolean;
+  focusMode?: string;
+  zoom?: number;
+};
+
+type BarcodeDetectorLike = {
+  detect: (
+    image: HTMLCanvasElement | HTMLVideoElement | HTMLImageElement,
+  ) => Promise<Array<{ rawValue?: string }>>;
+};
+
+type BarcodeDetectorConstructor = new (options: {
+  formats: string[];
+}) => BarcodeDetectorLike;
+
 let jsQrPromise: Promise<JsQr> | null = null;
+let barcodeDetector: BarcodeDetectorLike | null | undefined;
 
 const loadJsQr = () => {
-  if (!jsQrPromise) jsQrPromise = import("jsqr").then((module) => (module.default ?? module) as unknown as JsQr);
+  if (!jsQrPromise) {
+    jsQrPromise = import("jsqr").then(
+      (module) => (module.default ?? module) as unknown as JsQr,
+    );
+  }
   return jsQrPromise;
 };
+
+function getBarcodeDetector() {
+  if (barcodeDetector !== undefined) return barcodeDetector;
+  if (typeof window === "undefined" || !("BarcodeDetector" in window)) {
+    barcodeDetector = null;
+    return null;
+  }
+
+  try {
+    const Detector = (
+      window as typeof window & {
+        BarcodeDetector?: BarcodeDetectorConstructor;
+      }
+    ).BarcodeDetector;
+
+    barcodeDetector = Detector
+      ? new Detector({ formats: ["qr_code"] })
+      : null;
+  } catch {
+    barcodeDetector = null;
+  }
+
+  return barcodeDetector;
+}
 
 function getSourceSize(source: Source) {
   return source instanceof HTMLVideoElement
@@ -24,7 +92,12 @@ function getSourceSize(source: Source) {
     : { width: source.naturalWidth, height: source.naturalHeight };
 }
 
-function drawRegion(source: Source, maxSide: number, squareRatio?: number) {
+function drawRegion(
+  source: Source,
+  maxSide: number,
+  squareRatio?: number,
+  upscale = false,
+) {
   const { width: sourceWidth, height: sourceHeight } = getSourceSize(source);
   if (!sourceWidth || !sourceHeight) return null;
 
@@ -41,67 +114,163 @@ function drawRegion(source: Source, maxSide: number, squareRatio?: number) {
     sy = (sourceHeight - side) / 2;
   }
 
-  const scale = Math.min(1, maxSide / Math.max(sw, sh));
+  const naturalScale = maxSide / Math.max(sw, sh);
+  const scale = upscale
+    ? Math.min(2.25, Math.max(1, naturalScale))
+    : Math.min(1, naturalScale);
   const width = Math.max(1, Math.round(sw * scale));
   const height = Math.max(1, Math.round(sh * scale));
+
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
+
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) return null;
 
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
   context.drawImage(source, sx, sy, sw, sh, 0, 0, width, height);
+
   return canvas;
 }
 
-async function decodeCanvas(canvas: HTMLCanvasElement): Promise<string | null> {
-  if ("BarcodeDetector" in window) {
-    try {
-      const Detector = (window as typeof window & {
-        BarcodeDetector?: new (options: { formats: string[] }) => {
-          detect: (image: HTMLCanvasElement) => Promise<Array<{ rawValue?: string }>>;
-        };
-      }).BarcodeDetector;
-      if (Detector) {
-        const codes = await new Detector({ formats: ["qr_code"] }).detect(canvas);
-        const value = codes[0]?.rawValue?.trim();
-        if (value) return value;
-      }
-    } catch {
-      // Alguns navegadores anunciam suporte, mas falham. O jsQR continua abaixo.
+function enhancedCanvas(
+  source: HTMLCanvasElement,
+  mode: "contrast" | "threshold",
+) {
+  const canvas = document.createElement("canvas");
+  canvas.width = source.width;
+  canvas.height = source.height;
+
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  const sourceContext = source.getContext("2d", { willReadFrequently: true });
+  if (!context || !sourceContext) return null;
+
+  const image = sourceContext.getImageData(0, 0, source.width, source.height);
+  const data = image.data;
+
+  for (let index = 0; index < data.length; index += 4) {
+    const luminance =
+      data[index] * 0.299 +
+      data[index + 1] * 0.587 +
+      data[index + 2] * 0.114;
+
+    let value: number;
+    if (mode === "threshold") {
+      value = luminance < 150 ? 0 : 255;
+    } else {
+      value = Math.max(0, Math.min(255, (luminance - 128) * 1.65 + 128));
     }
+
+    data[index] = value;
+    data[index + 1] = value;
+    data[index + 2] = value;
   }
+
+  context.putImageData(image, 0, 0);
+  return canvas;
+}
+
+async function decodeNative(source: Source | HTMLCanvasElement) {
+  const detector = getBarcodeDetector();
+  if (!detector) return null;
+
+  try {
+    const codes = await detector.detect(source);
+    return codes[0]?.rawValue?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function decodeCanvas(canvas: HTMLCanvasElement): Promise<string | null> {
+  const native = await decodeNative(canvas);
+  if (native) return native;
 
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) return null;
+
   const image = context.getImageData(0, 0, canvas.width, canvas.height);
   const jsQr = await loadJsQr();
-  return jsQr(image.data, canvas.width, canvas.height, {
-    inversionAttempts: "attemptBoth",
-  })?.data?.trim() ?? null;
+
+  return (
+    jsQr(image.data, canvas.width, canvas.height, {
+      inversionAttempts: "attemptBoth",
+    })?.data?.trim() ?? null
+  );
 }
 
-async function readQr(source: Source, thorough = false): Promise<string | null> {
+async function decodeCanvasVariants(canvas: HTMLCanvasElement) {
+  const direct = await decodeCanvas(canvas);
+  if (direct) return direct;
+
+  const contrast = enhancedCanvas(canvas, "contrast");
+  if (contrast) {
+    const contrastValue = await decodeCanvas(contrast);
+    if (contrastValue) return contrastValue;
+  }
+
+  const threshold = enhancedCanvas(canvas, "threshold");
+  if (threshold) {
+    const thresholdValue = await decodeCanvas(threshold);
+    if (thresholdValue) return thresholdValue;
+  }
+
+  return null;
+}
+
+async function readQr(
+  source: Source,
+  thorough = false,
+): Promise<string | null> {
+  // BarcodeDetector can work directly on the original video/image frame.
+  // Avoiding an intermediate canvas preserves maximum camera detail.
+  const nativeDirect = await decodeNative(source);
+  if (nativeDirect) return nativeDirect;
+
   const isVideo = source instanceof HTMLVideoElement;
-  const attempts: Array<{ maxSide: number; squareRatio?: number }> = isVideo
+  const attempts: Array<{
+    maxSide: number;
+    squareRatio?: number;
+    upscale?: boolean;
+    enhanced?: boolean;
+  }> = isVideo
     ? thorough
       ? [
-          { maxSide: 1800, squareRatio: 0.68 },
-          { maxSide: 1800, squareRatio: 1 },
-          { maxSide: 1800 },
+          // Tight crops help dense NFC-e QR codes occupy many more pixels.
+          { maxSide: 2200, squareRatio: 0.46, upscale: true, enhanced: true },
+          { maxSide: 2200, squareRatio: 0.58, upscale: true, enhanced: true },
+          { maxSide: 2200, squareRatio: 0.7, upscale: true, enhanced: true },
+          { maxSide: 2200, squareRatio: 0.86, enhanced: true },
+          { maxSide: 2200, squareRatio: 1, enhanced: true },
+          { maxSide: 2200, enhanced: true },
         ]
-      : [{ maxSide: 1400, squareRatio: 1 }]
+      : [
+          { maxSide: 1800, squareRatio: 0.58 },
+          { maxSide: 1800, squareRatio: 0.72 },
+        ]
     : thorough
       ? [
-          { maxSide: 1800 },
-          { maxSide: 1800, squareRatio: 0.8 },
+          { maxSide: 2600, squareRatio: 0.5, upscale: true, enhanced: true },
+          { maxSide: 2600, squareRatio: 0.7, upscale: true, enhanced: true },
+          { maxSide: 2600, enhanced: true },
         ]
-      : [{ maxSide: 1400 }];
+      : [{ maxSide: 1800 }];
 
   for (const attempt of attempts) {
-    const canvas = drawRegion(source, attempt.maxSide, attempt.squareRatio);
+    const canvas = drawRegion(
+      source,
+      attempt.maxSide,
+      attempt.squareRatio,
+      attempt.upscale,
+    );
     if (!canvas) continue;
-    const value = await decodeCanvas(canvas);
+
+    const value = attempt.enhanced
+      ? await decodeCanvasVariants(canvas)
+      : await decodeCanvas(canvas);
+
     if (value) return value;
   }
 
@@ -112,24 +281,39 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
+  const thoroughTimerRef = useRef<number | null>(null);
   const readingRef = useRef(false);
   const finishedRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
   const [status, setStatus] = useState<Status>("idle");
-  const [message, setMessage] = useState("Aponte a câmera para o QR Code");
+  const [message, setMessage] = useState(
+    "Aponte a câmera para o QR Code",
+  );
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [zoomApplied, setZoomApplied] = useState(false);
 
   const stop = () => {
-    if (timerRef.current !== null) window.clearInterval(timerRef.current);
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+    }
+    if (thoroughTimerRef.current !== null) {
+      window.clearInterval(thoroughTimerRef.current);
+    }
+
     timerRef.current = null;
+    thoroughTimerRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+
     if (videoRef.current) videoRef.current.srcObject = null;
+
     readingRef.current = false;
     setStatus("idle");
     setTorchSupported(false);
     setTorchOn(false);
+    setZoomApplied(false);
   };
 
   useEffect(() => () => stop(), []);
@@ -143,14 +327,28 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
 
   const scanFrame = async (thorough = false) => {
     const video = videoRef.current;
-    if (!video || video.readyState < 2 || readingRef.current || finishedRef.current) return;
+    if (
+      !video ||
+      video.readyState < 2 ||
+      readingRef.current ||
+      finishedRef.current
+    ) {
+      return;
+    }
+
     readingRef.current = true;
     if (thorough) setStatus("reading");
+
     try {
       const value = await readQr(video, thorough);
-      if (value) finish(value);
-      else if (thorough) {
-        setMessage("Não consegui ler. Afaste um pouco, mantenha o QR nítido e evite reflexos.");
+      if (value) {
+        finish(value);
+      } else if (thorough) {
+        setMessage(
+          zoomApplied
+            ? "Ainda não li. Mantenha o QR inteiro, reto e nítido dentro do quadro."
+            : "Ainda não li. Aproxime até o QR ocupar boa parte do quadro e mantenha a imagem nítida.",
+        );
         setStatus("scanning");
       }
     } catch {
@@ -167,8 +365,9 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     const preferred: MediaStreamConstraints = {
       video: {
         facingMode: { exact: "environment" },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
+        width: { ideal: 3840 },
+        height: { ideal: 2160 },
+        aspectRatio: { ideal: 16 / 9 },
       },
       audio: false,
     };
@@ -176,15 +375,59 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     try {
       return await navigator.mediaDevices.getUserMedia(preferred);
     } catch (error) {
-      if (!(error instanceof DOMException) || !["OverconstrainedError", "NotFoundError"].includes(error.name)) throw error;
+      if (
+        !(error instanceof DOMException) ||
+        !["OverconstrainedError", "NotFoundError"].includes(error.name)
+      ) {
+        throw error;
+      }
+
       return navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: "environment" },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          width: { ideal: 2560 },
+          height: { ideal: 1440 },
         },
         audio: false,
       });
+    }
+  };
+
+  const optimizeCamera = async (track: MediaStreamTrack) => {
+    const capabilities =
+      track.getCapabilities?.() as ExtendedTrackCapabilities | undefined;
+
+    setTorchSupported(Boolean(capabilities?.torch));
+
+    const advanced: ExtendedTrackConstraintSet[] = [];
+
+    if (capabilities?.focusMode?.includes("continuous")) {
+      advanced.push({ focusMode: "continuous" });
+    }
+
+    const zoom = capabilities?.zoom;
+    if (zoom && Number.isFinite(zoom.min) && Number.isFinite(zoom.max)) {
+      // A modest optical/digital zoom makes dense printed NFC-e QR codes
+      // materially larger in the video frame without forcing the user
+      // to hold the phone too close for autofocus.
+      const desiredZoom = Math.min(
+        zoom.max,
+        Math.max(zoom.min, Math.min(1.7, zoom.max)),
+      );
+
+      if (desiredZoom > zoom.min + 0.05) {
+        advanced.push({ zoom: desiredZoom });
+        setZoomApplied(true);
+      }
+    }
+
+    if (!advanced.length) return;
+
+    try {
+      await track.applyConstraints({ advanced });
+    } catch {
+      // Camera optimization is best-effort; scanning still works without it.
+      setZoomApplied(false);
     }
   };
 
@@ -192,53 +435,69 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     setMessage("Abrindo câmera…");
     setStatus("starting");
     finishedRef.current = false;
+
     try {
-      if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("unsupported");
+      }
+
       const stream = await requestCamera();
       const video = videoRef.current;
+
       if (!video) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
+
       streamRef.current = stream;
       video.srcObject = stream;
       video.muted = true;
       await video.play();
 
       const track = stream.getVideoTracks()[0];
-      const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & {
-        torch?: boolean;
-        focusMode?: string[];
-      };
-      setTorchSupported(Boolean(capabilities?.torch));
+      if (track) await optimizeCamera(track);
 
-      if (capabilities?.focusMode?.includes("continuous")) {
-        try {
-          await track.applyConstraints({
-            advanced: [{ focusMode: "continuous" } as MediaTrackConstraintSet],
-          });
-        } catch {
-          // Autofoco contínuo não é obrigatório.
-        }
-      }
-
-      setMessage("Centralize o QR dentro do quadro");
+      setMessage(
+        "Centralize o QR e aproxime até ele ocupar boa parte do quadro",
+      );
       setStatus("scanning");
-      timerRef.current = window.setInterval(() => void scanFrame(false), 500);
-      window.setTimeout(() => void scanFrame(true), 700);
+
+      // Fast lightweight attempts keep the UI responsive.
+      timerRef.current = window.setInterval(
+        () => void scanFrame(false),
+        350,
+      );
+
+      // A deeper pass tries tight crops + contrast/threshold variants.
+      thoroughTimerRef.current = window.setInterval(
+        () => void scanFrame(true),
+        1400,
+      );
+
+      window.setTimeout(() => void scanFrame(true), 500);
     } catch (error) {
       stop();
-      const denied = error instanceof DOMException && error.name === "NotAllowedError";
-      setMessage(denied ? "Permita o acesso à câmera ou use uma foto." : "Não foi possível abrir a câmera. Use uma foto do QR Code.");
+      const denied =
+        error instanceof DOMException && error.name === "NotAllowedError";
+
+      setMessage(
+        denied
+          ? "Permita o acesso à câmera ou use uma foto."
+          : "Não foi possível abrir a câmera. Use uma foto do QR Code.",
+      );
     }
   };
 
   const toggleTorch = async () => {
     const track = streamRef.current?.getVideoTracks()[0];
     if (!track) return;
+
     const next = !torchOn;
+
     try {
-      await track.applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet] });
+      await track.applyConstraints({
+        advanced: [{ torch: next } as ExtendedTrackConstraintSet],
+      });
       setTorchOn(next);
       setMessage(next ? "Lanterna ligada" : "Lanterna desligada");
     } catch {
@@ -250,16 +509,23 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
   const readFile = async (file: File) => {
     setStatus("reading");
     setMessage("Lendo a foto…");
+
     const url = URL.createObjectURL(file);
+
     try {
       const image = new Image();
       image.src = url;
       await image.decode();
+
       const value = await readQr(image, true);
-      if (value) finish(value);
-      else {
+
+      if (value) {
+        finish(value);
+      } else {
         setStatus(streamRef.current ? "scanning" : "idle");
-        setMessage("QR não encontrado. Tire a foto mais perto, reta e sem reflexos.");
+        setMessage(
+          "QR não encontrado. Tire a foto mais perto, reta e sem reflexos.",
+        );
       }
     } catch {
       setStatus(streamRef.current ? "scanning" : "idle");
@@ -280,7 +546,13 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       </div>
 
       <div className="relative h-[220px] overflow-hidden rounded-md bg-muted sm:h-[280px]">
-        <video ref={videoRef} className="h-full w-full object-cover" autoPlay muted playsInline />
+        <video
+          ref={videoRef}
+          className="h-full w-full object-cover"
+          autoPlay
+          muted
+          playsInline
+        />
 
         {!active && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-5 text-center text-sm text-muted-foreground">
@@ -291,9 +563,11 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
 
         {active && (
           <>
-            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[64%] aspect-square -translate-x-1/2 -translate-y-1/2 rounded-md border-2 border-primary" />
+            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[68%] aspect-square -translate-x-1/2 -translate-y-1/2 rounded-md border-2 border-primary" />
             <div className="absolute inset-x-3 bottom-3 rounded bg-background/90 px-3 py-2 text-center text-xs">
-              {status === "reading" && <Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" />}
+              {status === "reading" && (
+                <Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" />
+              )}
               {message}
             </div>
           </>
@@ -303,32 +577,69 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       <div className="flex flex-wrap gap-2">
         {active ? (
           <>
-            <Button size="sm" onClick={() => void scanFrame(true)} disabled={status === "reading"}>
-              <ScanLine className="mr-1.5 h-4 w-4" />Ler agora
+            <Button
+              size="sm"
+              onClick={() => void scanFrame(true)}
+              disabled={status === "reading"}
+            >
+              <ScanLine className="mr-1.5 h-4 w-4" />
+              Ler agora
             </Button>
+
             {torchSupported && (
-              <Button size="sm" variant={torchOn ? "default" : "outline"} onClick={() => void toggleTorch()}>
-                {torchOn ? <ZapOff className="mr-1.5 h-4 w-4" /> : <Zap className="mr-1.5 h-4 w-4" />}
+              <Button
+                size="sm"
+                variant={torchOn ? "default" : "outline"}
+                onClick={() => void toggleTorch()}
+              >
+                {torchOn ? (
+                  <ZapOff className="mr-1.5 h-4 w-4" />
+                ) : (
+                  <Zap className="mr-1.5 h-4 w-4" />
+                )}
                 {torchOn ? "Desligar luz" : "Ligar luz"}
               </Button>
             )}
+
             <Button size="sm" variant="outline" onClick={stop}>
-              <CameraOff className="mr-1.5 h-4 w-4" />Parar
+              <CameraOff className="mr-1.5 h-4 w-4" />
+              Parar
             </Button>
           </>
         ) : (
-          <Button size="sm" onClick={() => void start()} disabled={status === "starting"}>
-            {status === "starting" ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Camera className="mr-1.5 h-4 w-4" />}
+          <Button
+            size="sm"
+            onClick={() => void start()}
+            disabled={status === "starting"}
+          >
+            {status === "starting" ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <Camera className="mr-1.5 h-4 w-4" />
+            )}
             Abrir câmera
           </Button>
         )}
 
-        <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={status === "reading"}>
-          <ImageIcon className="mr-1.5 h-4 w-4" />Usar foto
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => fileRef.current?.click()}
+          disabled={status === "reading"}
+        >
+          <ImageIcon className="mr-1.5 h-4 w-4" />
+          Usar foto
         </Button>
 
         {onClose && (
-          <Button size="sm" variant="ghost" onClick={() => { stop(); onClose(); }}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              stop();
+              onClose();
+            }}
+          >
             Fechar
           </Button>
         )}
