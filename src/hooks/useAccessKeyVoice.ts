@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { accessKeyDigitsFromTranscript, sanitizeAccessKeyDigits } from "@/lib/accessKeyVoice";
+import {
+  accessKeyDigitsFromTranscript,
+  sanitizeAccessKeyDigits,
+} from "@/lib/accessKeyVoice";
 
 type SpeechAlternative = { transcript: string };
 
@@ -15,7 +18,6 @@ type SpeechResultList = {
 };
 
 type SpeechRecognitionEventLike = Event & {
-  resultIndex?: number;
   results: SpeechResultList;
 };
 
@@ -52,8 +54,8 @@ type SpeechWindow = Window & {
   SpeechRecognitionPhrase?: SpeechRecognitionPhraseConstructor;
 };
 
-const MAX_LISTENING_MS = 60_000;
-const RESTART_DELAY_MS = 180;
+const ACCESS_KEY_LENGTH = 44;
+const RESTART_DELAY_MS = 120;
 const DIGIT_WORDS = [
   "zero",
   "um",
@@ -87,31 +89,31 @@ function voiceErrorMessage(error?: string) {
   if (error === "audio-capture") {
     return "Não foi possível acessar o microfone.";
   }
-  if (error === "no-speech") {
-    return "Não ouvi números. Toque no microfone e tente novamente.";
-  }
-  return "Não consegui reconhecer os números. Tente novamente.";
+  return "A escuta foi interrompida pelo navegador. Tentando continuar…";
+}
+
+function isFatalRecognitionError(error?: string) {
+  return (
+    error === "not-allowed" ||
+    error === "service-not-allowed" ||
+    error === "audio-capture"
+  );
 }
 
 export function useAccessKeyVoice() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  const timerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
   const committedDigitsRef = useRef("");
   const listeningRequestedRef = useRef(false);
-  const onDigitsRef = useRef<((digits: string, complete: boolean) => void) | null>(
-    null,
-  );
+  const onDigitsRef = useRef<
+    ((digits: string, complete: boolean) => void) | null
+  >(null);
 
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isSupported = getRecognitionConstructor() !== null;
 
-  const clearTimers = useCallback(() => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
+  const clearRestartTimer = useCallback(() => {
     if (restartTimerRef.current !== null) {
       window.clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
@@ -120,15 +122,27 @@ export function useAccessKeyVoice() {
 
   const stopListening = useCallback(() => {
     listeningRequestedRef.current = false;
-    clearTimers();
+    clearRestartTimer();
     recognitionRef.current?.stop();
     recognitionRef.current = null;
     setIsListening(false);
-  }, [clearTimers]);
+  }, [clearRestartTimer]);
 
   const startRecognition = useCallback(() => {
     const Recognition = getRecognitionConstructor();
-    if (!Recognition || !listeningRequestedRef.current) return false;
+
+    if (
+      !Recognition ||
+      !listeningRequestedRef.current ||
+      committedDigitsRef.current.length >= ACCESS_KEY_LENGTH
+    ) {
+      return false;
+    }
+
+    clearRestartTimer();
+
+    const sessionBaseDigits = committedDigitsRef.current;
+    let lastSessionDigits = "";
 
     const recognition = new Recognition();
     recognition.lang = "pt-BR";
@@ -143,7 +157,7 @@ export function useAccessKeyVoice() {
           (phrase) => new speechWindow.SpeechRecognitionPhrase!(phrase, 6),
         );
       } catch {
-        // Phrase bias is optional and not supported consistently across browsers.
+        // Phrase bias is optional and varies by browser.
       }
     }
 
@@ -154,15 +168,29 @@ export function useAccessKeyVoice() {
         accessKeyDigitsFromTranscript(result[index]?.transcript ?? ""),
       ).filter(Boolean);
 
-      const remaining = Math.max(0, 44 - committedDigitsRef.current.length);
-      const fitting =
-        candidates
-          .filter((digits) => digits.length <= remaining)
-          .sort((a, b) => b.length - a.length)[0] ??
+      return (
         candidates.sort((a, b) => b.length - a.length)[0] ??
-        "";
+        ""
+      );
+    };
 
-      return fitting.slice(0, remaining);
+    const publishDigits = (sessionDigits: string) => {
+      const displayed = sanitizeAccessKeyDigits(
+        sessionBaseDigits + sessionDigits,
+      );
+      const complete = displayed.length >= ACCESS_KEY_LENGTH;
+
+      lastSessionDigits = displayed.slice(sessionBaseDigits.length);
+      onDigitsRef.current?.(displayed, complete);
+
+      if (complete) {
+        committedDigitsRef.current = displayed.slice(0, ACCESS_KEY_LENGTH);
+        listeningRequestedRef.current = false;
+        setError(null);
+        recognition.stop();
+      }
+
+      return complete;
     };
 
     recognition.onstart = () => {
@@ -172,49 +200,58 @@ export function useAccessKeyVoice() {
     };
 
     recognition.onresult = (event) => {
-      const start = Math.max(0, event.resultIndex ?? 0);
-      let interim = "";
+      let finalDigits = "";
+      let interimDigits = "";
 
-      for (let index = start; index < event.results.length; index += 1) {
+      // Rebuild the complete current recognition session every time.
+      // This avoids duplicating final hypotheses and preserves the latest
+      // interim hypothesis if Android/Chrome closes the native session.
+      for (let index = 0; index < event.results.length; index += 1) {
         const result = event.results[index];
         const digits = digitsForResult(result);
         if (!digits) continue;
 
         if (result?.isFinal) {
-          committedDigitsRef.current = sanitizeAccessKeyDigits(
-            committedDigitsRef.current + digits,
-          );
+          finalDigits += digits;
         } else {
-          interim += digits;
+          interimDigits += digits;
         }
       }
 
-      const displayed = sanitizeAccessKeyDigits(
-        committedDigitsRef.current + interim,
+      const remaining = Math.max(
+        0,
+        ACCESS_KEY_LENGTH - sessionBaseDigits.length,
       );
-      const complete = displayed.length >= 44;
-      onDigitsRef.current?.(displayed, complete);
+      const finalWithinLimit = finalDigits.slice(0, remaining);
+      const interimWithinLimit = interimDigits.slice(
+        0,
+        Math.max(0, remaining - finalWithinLimit.length),
+      );
 
-      if (complete) {
-        committedDigitsRef.current = displayed.slice(0, 44);
-        listeningRequestedRef.current = false;
-        clearTimers();
-        recognition.stop();
-      }
+      // Final recognition is safe to persist immediately. Interim recognition
+      // is displayed live and is committed in onend if the browser ends the
+      // session before promoting it to final.
+      committedDigitsRef.current = sanitizeAccessKeyDigits(
+        sessionBaseDigits + finalWithinLimit,
+      );
+
+      publishDigits(finalWithinLimit + interimWithinLimit);
     };
 
     recognition.onerror = (event) => {
-      if (
-        event.error !== "aborted" &&
-        event.error !== "no-speech" &&
-        listeningRequestedRef.current
-      ) {
-        setError(voiceErrorMessage(event.error));
+      if (event.error === "aborted") return;
+
+      if (isFatalRecognitionError(event.error)) {
         listeningRequestedRef.current = false;
+        setError(voiceErrorMessage(event.error));
+        setIsListening(false);
+        return;
       }
 
-      if (event.error === "no-speech" && listeningRequestedRef.current) {
-        setError("Faça uma pausa curta entre os números e tente novamente.");
+      // no-speech/network and other transient native recognizer failures
+      // must not end a 44-digit dictation. onend will restart the session.
+      if (event.error !== "no-speech") {
+        setError(voiceErrorMessage(event.error));
       }
     };
 
@@ -223,10 +260,31 @@ export function useAccessKeyVoice() {
         recognitionRef.current = null;
       }
 
-      if (
-        listeningRequestedRef.current &&
-        committedDigitsRef.current.length < 44
-      ) {
+      // Chrome/Android may finish a recognition session while its latest
+      // hypothesis is still interim. Preserve it before restarting so the
+      // user never loses the digits already visible in the field.
+      if (lastSessionDigits) {
+        committedDigitsRef.current = sanitizeAccessKeyDigits(
+          sessionBaseDigits + lastSessionDigits,
+        );
+        onDigitsRef.current?.(
+          committedDigitsRef.current,
+          committedDigitsRef.current.length >= ACCESS_KEY_LENGTH,
+        );
+      }
+
+      const complete =
+        committedDigitsRef.current.length >= ACCESS_KEY_LENGTH;
+
+      if (complete) {
+        listeningRequestedRef.current = false;
+        setError(null);
+        setIsListening(false);
+        return;
+      }
+
+      if (listeningRequestedRef.current) {
+        setIsListening(true);
         restartTimerRef.current = window.setTimeout(() => {
           startRecognition();
         }, RESTART_DELAY_MS);
@@ -240,12 +298,18 @@ export function useAccessKeyVoice() {
       recognition.start();
       return true;
     } catch {
-      setError("Não foi possível iniciar o microfone. Tente novamente.");
-      listeningRequestedRef.current = false;
+      if (listeningRequestedRef.current) {
+        setError("Reiniciando a escuta…");
+        restartTimerRef.current = window.setTimeout(() => {
+          startRecognition();
+        }, RESTART_DELAY_MS * 2);
+        return true;
+      }
+
       setIsListening(false);
       return false;
     }
-  }, [clearTimers]);
+  }, [clearRestartTimer]);
 
   const startListening = useCallback(
     (
@@ -257,40 +321,39 @@ export function useAccessKeyVoice() {
         return false;
       }
 
-      clearTimers();
+      clearRestartTimer();
       recognitionRef.current?.abort();
       recognitionRef.current = null;
+
       committedDigitsRef.current = sanitizeAccessKeyDigits(initialDigits);
       onDigitsRef.current = onDigits;
+
+      if (committedDigitsRef.current.length >= ACCESS_KEY_LENGTH) {
+        onDigitsRef.current(
+          committedDigitsRef.current.slice(0, ACCESS_KEY_LENGTH),
+          true,
+        );
+        setIsListening(false);
+        return false;
+      }
+
       listeningRequestedRef.current = true;
       setError(null);
-
-      timerRef.current = window.setTimeout(() => {
-        listeningRequestedRef.current = false;
-        recognitionRef.current?.stop();
-        recognitionRef.current = null;
-        setIsListening(false);
-
-        if (committedDigitsRef.current.length < 44) {
-          setError(
-            `Ditado encerrado com ${committedDigitsRef.current.length}/44 dígitos. Toque no microfone para continuar.`,
-          );
-        }
-      }, MAX_LISTENING_MS);
+      setIsListening(true);
 
       return startRecognition();
     },
-    [clearTimers, isSupported, startRecognition],
+    [clearRestartTimer, isSupported, startRecognition],
   );
 
   useEffect(() => {
     return () => {
       listeningRequestedRef.current = false;
-      clearTimers();
+      clearRestartTimer();
       recognitionRef.current?.abort();
       recognitionRef.current = null;
     };
-  }, [clearTimers]);
+  }, [clearRestartTimer]);
 
   const clearError = useCallback(() => setError(null), []);
 
