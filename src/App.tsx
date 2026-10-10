@@ -1,7 +1,7 @@
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -46,6 +46,7 @@ const SearchPage = resilientLazy(() => import("./pages/SearchPage"));
 const OffersPage = resilientLazy(() => import("./pages/OffersPage"));
 const OfferImagesAuditPage = resilientLazy(() => import("./pages/OfferImagesAuditPage"));
 const ReceiptImportPage = resilientLazy(() => import("./pages/ReceiptImportPage"));
+const SefazSpNfcePage = resilientLazy(() => import("./pages/SefazSpNfcePage"));
 const FlyerPage = resilientLazy(() => import("./pages/FlyerPage"));
 const StorePriceImportPage = resilientLazy(() => import("./pages/StorePriceImportPage"));
 const AppOfferImportPage = resilientLazy(() => import("./pages/AppOfferImportPage"));
@@ -132,6 +133,7 @@ class RouteErrorBoundary extends Component<
 
 function AppRoutes() {
   const { user, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -152,6 +154,7 @@ function AppRoutes() {
         <Route path="/product/:id" element={<ProductDetail />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/upload" element={<ReceiptImportPage />} />
+        <Route path="/sefaz-sp-nfce" element={<SefazSpNfcePage />} />
         <Route path="/offers" element={<OffersPage />} />
         <Route path="/offers-beta" element={<OffersPage betaVoice />} />
         <Route path="/offers/images" element={<OfferImagesAuditPage />} />
@@ -168,7 +171,7 @@ function AppRoutes() {
       </Routes>
       </Suspense>
       </RouteErrorBoundary>
-      <BottomNav />
+      {location.pathname !== "/sefaz-sp-nfce" && <BottomNav />}
     </>
   );
 }
