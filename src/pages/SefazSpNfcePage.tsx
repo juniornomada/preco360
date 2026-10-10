@@ -140,6 +140,7 @@ export default function SefazSpNfcePage() {
 
       const resultMessage = {
         type: "preco360:receipt-import",
+        resultId: crypto.randomUUID(),
         key,
         payload: parsed.data,
       };
