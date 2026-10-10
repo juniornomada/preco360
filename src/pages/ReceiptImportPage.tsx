@@ -48,6 +48,13 @@ type BlockedState = {
   diagnostics?: Diagnostics;
 };
 
+type ExistingReceiptImport = {
+  imported_at: string;
+  supermarket: string;
+  receipt_date: string;
+  saved_price_count: number;
+};
+
 function blockedTitle(code: string) {
   if (code === "CAPTCHA_REQUIRED") return "A SEFAZ exige validação humana";
   if (code === "BLOCKED") return "A SEFAZ bloqueou a consulta automática";
@@ -428,6 +435,9 @@ export default function ReceiptImportPage() {
   const [assistedKeyStatus, setAssistedKeyStatus] = useState<
     "idle" | "waiting" | "checking" | "session-required" | "success"
   >("idle");
+  const [existingReceiptImport, setExistingReceiptImport] =
+    useState<ExistingReceiptImport | null>(null);
+  const [checkingReceiptImport, setCheckingReceiptImport] = useState(false);
   const assistedOpenedAtRef = useRef(0);
   const assistedAttemptedRef = useRef(false);
 
@@ -440,6 +450,52 @@ export default function ReceiptImportPage() {
     () => sanitizeAccessKeyDigits(accessKey),
     [accessKey],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!keyCheck.valid) {
+      setExistingReceiptImport(null);
+      setCheckingReceiptImport(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setCheckingReceiptImport(true);
+
+    void db
+      .rpc("get_receipt_import_status", {
+        p_access_key: keyCheck.clean,
+      })
+      .then(({ data, error }: any) => {
+        if (cancelled) return;
+
+        if (error) {
+          setExistingReceiptImport(null);
+          return;
+        }
+
+        const result = data?.[0];
+        setExistingReceiptImport(
+          result?.already_imported
+            ? {
+                imported_at: String(result.imported_at ?? ""),
+                supermarket: String(result.supermarket ?? ""),
+                receipt_date: String(result.receipt_date ?? ""),
+                saved_price_count: Number(result.saved_price_count ?? 0),
+              }
+            : null,
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingReceiptImport(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [keyCheck.clean, keyCheck.valid]);
 
   const clearResult = () => {
     setItems([]);
@@ -682,6 +738,14 @@ export default function ReceiptImportPage() {
     setLoading(true);
     clearResult();
     setLastUrl(url);
+
+    if (importSource === "qr") {
+      const detectedKey = extractAccessKey(url);
+      setAccessKey(
+        detectedKey && validateAccessKey(detectedKey).valid ? detectedKey : "",
+      );
+    }
+
     try {
       const { data, error } = await supabase.functions.invoke("fetch-receipt-url", { body: { url } });
       if (error) throw error;
@@ -711,7 +775,14 @@ export default function ReceiptImportPage() {
   };
 
   const openAssistedKeyConsultation = () => {
-    if (!keyCheck.valid || keyKind === "unknown") return;
+    if (
+      !keyCheck.valid ||
+      keyKind === "unknown" ||
+      checkingReceiptImport ||
+      existingReceiptImport
+    ) {
+      return;
+    }
 
     clearResult();
     setSource("key");
@@ -805,6 +876,11 @@ export default function ReceiptImportPage() {
       const resultId = String(message.resultId || "");
       if (resultId && seenResultIds.has(resultId)) return;
       if (resultId) seenResultIds.add(resultId);
+
+      const returnedKey = sanitizeAccessKeyDigits(String(message.key ?? ""));
+      if (validateAccessKey(returnedKey).valid) {
+        setAccessKey(returnedKey);
+      }
 
       applyResult(message.payload, "key");
       setAssistedKeyPending(false);
@@ -1002,6 +1078,9 @@ export default function ReceiptImportPage() {
             name,
             price: price.toFixed(6),
             barcode: item.barcode ?? null,
+            quantity: quantity ?? null,
+            sale_unit: unit || null,
+            total_price: total ?? null,
             package_quantity: metadata?.package_size ?? null,
             package_unit: metadata?.unit ?? null,
             normalized_price: normalized?.value ?? null,
@@ -1016,12 +1095,20 @@ export default function ReceiptImportPage() {
         throw new Error("Nenhum item válido para salvar.");
       }
 
+      const currentKeyCheck = validateAccessKey(accessKey);
+      const receiptAccessKey =
+        source !== "image" && currentKeyCheck.valid
+          ? currentKeyCheck.clean
+          : null;
+
       const { data: saved, error: saveError } = await db.rpc(
-        "save_receipt_price_batch",
+        "save_receipt_price_batch_v2",
         {
           p_supermarket: supermarket.trim() || "Não informado",
           p_date: date,
           p_items: batchItems,
+          p_access_key: receiptAccessKey,
+          p_original_line_count: items.length,
         },
       );
       if (saveError) throw saveError;
@@ -1054,13 +1141,23 @@ export default function ReceiptImportPage() {
         navigate("/", { replace: true });
       }, 1200);
     } catch (error: any) {
-      toast({
-        title: "Erro ao salvar",
-        description:
-          (error?.message ?? "Não foi possível salvar os preços.") +
-          " Nenhum item deste lote deve ser gravado se a transação falhar.",
-        variant: "destructive",
-      });
+      if (String(error?.message ?? "").includes("RECEIPT_ALREADY_IMPORTED")) {
+        toast({
+          title: "Cupom já importado",
+          description:
+            error?.details ??
+            "Este cupom já consta no Preço 360. Nenhum preço foi gravado novamente.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Erro ao salvar",
+          description:
+            (error?.message ?? "Não foi possível salvar os preços.") +
+            " Nenhum item deste lote deve ser gravado se a transação falhar.",
+          variant: "destructive",
+        });
+      }
     } finally {
       setSaving(false);
     }
@@ -1180,9 +1277,45 @@ export default function ReceiptImportPage() {
               {keyCheck.warning && (
                 <p className="text-sm text-amber-600">{keyCheck.warning}</p>
               )}
+              {checkingReceiptImport && keyCheck.valid && (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Verificando se este cupom já foi importado…
+                </p>
+              )}
+              {existingReceiptImport && (
+                <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3">
+                  <p className="flex items-center gap-2 text-sm font-bold text-amber-700 dark:text-amber-400">
+                    <AlertCircle className="h-4 w-4" />
+                    Este cupom já foi importado
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {existingReceiptImport.supermarket || "Estabelecimento não informado"}
+                    {existingReceiptImport.receipt_date
+                      ? ` · nota de ${new Date(
+                          `${existingReceiptImport.receipt_date}T12:00:00`,
+                        ).toLocaleDateString("pt-BR")}`
+                      : ""}
+                    {existingReceiptImport.imported_at
+                      ? ` · importado em ${new Date(
+                          existingReceiptImport.imported_at,
+                        ).toLocaleString("pt-BR")}`
+                      : ""}
+                  </p>
+                  <p className="mt-1 text-xs font-medium">
+                    A importação foi bloqueada para evitar preços duplicados.
+                  </p>
+                </div>
+              )}
               <Button
                 onClick={openAssistedKeyConsultation}
-                disabled={!keyCheck.valid || keyKind === "unknown" || loading}
+                disabled={
+                  !keyCheck.valid ||
+                  keyKind === "unknown" ||
+                  loading ||
+                  checkingReceiptImport ||
+                  Boolean(existingReceiptImport)
+                }
               >
                 <ExternalLink className="mr-2 h-4 w-4" />
                 {keyKind === "nfce" && keyCheck.clean.startsWith("35")
