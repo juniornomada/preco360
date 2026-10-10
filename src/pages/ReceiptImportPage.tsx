@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { QrScanner } from "@/components/QrScanner";
-import { extractAccessKey, validateAccessKey, validateNfceUrl } from "@/lib/nfceKey";
+import { buildOfficialConsultationUrl, extractAccessKey, fiscalDocumentKind, fiscalDocumentLabel, validateAccessKey, validateNfceUrl } from "@/lib/nfceKey";
 import { inferPackage } from "@/lib/flyerAnalysis";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,31 +42,6 @@ type BlockedState = {
   traceId?: string;
   diagnostics?: Diagnostics;
 };
-
-const ufUrls: Record<string, string> = {
-  "35": "https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaPublica.aspx",
-  "33": "https://www.nfce.fazenda.rj.gov.br/consulta",
-  "31": "https://nfce.fazenda.mg.gov.br/portalnfce/sistema/consultaarg.xhtml",
-  "41": "https://www.nfce.pr.gov.br/nfce/qrcode",
-  "43": "https://www.sefaz.rs.gov.br/NFCE/NFCE-COM.aspx",
-  "29": "https://nfe.sefaz.ba.gov.br/servicos/nfce/modulos/geral/NFCEC_consulta_chave_acesso.aspx",
-  "26": "https://nfce.sefaz.pe.gov.br/nfce/consulta",
-  "23": "https://nfce.sefaz.ce.gov.br/pages/ShowNFCe.html",
-  "52": "https://nfe.sefaz.go.gov.br/nfeweb/sites/nfce/danfeNFCe",
-  "50": "https://www.dfe.ms.gov.br/nfce/qrcode",
-  "53": "https://dec.fazenda.df.gov.br/NFCE/qrcode",
-};
-
-function buildKeyUrl(key: string) {
-  const base = ufUrls[key.slice(0, 2)] ?? "https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx";
-  const url = new URL(base);
-  if (key.startsWith("35")) url.searchParams.set("chNFe", key);
-  else if (url.hostname.includes("nfe.fazenda.gov.br")) {
-    url.searchParams.set("tipoConsulta", "resumo");
-    url.searchParams.set("nfe", key);
-  } else url.searchParams.set("chNFe", key);
-  return url.toString();
-}
 
 function blockedTitle(code: string) {
   if (code === "CAPTCHA_REQUIRED") return "A SEFAZ exige validação humana";
@@ -356,8 +331,19 @@ export default function ReceiptImportPage() {
   const [lastUrl, setLastUrl] = useState("");
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [fileProgress, setFileProgress] = useState("");
+  const [assistedKeyUrl, setAssistedKeyUrl] = useState("");
+  const [assistedKeyPending, setAssistedKeyPending] = useState(false);
+  const [assistedKeyStatus, setAssistedKeyStatus] = useState<
+    "idle" | "waiting" | "checking" | "session-required" | "success"
+  >("idle");
+  const assistedOpenedAtRef = useRef(0);
+  const assistedAttemptedRef = useRef(false);
 
   const keyCheck = useMemo(() => validateAccessKey(accessKey), [accessKey]);
+  const keyKind = useMemo(
+    () => fiscalDocumentKind(accessKey),
+    [accessKey],
+  );
 
   const clearResult = () => {
     setItems([]);
@@ -626,10 +612,169 @@ export default function ReceiptImportPage() {
     toast({ title: "QR Code não reconhecido", description: check.error ?? "Não encontrei uma NFC-e válida.", variant: "destructive" });
   };
 
-  const importKey = async () => {
-    if (!keyCheck.valid) return;
-    await importUrl(buildKeyUrl(keyCheck.clean), "key");
+  const tryContinueAfterCaptcha = async (automatic = false) => {
+    if (!assistedKeyUrl || loading) return;
+
+    setLoading(true);
+    setAssistedKeyStatus("checking");
+    setBlocked(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "fetch-receipt-url",
+        { body: { url: assistedKeyUrl } },
+      );
+      if (error) throw error;
+
+      if (data?.error) {
+        if (data?.code === "CAPTCHA_REQUIRED" || data?.code === "BLOCKED") {
+          setAssistedKeyStatus("session-required");
+          setBlocked({
+            message:
+              "O resultado da consulta ficou vinculado aos cookies da aba da SEFAZ. O Preço 360 web não consegue ler essa sessão de outro domínio. Para este navegador, use Arquivo (PDF/HTML/imagem) como contingência.",
+            code: "CAPTCHA_REQUIRED",
+            url: assistedKeyUrl,
+            traceId: data?.traceId,
+            diagnostics: data?.diagnostics,
+          });
+          if (!automatic) {
+            toast({
+              title: "A sessão da SEFAZ ficou isolada",
+              description:
+                "O CAPTCHA foi resolvido na outra aba, mas o navegador não liberou essa sessão para o Preço 360.",
+            });
+          }
+          return;
+        }
+
+        applyResult(data, "key");
+        return;
+      }
+
+      applyResult(data, "key");
+      setAssistedKeyStatus("success");
+      setAssistedKeyPending(false);
+      sessionStorage.removeItem("preco360.receipt.assisted");
+    } catch (error: any) {
+      setAssistedKeyStatus("waiting");
+      toast({
+        title: "Não consegui continuar a consulta",
+        description: error?.message ?? "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const openAssistedKeyConsultation = () => {
+    if (!keyCheck.valid || keyKind === "unknown") return;
+
+    const url = buildOfficialConsultationUrl(keyCheck.clean);
+    if (!url) {
+      toast({
+        title: "Modelo ainda não suportado",
+        description: "Essa chave não é NF-e modelo 55 nem NFC-e modelo 65.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    clearResult();
+    setSource("key");
+    setLastUrl(url);
+    setAssistedKeyUrl(url);
+    setAssistedKeyPending(true);
+    setAssistedKeyStatus("waiting");
+    assistedOpenedAtRef.current = Date.now();
+    assistedAttemptedRef.current = false;
+
+    sessionStorage.setItem(
+      "preco360.receipt.assisted",
+      JSON.stringify({
+        key: keyCheck.clean,
+        url,
+        startedAt: assistedOpenedAtRef.current,
+      }),
+    );
+
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      toast({
+        title: "O navegador bloqueou a nova aba",
+        description: "Permita pop-ups para abrir a consulta oficial da SEFAZ.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    toast({
+      title: "Consulta oficial aberta",
+      description:
+        "Resolva o CAPTCHA na SEFAZ, consulte a nota e volte ao Preço 360. Ao voltar, tentarei continuar automaticamente.",
+    });
+  };
+
+  useEffect(() => {
+    const raw = sessionStorage.getItem("preco360.receipt.assisted");
+    if (!raw || assistedKeyPending) return;
+
+    try {
+      const saved = JSON.parse(raw);
+      const startedAt = Number(saved?.startedAt) || 0;
+      if (
+        !saved?.key ||
+        !saved?.url ||
+        Date.now() - startedAt > 30 * 60 * 1000
+      ) {
+        sessionStorage.removeItem("preco360.receipt.assisted");
+        return;
+      }
+
+      setAccessKey(String(saved.key));
+      setTab("key");
+      setSource("key");
+      setLastUrl(String(saved.url));
+      setAssistedKeyUrl(String(saved.url));
+      setAssistedKeyPending(true);
+      setAssistedKeyStatus("waiting");
+      assistedOpenedAtRef.current = startedAt;
+      assistedAttemptedRef.current = false;
+    } catch {
+      sessionStorage.removeItem("preco360.receipt.assisted");
+    }
+  }, [assistedKeyPending]);
+
+  useEffect(() => {
+    const resume = () => {
+      if (
+        !assistedKeyPending ||
+        !assistedKeyUrl ||
+        assistedAttemptedRef.current ||
+        Date.now() - assistedOpenedAtRef.current < 2500
+      ) {
+        return;
+      }
+
+      assistedAttemptedRef.current = true;
+      window.setTimeout(() => {
+        void tryContinueAfterCaptcha(true);
+      }, 450);
+    };
+
+    window.addEventListener("focus", resume);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") resume();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      window.removeEventListener("focus", resume);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [assistedKeyPending, assistedKeyUrl]);
+
+
 
   const importPastedPage = async () => {
     if (pageText.trim().length < 80) return;
@@ -801,11 +946,58 @@ export default function ReceiptImportPage() {
               </div>
               <Input value={accessKey} onChange={(e) => setAccessKey(extractAccessKey(e.target.value) ?? e.target.value)} placeholder="44 dígitos da chave de acesso" className="font-mono" />
               {accessKey && !keyCheck.valid && <p className="flex gap-2 text-sm text-destructive"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{keyCheck.error}</p>}
-              {keyCheck.valid && <p className="flex gap-2 text-sm text-primary"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />Chave válida · {keyCheck.uf} · {keyCheck.emitted}</p>}
-              <Button onClick={() => void importKey()} disabled={!keyCheck.valid || loading}>
-                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ReceiptText className="mr-2 h-4 w-4" />}
-                Consultar cupom
+              {keyCheck.valid && (
+                <p className="flex gap-2 text-sm text-primary">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                  {fiscalDocumentLabel(keyCheck.clean)} · {keyCheck.uf} · {keyCheck.emitted}
+                </p>
+              )}
+              {keyCheck.warning && (
+                <p className="text-sm text-amber-600">{keyCheck.warning}</p>
+              )}
+              <Button
+                onClick={openAssistedKeyConsultation}
+                disabled={!keyCheck.valid || keyKind === "unknown" || loading}
+              >
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Abrir SEFAZ e validar CAPTCHA
               </Button>
+              <p className="text-xs text-muted-foreground">
+                A chave já vai preenchida. Resolva o CAPTCHA na página oficial, consulte a nota e volte ao Preço 360.
+              </p>
+
+              {assistedKeyPending && (
+                <div className="rounded-lg border bg-muted/20 p-3">
+                  <p className="text-sm font-semibold">
+                    {assistedKeyStatus === "checking"
+                      ? "Tentando continuar a consulta…"
+                      : assistedKeyStatus === "session-required"
+                        ? "CAPTCHA concluído, mas a sessão ficou presa à aba da SEFAZ"
+                        : "Consulta oficial aberta"}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Depois de concluir o CAPTCHA e visualizar a NF-e/NFC-e, volte para esta tela. O Preço 360 tenta continuar automaticamente.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-3 w-full"
+                    disabled={loading}
+                    onClick={() => {
+                      assistedAttemptedRef.current = true;
+                      void tryContinueAfterCaptcha(false);
+                    }}
+                  >
+                    {loading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Já concluí o CAPTCHA — tentar agora
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
