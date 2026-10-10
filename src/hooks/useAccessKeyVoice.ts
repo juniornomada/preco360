@@ -179,11 +179,13 @@ export function useAccessKeyVoice() {
     const digitsForResult = (result?: SpeechResult) =>
       accessKeyDigitsFromTranscript(result?.[0]?.transcript ?? "");
 
-    const publishDigits = (sessionDigits: string) => {
+    const publishDigits = (sessionDigits: string, confirmed: boolean) => {
       const displayed = sanitizeAccessKeyDigits(
         sessionBaseDigits + sessionDigits,
       );
-      const complete = displayed.length >= ACCESS_KEY_LENGTH;
+      // Interim speech can be revised; never finish a 44-digit key based
+      // solely on an unconfirmed hypothesis.
+      const complete = confirmed && displayed.length >= ACCESS_KEY_LENGTH;
 
       lastSessionDigits = displayed.slice(sessionBaseDigits.length);
       onDigitsRef.current?.(displayed, complete);
@@ -263,7 +265,10 @@ export function useAccessKeyVoice() {
         sessionBaseDigits + finalWithinLimit,
       );
 
-      publishDigits(finalWithinLimit + interimWithinLimit);
+      publishDigits(
+        finalWithinLimit + interimWithinLimit,
+        interimWithinLimit.length === 0,
+      );
     };
 
     recognition.onerror = (event) => {
