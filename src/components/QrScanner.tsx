@@ -4,11 +4,14 @@ import {
   CameraOff,
   Image as ImageIcon,
   Loader2,
+  Minus,
+  Plus,
   ScanLine,
   Zap,
   ZapOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { decodeQrFromSource } from "@/lib/qrDecode";
 
 interface QrScannerProps {
   onResult: (text: string) => void;
@@ -39,6 +42,9 @@ type ExtendedTrackConstraintSet = MediaTrackConstraintSet & {
   focusMode?: string;
   zoom?: number;
 };
+
+type ExtendedTrackSettings = MediaTrackSettings & { zoom?: number };
+type CameraZoomRange = { min: number; max: number; step: number };
 
 type BarcodeDetectorLike = {
   detect: (
@@ -97,6 +103,8 @@ function drawRegion(
   maxSide: number,
   squareRatio?: number,
   upscale = false,
+  centerX = 0.5,
+  centerY = 0.5,
 ) {
   const { width: sourceWidth, height: sourceHeight } = getSourceSize(source);
   if (!sourceWidth || !sourceHeight) return null;
@@ -110,8 +118,8 @@ function drawRegion(
     const side = Math.min(sourceWidth, sourceHeight) * squareRatio;
     sw = side;
     sh = side;
-    sx = (sourceWidth - side) / 2;
-    sy = (sourceHeight - side) / 2;
+    sx = Math.max(0, Math.min(sourceWidth - side, sourceWidth * centerX - side / 2));
+    sy = Math.max(0, Math.min(sourceHeight - side, sourceHeight * centerY - side / 2));
   }
 
   const naturalScale = maxSide / Math.max(sw, sh);
@@ -223,6 +231,7 @@ async function decodeCanvasVariants(canvas: HTMLCanvasElement) {
 async function readQr(
   source: Source,
   thorough = false,
+  useExtraDecoders = false,
 ): Promise<string | null> {
   // BarcodeDetector can work directly on the original video/image frame.
   // Avoiding an intermediate canvas preserves maximum camera detail.
@@ -235,6 +244,8 @@ async function readQr(
     squareRatio?: number;
     upscale?: boolean;
     enhanced?: boolean;
+    centerX?: number;
+    centerY?: number;
   }> = isVideo
     ? thorough
       ? [
@@ -242,18 +253,27 @@ async function readQr(
           { maxSide: 2200, squareRatio: 0.46, upscale: true, enhanced: true },
           { maxSide: 2200, squareRatio: 0.58, upscale: true, enhanced: true },
           { maxSide: 2200, squareRatio: 0.7, upscale: true, enhanced: true },
+          // Small QR codes are not always perfectly centered in the preview.
+          { maxSide: 1800, squareRatio: 0.52, centerX: 0.28, centerY: 0.3 },
+          { maxSide: 1800, squareRatio: 0.52, centerX: 0.72, centerY: 0.3 },
+          { maxSide: 1800, squareRatio: 0.52, centerX: 0.28, centerY: 0.7 },
+          { maxSide: 1800, squareRatio: 0.52, centerX: 0.72, centerY: 0.7 },
           { maxSide: 2200, squareRatio: 0.86, enhanced: true },
           { maxSide: 2200, squareRatio: 1, enhanced: true },
           { maxSide: 2200, enhanced: true },
         ]
       : [
-          { maxSide: 1800, squareRatio: 0.58 },
+          { maxSide: 1800, squareRatio: 0.52 },
           { maxSide: 1800, squareRatio: 0.72 },
         ]
     : thorough
       ? [
           { maxSide: 2600, squareRatio: 0.5, upscale: true, enhanced: true },
           { maxSide: 2600, squareRatio: 0.7, upscale: true, enhanced: true },
+          { maxSide: 1800, squareRatio: 0.5, centerX: 0.27, centerY: 0.27, enhanced: true },
+          { maxSide: 1800, squareRatio: 0.5, centerX: 0.73, centerY: 0.27, enhanced: true },
+          { maxSide: 1800, squareRatio: 0.5, centerX: 0.27, centerY: 0.73, enhanced: true },
+          { maxSide: 1800, squareRatio: 0.5, centerX: 0.73, centerY: 0.73, enhanced: true },
           { maxSide: 2600, enhanced: true },
         ]
       : [{ maxSide: 1800 }];
@@ -264,6 +284,8 @@ async function readQr(
       attempt.maxSide,
       attempt.squareRatio,
       attempt.upscale,
+      attempt.centerX,
+      attempt.centerY,
     );
     if (!canvas) continue;
 
@@ -272,6 +294,17 @@ async function readQr(
       : await decodeCanvas(canvas);
 
     if (value) return value;
+  }
+
+  // The QR lab already includes a third decoding engine (ZXing) plus
+  // adaptive thresholding and rotations. Reserve it for explicit scans or
+  // captured photos to avoid blocking the live camera loop.
+  if (useExtraDecoders) {
+    const fallback = drawRegion(source, 1200, isVideo ? 0.75 : undefined);
+    if (fallback) {
+      const value = await decodeQrFromSource(fallback, { fast: false });
+      if (value) return value;
+    }
   }
 
   return null;
@@ -293,6 +326,9 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [zoomApplied, setZoomApplied] = useState(false);
+  const [zoomRange, setZoomRange] = useState<CameraZoomRange | null>(null);
+  const [zoomValue, setZoomValue] = useState<number | null>(null);
+  const zoomUpdatingRef = useRef(false);
 
   const stop = () => {
     if (timerRef.current !== null) {
@@ -314,6 +350,9 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     setTorchSupported(false);
     setTorchOn(false);
     setZoomApplied(false);
+    setZoomRange(null);
+    setZoomValue(null);
+    zoomUpdatingRef.current = false;
   };
 
   useEffect(() => () => stop(), []);
@@ -325,7 +364,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     onResult(value);
   };
 
-  const scanFrame = async (thorough = false) => {
+  const scanFrame = async (thorough = false, useExtraDecoders = false) => {
     const video = videoRef.current;
     if (
       !video ||
@@ -340,7 +379,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     if (thorough) setStatus("reading");
 
     try {
-      const value = await readQr(video, thorough);
+      const value = await readQr(video, thorough, useExtraDecoders);
       if (value) {
         finish(value);
       } else if (thorough) {
@@ -399,35 +438,62 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
 
     setTorchSupported(Boolean(capabilities?.torch));
 
-    const advanced: ExtendedTrackConstraintSet[] = [];
-
+    // Foco e zoom são aplicados separadamente: um foco não suportado
+    // não deve impedir o zoom de um QR impresso muito pequeno.
     if (capabilities?.focusMode?.includes("continuous")) {
-      advanced.push({ focusMode: "continuous" });
-    }
-
-    const zoom = capabilities?.zoom;
-    if (zoom && Number.isFinite(zoom.min) && Number.isFinite(zoom.max)) {
-      // A modest optical/digital zoom makes dense printed NFC-e QR codes
-      // materially larger in the video frame without forcing the user
-      // to hold the phone too close for autofocus.
-      const desiredZoom = Math.min(
-        zoom.max,
-        Math.max(zoom.min, Math.min(1.7, zoom.max)),
-      );
-
-      if (desiredZoom > zoom.min + 0.05) {
-        advanced.push({ zoom: desiredZoom });
-        setZoomApplied(true);
+      try {
+        await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+      } catch {
+        // Nem todo navegador Android aceita ajuste manual de foco.
       }
     }
 
-    if (!advanced.length) return;
+    const zoom = capabilities?.zoom;
+    if (!zoom || !Number.isFinite(zoom.min) || !Number.isFinite(zoom.max) || zoom.max <= zoom.min) {
+      return;
+    }
+
+    const step = zoom.step && zoom.step > 0 ? zoom.step : 0.1;
+    setZoomRange({ min: zoom.min, max: zoom.max, step });
+
+    const desired = Math.max(zoom.min, Math.min(zoom.max, 1.7));
+    const target = Math.min(zoom.max, Math.max(zoom.min,
+      Math.round((desired - zoom.min) / step) * step + zoom.min,
+    ));
 
     try {
-      await track.applyConstraints({ advanced });
+      await track.applyConstraints({ advanced: [{ zoom: target }] });
+      const applied = (track.getSettings() as ExtendedTrackSettings).zoom ?? target;
+      setZoomValue(applied);
+      setZoomApplied(applied > 1.05);
     } catch {
-      // Camera optimization is best-effort; scanning still works without it.
-      setZoomApplied(false);
+      // Se o zoom programático for rejeitado, segue em 1× sem bloquear a leitura.
+      setZoomRange(null);
+      setZoomValue(null);
+    }
+  };
+
+  const adjustZoom = async (direction: -1 | 1) => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track || !zoomRange || zoomValue === null || zoomUpdatingRef.current) return;
+
+    const desired = Math.max(zoomRange.min, Math.min(zoomRange.max, zoomValue + direction * 0.5));
+    const target = Math.max(zoomRange.min, Math.min(zoomRange.max,
+      Math.round((desired - zoomRange.min) / zoomRange.step) * zoomRange.step + zoomRange.min,
+    ));
+    if (Math.abs(target - zoomValue) < 0.01) return;
+
+    zoomUpdatingRef.current = true;
+    try {
+      await track.applyConstraints({ advanced: [{ zoom: target }] });
+      const applied = (track.getSettings() as ExtendedTrackSettings).zoom ?? target;
+      setZoomValue(applied);
+      setZoomApplied(applied > 1.05);
+      setMessage("Mantenha o QR inteiro e nítido dentro do quadro.");
+    } catch {
+      setMessage("O navegador não permitiu alterar o zoom. Aproxime ou afaste o cupom.");
+    } finally {
+      zoomUpdatingRef.current = false;
     }
   };
 
@@ -517,7 +583,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       image.src = url;
       await image.decode();
 
-      const value = await readQr(image, true);
+      const value = await readQr(image, true, true);
 
       if (value) {
         finish(value);
@@ -550,7 +616,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
           <>
             <Button
               size="sm"
-              onClick={() => void scanFrame(true)}
+              onClick={() => void scanFrame(true, true)}
               disabled={status === "reading"}
             >
               <ScanLine className="mr-1.5 h-4 w-4" />
@@ -570,6 +636,20 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
                 )}
                 {torchOn ? "Desligar luz" : "Ligar luz"}
               </Button>
+            )}
+
+            {zoomRange && zoomValue !== null && (
+              <div className="flex items-center gap-1">
+                <Button type="button" size="sm" variant="outline" aria-label="Diminuir zoom"
+                  onClick={() => void adjustZoom(-1)}
+                  disabled={zoomValue <= zoomRange.min + 0.05}
+                ><Minus className="h-4 w-4" /></Button>
+                <span className="min-w-10 text-center text-xs font-semibold">{zoomValue.toFixed(1)}×</span>
+                <Button type="button" size="sm" variant="outline" aria-label="Aumentar zoom"
+                  onClick={() => void adjustZoom(1)}
+                  disabled={zoomValue >= zoomRange.max - 0.05}
+                ><Plus className="h-4 w-4" /></Button>
+              </div>
             )}
 
             <Button size="sm" variant="outline" onClick={stop}>
