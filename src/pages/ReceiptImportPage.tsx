@@ -643,26 +643,9 @@ export default function ReceiptImportPage() {
       }),
     );
 
-    const opened = window.open(url, "_blank");
-    if (!opened) {
-      toast({
-        title: "O navegador bloqueou a nova aba",
-        description: "Permita pop-ups para abrir a consulta oficial da SEFAZ.",
-        variant: "destructive",
-      });
-      return;
-    }
-    try {
-      opened.opener = null;
-    } catch {
-      // Alguns navegadores móveis não permitem alterar opener entre domínios.
-    }
-
-    toast({
-      title: "Consulta oficial aberta",
-      description:
-        "Resolva o CAPTCHA na SEFAZ, consulte a nota e volte ao Preço 360. Ao voltar, tentarei continuar automaticamente.",
-    });
+    // Abre a consulta oficial na mesma aba. O estado da chave fica salvo em
+    // sessionStorage e é restaurado quando o usuário usa "Voltar" no navegador.
+    window.location.assign(url);
   };
 
   useEffect(() => {
@@ -910,23 +893,23 @@ export default function ReceiptImportPage() {
                 disabled={!keyCheck.valid || keyKind === "unknown" || loading}
               >
                 <ExternalLink className="mr-2 h-4 w-4" />
-                Abrir SEFAZ e validar CAPTCHA
+                Ir para SEFAZ e validar CAPTCHA
               </Button>
               <p className="text-xs text-muted-foreground">
-                A chave já vai preenchida. Resolva o CAPTCHA na página oficial, consulte a nota e volte ao Preço 360.
+                A chave já vai preenchida. A SEFAZ abrirá nesta mesma aba. Depois de consultar a nota, use o botão Voltar do navegador para retornar ao Preço 360.
               </p>
 
               {assistedKeyPending && (
                 <div className="rounded-lg border bg-muted/20 p-3">
                   <p className="text-sm font-semibold">
                     {assistedKeyStatus === "session-required"
-                      ? "Consulta aberta na SEFAZ"
-                      : "Consulta oficial aberta"}
+                      ? "Você voltou da consulta da SEFAZ"
+                      : "Consulta oficial preparada"}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {assistedKeyStatus === "session-required"
-                      ? "A validação do CAPTCHA fica na sessão da SEFAZ e não pode ser lida automaticamente pelo Preço 360 web. Se a nota já abriu corretamente, use a aba Arquivo para importar PDF, HTML ou imagem."
-                      : "Resolva o CAPTCHA e consulte a nota na página oficial. Ao voltar, esta chave continuará preenchida no Preço 360."}
+                      ? "A chave foi preservada. Como o CAPTCHA pertence à sessão da SEFAZ, o Preço 360 web não consegue ler automaticamente a nota já liberada. Se quiser importar os itens, use Arquivo para PDF, HTML ou imagem."
+                      : "Ao tocar no botão, a SEFAZ abrirá nesta mesma aba. Depois de consultar a nota, use Voltar no navegador; esta chave continuará preenchida."}
                   </p>
                 </div>
               )}
