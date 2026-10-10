@@ -232,6 +232,7 @@ async function readQr(
   source: Source,
   thorough = false,
   useExtraDecoders = false,
+  efficientVideoPass = false,
 ): Promise<string | null> {
   // BarcodeDetector can work directly on the original video/image frame.
   // Avoiding an intermediate canvas preserves maximum camera detail.
@@ -248,7 +249,16 @@ async function readQr(
     centerY?: number;
   }> = isVideo
     ? thorough
-      ? [
+      ? efficientVideoPass
+        ? [
+            // Prefer a few native-resolution center crops on live video.
+            // The previous automatic pass ran 25+ expensive enhancements per
+            // frame, starving autofocus, zoom and light adjustments.
+            { maxSide: 1600, squareRatio: 0.55 },
+            { maxSide: 1600, squareRatio: 0.75 },
+            { maxSide: 1500, squareRatio: 0.6, enhanced: true },
+          ]
+        : [
           // Tight crops help dense NFC-e QR codes occupy many more pixels.
           { maxSide: 2200, squareRatio: 0.46, upscale: true, enhanced: true },
           { maxSide: 2200, squareRatio: 0.58, upscale: true, enhanced: true },
@@ -345,6 +355,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
   const assistTimerRef = useRef<number | null>(null);
   const startupTimeoutRef = useRef<number | null>(null);
   const [lowLightDetected, setLowLightDetected] = useState(false);
+  const [lightSuggested, setLightSuggested] = useState(false);
   const [autoLightEnabled, setAutoLightEnabled] = useState(false);
 
   const stop = () => {
@@ -383,6 +394,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     lowLightSamplesRef.current = 0;
     assistBusyRef.current = false;
     setLowLightDetected(false);
+    setLightSuggested(false);
     zoomUpdatingRef.current = false;
   };
 
@@ -430,12 +442,12 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     if (useExtraDecoders) setStatus("reading");
     const now = performance.now();
     const deep = useExtraDecoders || (thorough &&
-      now - scanStartedAtRef.current > 4800 &&
-      now - lastDeepScanRef.current > 9000);
+      now - scanStartedAtRef.current > 6800 &&
+      now - lastDeepScanRef.current > 10000);
     if (deep) lastDeepScanRef.current = now;
 
     try {
-      const value = await readQr(video, thorough, deep);
+      const value = await readQr(video, thorough, deep, thorough && !deep);
       if (session !== scanSessionRef.current || finishedRef.current) return;
       if (value) {
         finish(value);
@@ -581,8 +593,8 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       if (
         !manualZoomRef.current && range && current !== null &&
         !zoomUpdatingRef.current &&
-        now - scanStartedAtRef.current >= 3200 &&
-        now - lastZoomStepRef.current >= 3400
+        now - scanStartedAtRef.current >= 1900 &&
+        now - lastZoomStepRef.current >= 2000
       ) {
         const ceiling = Math.min(range.max, 3);
         const target = current < 2.15 ? 2.3 : current < 2.85 ? 3 : null;
@@ -599,7 +611,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
             const applied = (track.getSettings() as ExtendedTrackSettings).zoom ?? quantized;
             zoomValueRef.current = applied;
             setZoomValue(applied);
-                  setMessage("Ajustando zoom automaticamente para encontrar um QR pequeno…");
+            setMessage("Ajustando zoom automaticamente para encontrar um QR pequeno…");
           } catch {
             // The browser may report zoom support but reject changes at runtime.
             manualZoomRef.current = true;
@@ -627,10 +639,19 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
         lumaSum += brightness;
         if (brightness < 75) darkCount += 1;
       }
-      const isDim = lumaSum / pixelCount < 90 && darkCount / pixelCount > 0.5;
+      // Printed QR codes may be underexposed even in a reasonably bright room.
+      const isDim = lumaSum / pixelCount < 110 && darkCount / pixelCount > 0.38;
       lowLightSamplesRef.current = Math.max(-2, Math.min(2, lowLightSamplesRef.current + (isDim ? 1 : -1)));
-      if (lowLightSamplesRef.current === 2) {
-        setLowLightDetected(true);
+      const elapsed = now - scanStartedAtRef.current;
+      const zoomEnough = !range || current === null ||
+        current >= Math.min(2.2, range.max) - 0.05;
+      // A stalled read is itself evidence that more local illumination
+      // could help with fine print, even when average brightness looks OK.
+      const stalledOnSmallQr = elapsed >= 4600 && zoomEnough;
+      const shouldOfferLight = lowLightSamplesRef.current >= 2 || stalledOnSmallQr;
+      if (shouldOfferLight) {
+        setLowLightDetected(lowLightSamplesRef.current >= 2);
+        setLightSuggested(true);
         if (autoLightRef.current && torchSupportedRef.current && !torchOnRef.current && !manualTorchRef.current) {
           try {
             await track.applyConstraints({ advanced: [{ torch: true } as ExtendedTrackConstraintSet] });
@@ -638,7 +659,8 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
             torchOnRef.current = true;
             autoTorchOnRef.current = true;
             setTorchOn(true);
-            setMessage("Pouca luz detectada: lanterna ativada automaticamente.");
+            setLightSuggested(false);
+            setMessage("Luz de apoio ativada para facilitar a leitura do QR pequeno.");
           } catch {
             torchSupportedRef.current = false;
             setTorchSupported(false);
@@ -646,6 +668,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
         }
       } else if (lowLightSamplesRef.current === -2) {
         setLowLightDetected(false);
+        setLightSuggested(false);
       }
     } catch {
       // Lighting samples and camera assist are best-effort only.
@@ -689,6 +712,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
     manualTorchRef.current = false;
     lowLightSamplesRef.current = 0;
     setLowLightDetected(false);
+    setLightSuggested(false);
     setMessage("Abrindo câmera…");
     setStatus("starting");
     finishedRef.current = false;
@@ -743,7 +767,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       startupTimeoutRef.current = window.setTimeout(() => void scanFrame(true), 500);
       assistTimerRef.current = window.setInterval(() => {
         if (session === scanSessionRef.current) void checkCameraAssist();
-      }, 1800);
+      }, 1000);
     } catch (error) {
       if (session !== scanSessionRef.current) return;
       stop();
@@ -772,6 +796,7 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
       });
       torchOnRef.current = next;
       setTorchOn(next);
+      if (next) setLightSuggested(false);
       setMessage(next ? "Lanterna ligada" : "Lanterna desligada");
     } catch {
       setTorchSupported(false);
@@ -914,11 +939,13 @@ export function QrScanner({ onResult, onClose }: QrScannerProps) {
         )}
       </div>
 
-      {active && lowLightDetected && torchSupported && !torchOn && !autoLightEnabled && (
+      {active && lightSuggested && torchSupported && !torchOn && !autoLightEnabled && (
         <div className="flex items-center justify-between gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-xs" role="status">
-          <span>Pouca luz detectada. A lanterna pode ajudar.</span>
-          <Button size="sm" type="button" variant="outline" onClick={toggleAutoLight}>
-            Ativar luz auto
+          <span>{lowLightDetected
+            ? "Pouca luz detectada. Iluminar o QR pode ajudar."
+            : "QR pequeno difícil de ler? A lanterna pode acelerar."}</span>
+          <Button size="sm" type="button" variant="outline" onClick={() => void toggleTorch()}>
+            Ligar luz
           </Button>
         </div>
       )}
