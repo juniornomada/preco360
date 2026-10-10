@@ -43,22 +43,12 @@ function RetailerArtwork({ logo, name }: RetailerArtworkProps) {
       <img
         src={logo}
         alt=""
-        className={cn(
-          "h-full w-full object-contain",
-          kawakami && "pb-2",
-        )}
+        className="h-full w-full object-contain"
         loading="lazy"
         decoding="async"
         onError={() => setImageFailed(true)}
       />
-      {kawakami && (
-        <span
-          className="pointer-events-none absolute inset-x-0 bottom-0 truncate text-center text-[8px] font-extrabold leading-none tracking-tight text-emerald-800"
-          aria-hidden="true"
-        >
-          Kawakami
-        </span>
-      )}
+      {/* The supplied logo already contains the full Kawakami wordmark. */}
     </span>
   );
 }
