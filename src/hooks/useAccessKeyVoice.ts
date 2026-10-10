@@ -155,7 +155,8 @@ export function useAccessKeyVoice() {
     // The browser may echo the final interim hypothesis after auto-restart.
     // Only reconcile this immediately following session, never historical digits.
     const replayGuard = replayGuardRef.current;
-    replayGuardRef.current = null;
+    // Keep this guard if recognition.start() is temporarily rejected:
+    // Android can replay the same hypothesis on a later successful retry.
 
     const recognition = new Recognition();
     recognition.lang = "pt-BR";
@@ -212,6 +213,9 @@ export function useAccessKeyVoice() {
 
     recognition.onresult = (event) => {
       if (generation !== generationRef.current) return;
+      // The next native session has finally delivered data. Its local
+      // replayGuard stays valid for revisions within this one session.
+      if (replayGuardRef.current === replayGuard) replayGuardRef.current = null;
       let finalDigits = "";
       let interimDigits = "";
 
