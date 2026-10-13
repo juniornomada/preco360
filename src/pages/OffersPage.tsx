@@ -64,6 +64,7 @@ import {
   Trophy
 } from "lucide-react";
 import {
+  cornProductKind,
   evaluateFlyerOffer,
   findComparableProducts,
   findComparablePurchaseProducts,
@@ -643,6 +644,7 @@ type OfferFamily =
   | "tomatoPeeled"
   | "cornFresh"
   | "cornGreen"
+  | "cornUnknown"
   | "cornPopcorn"
   | "coffeeGround"
   | "coffeeBeans"
@@ -660,7 +662,7 @@ type OfferFamily =
   | "alcoholDisinfectant"
   | "other";
 
-type SearchFamilyIntent = OfferFamily | "milk" | "corn" | "coffee";
+type SearchFamilyIntent = OfferFamily | "milk" | "corn" | "cornGreenBroad" | "coffee";
 
 function hasAny(tokens: Set<string>, values: string[]) {
   return values.some((value) => tokens.has(value));
@@ -758,9 +760,13 @@ function queryOfferFamily(query: string): SearchFamilyIntent | null {
     }
 
     if (hasAny(tokens, ["pipoca", "pipocas"])) return "cornPopcorn";
-    if (hasAny(tokens, ["verde", "verdes", "conserva", "vapor"])) {
+    if (hasAny(tokens, ["bandeja", "espiga", "espigas", "fresco", "fresca"])) {
+      return "cornFresh";
+    }
+    if (hasAny(tokens, ["conserva", "lata", "latas", "sache", "saches", "vapor"])) {
       return "cornGreen";
     }
+    if (hasAny(tokens, ["verde", "verdes"])) return "cornGreenBroad";
     return "corn";
   }
 
@@ -859,11 +865,11 @@ function inferOfferFamily(
   }
 
   if (/^milho\b/.test(raw)) {
-    if (/\bpipoca\b/.test(raw)) return "cornPopcorn";
-    if (/\bverde\b/.test(raw) || /\bconserva\b/.test(raw)) {
-      return "cornGreen";
-    }
-    return "cornFresh";
+    const kind = cornProductKind(item.raw_name);
+    if (kind === "popcorn") return "cornPopcorn";
+    if (kind === "fresh") return "cornFresh";
+    if (kind === "preserved") return "cornGreen";
+    return "cornUnknown";
   }
 
   // Coffee is only treated as coffee when coffee itself is the product head.
@@ -930,8 +936,9 @@ function familyLabel(family: OfferFamily) {
   if (family === "tomatoExtract") return "Extrato de tomate";
   if (family === "tomatoPassata") return "Passata";
   if (family === "tomatoPeeled") return "Tomate pelado";
-  if (family === "cornFresh") return "Milho";
-  if (family === "cornGreen") return "Milho verde";
+  if (family === "cornFresh") return "Milho verde fresco";
+  if (family === "cornGreen") return "Milho verde em conserva";
+  if (family === "cornUnknown") return "Milho (tipo não identificado)";
   if (family === "cornPopcorn") return "Milho para pipoca";
   if (family === "coffeeGround") return "Café";
   if (family === "coffeeBeans") return "Café em grão";
@@ -1142,9 +1149,13 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
     add("tomate", "tomates", "pelado", "pelados", "pelada", "peladas");
   }
 
-  if (intent === "corn") add("milho", "milhos");
-  if (intent === "cornFresh") add("milho", "milhos");
-  if (intent === "cornGreen") add("milho", "milhos", "verde", "verdes");
+  if (intent === "corn" || intent === "cornFresh" ||
+      intent === "cornGreen" || intent === "cornGreenBroad" ||
+      intent === "cornUnknown") add("milho", "milhos");
+  if (intent === "cornFresh" || intent === "cornGreen" ||
+      intent === "cornGreenBroad") add("verde", "verdes");
+  if (intent === "cornFresh") add("bandeja", "espiga", "espigas", "fresco", "fresca");
+  if (intent === "cornGreen") add("conserva", "lata", "latas", "sache", "saches", "vapor");
   if (intent === "cornPopcorn") add("milho", "milhos", "pipoca", "pipocas");
 
   if (intent === "coffee") add("cafe", "cafes");
@@ -1241,8 +1252,12 @@ function familyMatchesIntent(family: OfferFamily, intent: SearchFamilyIntent | n
     return (
       family === "cornFresh" ||
       family === "cornGreen" ||
+      family === "cornUnknown" ||
       family === "cornPopcorn"
     );
+  }
+  if (intent === "cornGreenBroad") {
+    return family === "cornFresh" || family === "cornGreen" || family === "cornUnknown";
   }
   if (intent === "coffee") {
     return (
@@ -2059,7 +2074,9 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
         : [];
 
       const previousAdvertised = linkedHistory.length
-        ? linkedHistory
+        ? linkedHistory.filter((previous) =>
+            offerReferenceFamiliesCompatible(item.raw_name, previous.raw_name) !== false,
+          )
         : historicalItems.filter((previous) =>
             comparableOfferIdentity(item, previous),
           );
@@ -2346,6 +2363,11 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     : null;
 
   const reference360 = useMemo(() => {
+    // A single historical reference for generic "milho" would pool in-natura,
+    // preserved and popcorn prices. The individual offer cards have separate
+    // histories; avoid presenting a misleading cross-type aggregate here.
+    if (queryOfferFamily(normalizedSearch) === "corn" ||
+        queryOfferFamily(normalizedSearch) === "cornGreenBroad") return null;
     const candidates: Array<{
       source: "receipt" | "shelf";
       value: number;
@@ -2410,7 +2432,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
       shelfCount: comparable.filter((item) => item.source === "shelf").length,
       values: comparable.map((item) => item.value),
     };
-  }, [matchingReceiptReferences, matchingStoreReferences, productById]);
+  }, [matchingReceiptReferences, matchingStoreReferences, productById, normalizedSearch]);
 
   const analyzed = useMemo(() => {
     if (!hasSearch || !preparedOffers.length) return [];
@@ -2693,6 +2715,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     explicitSearchFamily === null ||
     explicitSearchFamily === "milk" ||
     explicitSearchFamily === "corn" ||
+    explicitSearchFamily === "cornGreenBroad" ||
     explicitSearchFamily === "coffee" ||
     explicitSearchFamily === "beef" ||
     explicitSearchFamily === "pork" ||
