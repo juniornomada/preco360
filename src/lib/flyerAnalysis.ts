@@ -1032,20 +1032,20 @@ export type CornProductKind = "fresh" | "preserved" | "popcorn" | "unknown";
 
 export function cornProductKind(value: string): CornProductKind | null {
   const name = normalizeSearchText(value);
-  if (!/^milho\\b/.test(name)) return null;
+  if (!/^milho\b/.test(name)) return null;
 
-  if (/\\bpipoca\\b|\\bpipocas\\b/.test(name)) return "popcorn";
+  if (/\bpipoca\b|\bpipocas\b/.test(name)) return "popcorn";
 
   // Packaging/produce signals outrank the generic "verde" descriptor.
   if (
-    /\\b(?:bandeja|espiga|espigas|in natura|hortifruti|fresco|fresca)\\b/.test(name) ||
-    (/\\bfernandes\\b/.test(name) && /\\bverde\\b/.test(name)) ||
-    (/\\bfern\\b/.test(name) && /\\bbd\\b/.test(name))
+    /\b(?:bandeja|espiga|espigas|in natura|hortifruti|fresco|fresca)\b/.test(name) ||
+    (/\bfernandes\b/.test(name) && /\bverde\b/.test(name)) ||
+    (/\bfern\b/.test(name) && /\bbd\b/.test(name))
   ) return "fresh";
 
   if (
-    /\\b(?:conserva|lata|latas|sache|saches|enlatado|enlatada|vapor|vidro)\\b/.test(name) ||
-    /\\b(?:fugini|predilecta|salsaretti|quero|bonare|bulnez|stella d oro)\\b/.test(name)
+    /\b(?:conserva|lata|latas|sache|saches|enlatado|enlatada|vapor|vidro)\b/.test(name) ||
+    /\b(?:fugini|predilecta|salsaretti|quero|bonare|bulnez|stella d oro)\b/.test(name)
   ) return "preserved";
 
   // Names that only say "milho verde" or omit the package are ambiguous:
