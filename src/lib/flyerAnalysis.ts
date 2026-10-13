@@ -1023,6 +1023,36 @@ function milkVariant(tokens: string[]) {
   return "generico";
 }
 
+/**
+ * Milho verde in natura (bandeja/espiga) and milho verde em conserva have
+ * fundamentally different price histories, even when both are sold by kg.
+ * Unknown packaging stays separate until there is reliable evidence.
+ */
+export type CornProductKind = "fresh" | "preserved" | "popcorn" | "unknown";
+
+export function cornProductKind(value: string): CornProductKind | null {
+  const name = normalizeSearchText(value);
+  if (!/^milho\b/.test(name)) return null;
+
+  if (/\bpipoca\b|\bpipocas\b/.test(name)) return "popcorn";
+
+  // Packaging/produce signals outrank the generic "verde" descriptor.
+  if (
+    /\b(?:bandeja|espiga|espigas|in natura|hortifruti|fresco|fresca)\b/.test(name) ||
+    (/\bfernandes\b/.test(name) && /\bverde\b/.test(name)) ||
+    (/\bfern\b/.test(name) && /\bbd\b/.test(name))
+  ) return "fresh";
+
+  if (
+    /\b(?:conserva|lata|latas|sache|saches|enlatado|enlatada|vapor|vidro)\b/.test(name) ||
+    /\b(?:fugini|predilecta|salsaretti|quero|bonare|bulnez|stella d oro)\b/.test(name)
+  ) return "preserved";
+
+  // Names that only say "milho verde" or omit the package are ambiguous:
+  // do not infer fresh vs canned from weight alone.
+  return "unknown";
+}
+
 function purchaseComparisonKey(value: string) {
   const t = comparisonTokens(value);
   if (!t.length) return null;
@@ -1043,8 +1073,12 @@ function purchaseComparisonKey(value: string) {
   if (startsComparison(t, "doce", "leite")) return "leite:doce";
 
   if (startsComparison(t, "milho")) {
-    if (hasComparisonToken(t, "pipoca")) return "milho:pipoca";
-    if (hasComparisonToken(t, "verde")) return "milho:verde";
+    const kind = cornProductKind(value);
+    if (kind === "popcorn") return "milho:pipoca";
+    if (kind === "fresh") return "milho:verde:fresco";
+    if (kind === "preserved") return "milho:verde:conserva";
+    // Never let an unqualified corn name bridge fresh and canned histories.
+    return "milho:verde:desconhecido";
   }
 
   if (startsComparison(t, "cafe")) {
@@ -1458,6 +1492,13 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
       .map((entry) => entry!.normalizedPrice),
   );
   const advertised = previousAdvertised
+    // Enforce subtype compatibility at the point of evaluation as well.
+    // Prevent any caller (including a linked product_id) from reusing a
+    // canned-corn price as the benchmark for fresh tray corn.
+    .filter((entry) =>
+      !entry.raw_name ||
+      offerReferenceFamiliesCompatible(candidate.rawName, entry.raw_name) !== false,
+    )
     .map((entry) => {
       const regularPrice = Number(entry.advertised_price);
       const clubPrice = Number(entry.club_advertised_price);
