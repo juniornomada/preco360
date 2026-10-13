@@ -1492,6 +1492,13 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
       .map((entry) => entry!.normalizedPrice),
   );
   const advertised = previousAdvertised
+    // Enforce subtype compatibility at the point of evaluation as well.
+    // Prevent any caller (including a linked product_id) from reusing a
+    // canned-corn price as the benchmark for fresh tray corn.
+    .filter((entry) =>
+      !entry.raw_name ||
+      offerReferenceFamiliesCompatible(candidate.rawName, entry.raw_name) !== false,
+    )
     .map((entry) => {
       const regularPrice = Number(entry.advertised_price);
       const clubPrice = Number(entry.club_advertised_price);
