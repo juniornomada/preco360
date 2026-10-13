@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  cornProductKind,
+  evaluateFlyerOffer,
   inferPackage,
   offerPackageInfo,
   offerReferenceFamiliesCompatible,
@@ -155,5 +157,83 @@ describe("offer reference normalization", () => {
       "Papel Higiênico Duetto Folha Dupla 16un",
     );
     expect(offerReferenceRequiresKnownCount(key)).toBe(true);
+  });
+});
+
+describe("milho verde: bandeja fresca versus conserva", () => {
+  const fernandes = "Milho Verde Fernandes 600g";
+  const tray = "Milho Verde Fernandes bandeja/600g";
+  const canned = "Milho Verde Stella D'Oro Sachê 170g";
+  const lata = "Milho Verde Salsaretti lata 170g";
+
+  it("classifies real offers and safeguards ambiguous names", () => {
+    expect(cornProductKind(fernandes)).toBe("fresh");
+    expect(cornProductKind(tray)).toBe("fresh");
+    expect(cornProductKind("Milho Verde bandeja ou Quiabo Fernandes bandeja 600g")).toBe("fresh");
+    expect(cornProductKind(canned)).toBe("preserved");
+    expect(cornProductKind(lata)).toBe("preserved");
+    expect(cornProductKind("Milho Verde Predilecta 170g")).toBe("preserved");
+    expect(cornProductKind("Milho para Pipoca Yoki Premium 400g")).toBe("popcorn");
+    expect(cornProductKind("Milho Verde 500g")).toBe("unknown");
+  });
+
+  it("uses separate identities for fresh, canned, unknown and popcorn", () => {
+    expect(offerReferenceFamilyKey(fernandes)).toBe("milho:verde:fresco");
+    expect(offerReferenceFamilyKey(canned)).toBe("milho:verde:conserva");
+    expect(offerReferenceFamilyKey("Milho Verde 500g")).toBe("milho:verde:desconhecido");
+    expect(offerReferenceFamilyKey("Milho para Pipoca Yoki Premium 400g")).toBe("milho:pipoca");
+  });
+
+  it("does not mix conserved historical price per kg with fresh corn", () => {
+    expect(offerReferenceFamiliesCompatible(fernandes, canned)).toBe(false);
+    expect(offerReferenceFamiliesCompatible(fernandes, lata)).toBe(false);
+    expect(offerReferenceFamiliesCompatible(tray, fernandes)).toBe(true);
+    expect(offerReferenceFamiliesCompatible(canned, lata)).toBe(true);
+    expect(offerReferenceFamiliesCompatible(fernandes, "Milho Verde 500g")).toBe(false);
+  });
+
+  it("evaluates Fernandes using tray prices, not 170g canned products", () => {
+    const pack = inferPackage("600g")!;
+    const candidate = {
+      rawName: fernandes,
+      price: 5.98,
+      packageInfo: pack,
+      normalizedPrice: 5.98 / 0.6,
+      baseUnit: "kg" as const,
+      clubPrice: false,
+      sourcePage: 1,
+    };
+    const historical = [
+      { raw_name: "Milho Verde Fernandes bandeja/600g", advertised_price: 4.98, normalized_price: 8.3, package_quantity: 600, package_unit: "g" },
+      { raw_name: "Milho Verde Fernandes 600g", advertised_price: 5.98, normalized_price: 5.98 / 0.6, package_quantity: 600, package_unit: "g" },
+      { raw_name: "Milho Verde Predilecta 170g", advertised_price: 2.75, normalized_price: 2.75 / 0.17, package_quantity: 170, package_unit: "g" },
+      { raw_name: canned, advertised_price: 2.38, normalized_price: 2.38 / 0.17, package_quantity: 170, package_unit: "g" },
+    ];
+
+    const verdict = evaluateFlyerOffer(candidate, null, historical);
+    expect(verdict.advertisedCount).toBe(2);
+    expect(verdict.referencePrice).toBeCloseTo((8.3 + 5.98 / 0.6) / 2);
+    expect(verdict.referencePrice).not.toBeCloseTo(2.75 / 0.17);
+  });
+
+  it("gives no false history if only canned references are available", () => {
+    const candidate = {
+      rawName: fernandes,
+      price: 5.98,
+      packageInfo: inferPackage("600g")!,
+      normalizedPrice: 5.98 / 0.6,
+      baseUnit: "kg" as const,
+      clubPrice: false,
+      sourcePage: 1,
+    };
+    const verdict = evaluateFlyerOffer(candidate, null, [{
+      raw_name: "Milho Verde Predilecta lata 170g",
+      advertised_price: 2.75,
+      normalized_price: 2.75 / 0.17,
+      package_quantity: 170,
+      package_unit: "g",
+    }]);
+    expect(verdict.key).toBe("unknown");
+    expect(verdict.referencePrice).toBeNull();
   });
 });
