@@ -2849,11 +2849,47 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
   );
 
   const listedAnalyzed = useMemo(() => {
-    if (!bestCurrentOffer || resultFamilyCount !== 1) return visibleAnalyzed;
+    if (!bestCurrentOffer || resultFamilyCount !== 1 ||
+      (isBananaFruitQuery(normalizedSearch) && bestCurrentOffer.family === "bananaRelated")
+    ) return visibleAnalyzed;
     return visibleAnalyzed.filter(
       (entry) => entry.item.id !== bestCurrentOffer.item.id,
     );
-  }, [bestCurrentOffer, resultFamilyCount, visibleAnalyzed]);
+  }, [bestCurrentOffer, resultFamilyCount, visibleAnalyzed, normalizedSearch]);
+
+  const broadMilkHistory = isGenericMilkQuery(normalizedSearch);
+  const broadBananaFruit = isBananaFruitQuery(normalizedSearch);
+  const freshBananaOffers = analyzed.filter((entry) => entry.family === "bananaFresh");
+  const bananaRelatedOnly =
+    broadBananaFruit &&
+    freshBananaOffers.length === 0 &&
+    analyzed.some((entry) => entry.family === "bananaRelated");
+
+  // Pick the latest receipt separately for each subtype, never by the newest
+  // matching word alone (e.g. Yakult should not hide integral milk).
+  const receiptHistoryByKind = useMemo(() => {
+    if (!isGenericMilkQuery(normalizedSearch) && !isBananaFruitQuery(normalizedSearch)) return [];
+    const latest = new Map<string, {row:PurchasePriceRow;name:string;kind:string}>();
+    for(const row of matchingReceiptReferences){
+      const product=productById.get(row.product_id);
+      if(!product) continue;
+      const kind = isGenericMilkQuery(normalizedSearch)
+        ? productReferenceFamily(product)
+        : isFruitBananaProduct(product.name) ? "bananaFresh" : "bananaRelated";
+      if(isBananaFruitQuery(normalizedSearch) && kind!=="bananaFresh") continue;
+      const existing=latest.get(kind);
+      if(!existing || String(row.date??"")>String(existing.row.date??"")){
+        latest.set(kind,{row,name:product.name,kind});
+      }
+    }
+    const rank:Record<string,number>={
+      milkLiquid:0,bananaFresh:0,milkPowder:1,milkCondensed:2,
+      milkFermented:3,milkCream:4,milkCreamNata:5,milkCoconut:6,milkSweet:7
+    };
+    return [...latest.values()].sort((a,b)=>
+      (rank[a.kind]??100)-(rank[b.kind]??100)
+    ).slice(0,8);
+  },[matchingReceiptReferences,productById,normalizedSearch]);
 
   const activeFlyerCount = activeFlyers.length;
   const allActiveOfferCount = activeOfferCount;
@@ -2933,11 +2969,77 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
       />
       )}
 
+      {hasSearch && !isLoading && !error && broadBananaFruit && (
+        <section className="mb-4 rounded-2xl border border-primary/25 bg-primary/[0.05] p-3">
+          <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+            Banana fruta (in natura)
+          </p>
+          <p className="mt-1 text-sm font-semibold">
+            {freshBananaOffers.length
+              ? `${freshBananaOffers.length} oferta(s) vigente(s) da fruta`
+              : "Nenhuma oferta vigente da fruta encontrada"}
+          </p>
+          {receiptHistoryByKind.filter((entry)=>entry.kind==="bananaFresh").map((entry)=> {
+            const reference=purchaseReferenceValue(entry.row,productById.get(entry.row.product_id));
+            return (
+              <div key={entry.row.product_id} className="mt-2 rounded-xl border border-border/70 bg-card/60 p-3">
+                <p className="text-xs font-bold">Último pago — {entry.name}</p>
+                <p className="mt-1 text-lg font-extrabold text-foreground">
+                  {reference && reference.baseUnit === "kg"
+                    ? formatNormalizedPrice(reference.value,"kg")
+                    : brl(Number(entry.row.price))}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {canonicalRetailerName(entry.row.supermarket)||entry.row.supermarket||"Supermercado"}
+                  {entry.row.date ? ` · ${dateBr(entry.row.date)}` : ""}
+                </p>
+              </div>
+            );
+          })}
+          {bananaRelatedOnly && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              As ofertas abaixo são de produtos que contêm banana, mas não são a fruta.
+              Seus preços por kg não podem ser comparados aos da banana in natura.
+            </p>
+          )}
+        </section>
+      )}
+
+      {hasSearch && !isLoading && !error && broadMilkHistory && receiptHistoryByKind.length>0 && (
+        <section className="mb-4 rounded-2xl border border-border bg-card/50 p-3">
+          <h2 className="text-sm font-extrabold">Histórico de compras por tipo de leite</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Leite integral, fermentado, em pó e outros tipos têm referências separadas.
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {receiptHistoryByKind.map((entry)=>{
+              const reference=purchaseReferenceValue(entry.row,productById.get(entry.row.product_id));
+              return (
+                <div key={entry.kind} className="rounded-xl border border-border/70 bg-background/35 p-3">
+                  <p className="text-xs font-extrabold">{familyLabel(entry.kind as OfferFamily)}</p>
+                  <p className="mt-1 text-sm font-bold">{entry.name}</p>
+                  <p className="mt-1 text-lg font-black">
+                    {reference && reference.baseUnit!=="un"
+                      ? formatNormalizedPrice(reference.value,reference.baseUnit)
+                      : brl(Number(entry.row.price))}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {canonicalRetailerName(entry.row.supermarket)||entry.row.supermarket||"Supermercado"}
+                    {entry.row.date ? ` · ${dateBr(entry.row.date)}` : ""}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {hasSearch &&
         !isLoading &&
         !error &&
         bestCurrentOffer &&
-        resultFamilyCount === 1 && (() => {
+        resultFamilyCount === 1 &&
+        !bananaRelatedOnly && (() => {
           const quickItem = bestCurrentOffer.item;
           const quickCandidate = bestCurrentOffer.candidate;
           const quickPack = packageLabel(quickItem);
@@ -3219,13 +3321,15 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                 {hasSearch
-                  ? resultFamilyCount === 1 && bestCurrentOffer
-                    ? "Outras ofertas vigentes"
-                    : "Ofertas vigentes"
+                  ? bananaRelatedOnly
+                    ? "Produtos relacionados (não são a fruta)"
+                    : resultFamilyCount === 1 && bestCurrentOffer
+                      ? "Outras ofertas vigentes"
+                      : "Ofertas vigentes"
                   : "Melhores oportunidades vigentes"}
               </p>
               <p className="text-sm font-bold">
-                {resultFamilyCount === 1 && bestCurrentOffer
+                {resultFamilyCount === 1 && bestCurrentOffer && !bananaRelatedOnly
                   ? packageFilters.length === 0
                     ? `${listedAnalyzed.length} outra(s) oferta(s)`
                     : `${listedAnalyzed.length} outra(s) de ${visibleAnalyzed.length} nas embalagens selecionadas`
@@ -3295,7 +3399,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                   : null;
             const isFamilyBest =
               bestOfferByFamily.get(entry.family) === item.id;
-            const isTopResult = isBroadFamilySearch
+            const isTopResult = bananaRelatedOnly ? false : isBroadFamilySearch
               ? hasSearch && isFamilyBest
               : hasSearch && resultFamilyCount !== 1 && index === 0;
             const bestLabel = isBroadFamilySearch
