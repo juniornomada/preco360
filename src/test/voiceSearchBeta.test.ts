@@ -22,6 +22,14 @@ describe("normalizeVoiceSearchBetaTranscript", () => {
     expect(normalizeVoiceSearchBetaTranscript("Colchão mole.")).toBe("coxão mole");
   });
 
+  it("normalizes caqui variants from speech only", () => {
+    expect(normalizeVoiceSearchBetaTranscript("Kaqui.")).toBe("caqui");
+    expect(normalizeVoiceSearchBetaTranscript("Kaki.")).toBe("caqui");
+    expect(normalizeVoiceSearchBetaTranscript("Cacique.")).toBe("caqui");
+    expect(normalizeVoiceSearchBetaTranscript("Caqui.")).toBe("Caqui");
+    expect(normalizeVoiceSearchBetaTranscript("Cacique Café")).toBe("Cacique Café");
+  });
+
   it("normalizes specialty butcher names from observed ASR output", () => {
     expect(normalizeVoiceSearchBetaTranscript("Entrecô.")).toBe("Entrecot");
     expect(normalizeVoiceSearchBetaTranscript("Novax.")).toBe("Noix");
