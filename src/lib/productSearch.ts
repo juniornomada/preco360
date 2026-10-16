@@ -35,6 +35,7 @@ export function normalizeProductSearchText(value: string) {
     .replace(/\balcool\s+(?:zero|0\s*[.,]?\s*0?)\b/g, "sem alcool")
     .replace(/\bsem\s+alcool\b/g, "sem alcool")
     .replace(/\b(?:suco|refresco)\s+em\s+po\b/g, "refresco em po")
+    .replace(/\b(?:kaqui|kaki)\b/g, "caqui")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }

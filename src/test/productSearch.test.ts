@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { productMatchesSearch } from "@/lib/productSearch";
+import { productMatchesSearch, productSearchTokens, normalizeProductSearchText } from "@/lib/productSearch";
 
 describe("productMatchesSearch", () => {
   it("does not match leite against an unrelated 5 L product", () => {
@@ -60,5 +60,14 @@ describe("Poncan search aliases", () => {
     for (const variant of variants) {
       expect(productSearchTokens(variant)).toEqual(["poncan"]);
     }
+  });
+});
+
+describe("fruit-name ASR aliases", () => {
+  it("recognizes kaqui as caqui without misclassifying unrelated typed words", () => {
+    expect(normalizeProductSearchText("Kaqui")).toBe("caqui");
+    expect(productSearchTokens("kaki")).toEqual(["caqui"]);
+    expect(productMatchesSearch("Caqui Fruta 1kg", "kaqui")).toBe(true);
+    expect(normalizeProductSearchText("Cacique")).toBe("cacique");
   });
 });
