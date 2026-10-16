@@ -718,7 +718,13 @@ function queryOfferFamily(query: string): SearchFamilyIntent | null {
   }
 
   if (isGenericMilkQuery(query)) return "milk";
-  if (hasAny(tokens, ["banana", "bananas"]) && isBananaFruitQuery(query)) return "banana";
+  if (hasAny(tokens, ["banana", "bananas"])) {
+    if (isBananaFruitQuery(query)) return "banana";
+    // A named cultivar is always the fruit, not a banana-flavored bar.
+    if (hasAny(tokens, ["maca", "prata", "nanica", "terra", "caturra"])) {
+      return "bananaFresh";
+    }
+  }
   if (hasMilk) {
     if (hasAny(tokens, ["bolo", "bolos"])) return "cake";
     if (
@@ -1157,6 +1163,7 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   if (intent === "milkCoconut") add("leite", "leites", "coco");
   if (intent === "milkSweet") add("doce", "doces", "leite", "leites");
   if (intent === "banana") add("banana", "bananas", "fruta", "frutas");
+  if (intent === "bananaFresh") add("banana", "bananas");
 
   if (intent === "tomatoFresh") add("tomate", "tomates");
   if (intent === "tomatoSauce") add("molho", "molhos", "tomate", "tomates");
@@ -1322,7 +1329,8 @@ function matchesSearch(
     source.some((token) =>
       token === needle ||
       token.includes(needle) ||
-      (needle.length >= 4 && token.length >= 3 && needle.startsWith(token)),
+      (needle.length >= 4 && token.length >= 4 &&
+        needle.startsWith(token) && needle.length - token.length <= 2),
     ),
   );
 }
@@ -2485,8 +2493,9 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
           token === needle ||
           token.includes(needle) ||
           (needle.length >= 4 &&
-            token.length >= 3 &&
-            needle.startsWith(token)),
+            token.length >= 4 &&
+            needle.startsWith(token) &&
+            needle.length - token.length <= 2),
         ),
       );
     });
