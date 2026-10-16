@@ -13,6 +13,13 @@ import {
   productSearchRequestVariants,
 } from "@/lib/productSearch";
 import ProductVisual from "@/components/ProductVisual";
+import {
+  bananaProductKind,
+  isBananaFruitQuery,
+  isFruitBananaProduct,
+  isGenericMilkQuery,
+  milkProductKind,
+} from "@/lib/offerProductKinds";
 import RetailerLogo from "@/components/RetailerLogo";
 import {
   BEEF_SEMANTIC_TOKENS,
@@ -608,9 +615,12 @@ function searchTokens(value: string) {
     "kinino",
   );
 
-  return normalizeSearchText(voiceAliasNormalized)
+  const normalized = normalizeProductSearchText(voiceAliasNormalized);
+  const isBananaFruit = isBananaFruitQuery(normalized);
+  return normalizeSearchText(normalized)
     .split(/\s+/)
     .filter(Boolean)
+    .filter((token) => !isBananaFruit || (token !== "fruta" && token !== "frutas"))
     .map((token) => {
       if (["refri", "refr"].includes(token)) return "refrigerante";
       if (["qj", "qjo"].includes(token)) return "queijo";
@@ -637,6 +647,8 @@ type OfferFamily =
   | "milkFermented"
   | "milkCoconut"
   | "milkSweet"
+  | "bananaFresh"
+  | "bananaRelated"
   | "tomatoFresh"
   | "tomatoSauce"
   | "tomatoExtract"
@@ -662,7 +674,7 @@ type OfferFamily =
   | "alcoholDisinfectant"
   | "other";
 
-type SearchFamilyIntent = OfferFamily | "milk" | "corn" | "cornGreenBroad" | "coffee";
+type SearchFamilyIntent = OfferFamily | "milk" | "banana" | "corn" | "cornGreenBroad" | "coffee";
 
 function hasAny(tokens: Set<string>, values: string[]) {
   return values.some((value) => tokens.has(value));
@@ -705,6 +717,8 @@ function queryOfferFamily(query: string): SearchFamilyIntent | null {
     return "powderedDrink";
   }
 
+  if (isGenericMilkQuery(query)) return "milk";
+  if (hasAny(tokens, ["banana", "bananas"]) && isBananaFruitQuery(query)) return "banana";
   if (hasMilk) {
     if (hasAny(tokens, ["bolo", "bolos"])) return "cake";
     if (
@@ -848,11 +862,13 @@ function inferOfferFamily(
   if (/^doce de leite\b/.test(raw)) return "milkSweet";
 
   if (/^leite\b/.test(raw)) {
-    if (/\bpo\b/.test(raw)) return "milkPowder";
-    if (isVolume) return "milkLiquid";
-    if (isWeight) return "milkPowder";
-    return "milkLiquid";
+    // Receipts abbreviate "LEITE F YAKULT" and "LEITE COND. MOCA".
+    // Classify the actual product, not its container's weight alone.
+    return milkProductKind(raw) ?? "milkLiquid";
   }
+
+  const bananaKind = bananaProductKind(raw);
+  if (bananaKind) return bananaKind;
 
   if (/^molho\b/.test(raw) && /\btomate\b/.test(raw)) return "tomatoSauce";
   if (/^extrato (?:de )?tomate\b/.test(raw)) return "tomatoExtract";
@@ -931,6 +947,8 @@ function familyLabel(family: OfferFamily) {
   if (family === "milkFermented") return "Leite fermentado";
   if (family === "milkCoconut") return "Leite de coco";
   if (family === "milkSweet") return "Doce de leite";
+  if (family === "bananaFresh") return "Banana fruta (in natura)";
+  if (family === "bananaRelated") return "Produto com banana (não é fruta in natura)";
   if (family === "tomatoFresh") return "Tomate";
   if (family === "tomatoSauce") return "Molho de tomate";
   if (family === "tomatoExtract") return "Extrato de tomate";
@@ -1138,6 +1156,7 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   }
   if (intent === "milkCoconut") add("leite", "leites", "coco");
   if (intent === "milkSweet") add("doce", "doces", "leite", "leites");
+  if (intent === "banana") add("banana", "bananas", "fruta", "frutas");
 
   if (intent === "tomatoFresh") add("tomate", "tomates");
   if (intent === "tomatoSauce") add("molho", "molhos", "tomate", "tomates");
@@ -1246,7 +1265,13 @@ function storeReferenceFamily(row: StoreReferenceRow): OfferFamily {
 function familyMatchesIntent(family: OfferFamily, intent: SearchFamilyIntent | null) {
   if (!intent) return true;
   if (intent === "milk") {
-    return family === "milkLiquid" || family === "milkPowder";
+    return [
+      "milkLiquid", "milkPowder", "milkCondensed", "milkFermented",
+      "milkCream", "milkCreamNata", "milkCoconut", "milkSweet",
+    ].includes(family);
+  }
+  if (intent === "banana") {
+    return family === "bananaFresh" || family === "bananaRelated";
   }
   if (intent === "corn") {
     return (
@@ -2141,7 +2166,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
       .filter((product) =>
         productMatchesSearch(
           `${product.name} ${product.brand ?? ""} ${product.category ?? ""}`,
-          normalizedSearch,
+          isBananaFruitQuery(normalizedSearch) ? "banana" : normalizedSearch,
         ),
       )
       .map((product) => product.id)
@@ -2335,9 +2360,14 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
 
         return familyMatchesIntent(productReferenceFamily(product), queryFamily);
       })
-      .sort((a, b) =>
-        String(b.date ?? "").localeCompare(String(a.date ?? "")),
-      );
+      .sort((a, b) => {
+        if (queryFamily === "milk") {
+          const aLiquid = productReferenceFamily(productById.get(a.product_id)!) === "milkLiquid";
+          const bLiquid = productReferenceFamily(productById.get(b.product_id)!) === "milkLiquid";
+          if (aLiquid !== bLiquid) return aLiquid ? -1 : 1;
+        }
+        return String(b.date ?? "").localeCompare(String(a.date ?? ""));
+      });
   }, [
     directSearchProductIds,
     normalizedSearch,
@@ -2367,7 +2397,9 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     // preserved and popcorn prices. The individual offer cards have separate
     // histories; avoid presenting a misleading cross-type aggregate here.
     if (queryOfferFamily(normalizedSearch) === "corn" ||
-        queryOfferFamily(normalizedSearch) === "cornGreenBroad") return null;
+        queryOfferFamily(normalizedSearch) === "cornGreenBroad" ||
+        queryOfferFamily(normalizedSearch) === "milk" ||
+        queryOfferFamily(normalizedSearch) === "banana") return null;
     const candidates: Array<{
       source: "receipt" | "shelf";
       value: number;
@@ -2714,6 +2746,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
   const isBroadFamilySearch =
     explicitSearchFamily === null ||
     explicitSearchFamily === "milk" ||
+    explicitSearchFamily === "banana" ||
     explicitSearchFamily === "corn" ||
     explicitSearchFamily === "cornGreenBroad" ||
     explicitSearchFamily === "coffee" ||
