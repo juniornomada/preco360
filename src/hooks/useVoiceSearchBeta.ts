@@ -124,10 +124,26 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     ["kaki", "caqui"],
     // Only in the VOICE path: "cacique" is a genuine written product/brand.
     ["cacique", "caqui"],
+    // Observed Whisper/Groq transcripts for the same spoken word.
+    ["midium", "milho"],
+    ["medio", "milho"],
+    ["minio", "milho"],
+    ["mil io", "milho"],
+    ["milio", "milho"],
+    ["mido", "milho"],
+    ["banana massa", "banana maçã"],
+    ["moricote", "murcote"],
+    ["morgote", "murcote"],
   ]);
 
   const knownCorrection = knownAsrCorrections.get(key);
   if (knownCorrection) return knownCorrection;
+
+  // Two-word speech output is also observed as "Mílio Verde".
+  // Avoid globally rewriting the common word "médio" in product names:
+  // corrections above apply only to short, standalone voice requests.
+  if (key === "milio verde" || key === "minio verde" ||
+      key === "mido verde") return "milho verde";
 
   // Whisper can confuse the supermarket cut "coxão duro" with acoustically
   // similar phrases. Keep this correction intentionally narrow so a genuine
@@ -471,6 +487,9 @@ export function useVoiceSearchBeta() {
             ...PONCAN_CONTEXT_PHRASES.map((phrase) => new Phrase(phrase, 3)),
             new Phrase("caqui", 4),
             new Phrase("caqui fruta", 3),
+            new Phrase("milho verde", 3),
+            new Phrase("banana maçã", 3),
+            new Phrase("murcote", 3),
           ];
         } catch (phraseError) {
           console.debug("Poncan contextual bias unavailable", phraseError);
