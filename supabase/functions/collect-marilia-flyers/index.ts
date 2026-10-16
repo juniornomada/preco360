@@ -1194,6 +1194,100 @@ async function collectSwift(report:any[]){
   }
 }
 
+
+/**
+ * A cron HTTP 200 only confirms that discovery ran. Flyer pages run in
+ * background and can remain failed/stuck after a transient Gemini 503.
+ * Follow-ups recover at most two still-valid jobs at a time, reusing their
+ * stored source and already processed pages rather than importing duplicates.
+ */
+async function recoverIncompleteScheduledFlyers(db:any, report:any[]) {
+  const now=new Date();
+  const cutoff=new Date(now.getTime()-45*60*1000).toISOString();
+  const recent=new Date(now.getTime()-7*24*60*60*1000).toISOString();
+  const parts=new Intl.DateTimeFormat("en-US",{
+    timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit",
+  }).formatToParts(now);
+  const datePart=(type:string)=>parts.find((part)=>part.type===type)?.value??"";
+  const today=[datePart("year"),datePart("month"),datePart("day")].join("-");
+  const {data:jobs,error}=await db.from("flyer_import_jobs")
+    .select("id,user_id,status,updated_at,created_at,retailer,source_file_name,file_hash,page_count,valid_to,result")
+    .eq("user_id",USER_ID)
+    .in("status",["failed","queued","processing","refining"])
+    .gte("created_at",recent)
+    .lt("updated_at",cutoff)
+    .order("updated_at",{ascending:false})
+    .limit(30);
+  if(error){
+    report.push({retailer:"Sistema",result:"erro na verificação de jobs incompletos",error:error.message});
+    return;
+  }
+
+  let resumed=0;
+  for(const job of jobs??[]){
+    if(resumed>=2) break;
+    const oldResult=job.result??{};
+    if(oldResult.auto_import!==true) continue;
+    const validTo=String(oldResult.valid_to??job.valid_to??"");
+    // Never spend AI quota on an expired flyer.
+    if(validTo && /^\d{4}-\d{2}-\d{2}$/.test(validTo) && validTo<today) continue;
+    const count=Math.max(0,Math.trunc(Number(oldResult.scheduled_recovery_attempts)||0));
+    if(count>=3) continue;
+    const total=Math.max(1,Math.trunc(Number(job.page_count)||1));
+    const completed=new Set(Array.isArray(oldResult.processed_pages)
+      ? oldResult.processed_pages.map((page:any)=>Number(page)):[]);
+    const pending=Array.from({length:total},(_,i)=>i+1).filter(page=>!completed.has(page));
+    if(!pending.length) continue;
+
+    // If the same content was successfully saved under another job, do not
+    // resurrect the old import. Rechecks stay idempotent at the flyer level.
+    if(job.file_hash){
+      const {data:saved,error:savedError}=await db.from("flyers")
+        .select("id").eq("user_id",USER_ID).eq("file_hash",job.file_hash).limit(1);
+      if(savedError||saved?.length) continue;
+    }
+
+    const retries={...(oldResult.page_retry_counts??{})};
+    for(const page of pending) delete retries[String(page)];
+    const nextResult={
+      ...oldResult,
+      page_retry_counts:retries,
+      scheduled_recovery_attempts:count+1,
+      scheduled_recovery_at:now.toISOString(),
+    };
+    // Optimistic guard: do not reset a job that progressed during the scan.
+    const {data:claimed,error:claimError}=await db.from("flyer_import_jobs")
+      .update({status:"queued",result:nextResult,progress_label:"Recuperação automática de páginas pendentes…",error_message:null,completed_at:null})
+      .eq("id",job.id).eq("user_id",USER_ID)
+      .eq("status",job.status).eq("updated_at",job.updated_at)
+      .select("id").maybeSingle();
+    if(claimError||!claimed) continue;
+    resumed++;
+    try{
+      const response=await fetch(Deno.env.get("SUPABASE_URL")+"/functions/v1/process-flyer-job",{
+        method:"POST",
+        headers:{
+          authorization:"Bearer "+Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
+          "content-type":"application/json",
+        },
+        body:JSON.stringify({job_id:job.id,mode:"resume"}),
+      });
+      report.push({
+        retailer:job.retailer||"Sistema",
+        title:job.source_file_name,
+        result:response.ok?"recuperação automática iniciada":"falha ao iniciar recuperação",
+        job_id:job.id,remaining_pages:pending,error:response.ok?null:"worker HTTP "+response.status,
+      });
+    }catch(error){
+      report.push({
+        retailer:job.retailer||"Sistema",title:job.source_file_name,
+        result:"falha ao iniciar recuperação",job_id:job.id,
+        error:error instanceof Error?error.message:String(error),
+      });
+    }
+  }
+}
+
 Deno.serve(async(req)=>{
  if(req.method==="OPTIONS") return new Response("ok",{headers:corsHeaders});
  if(req.method!=="POST")return new Response("POST only",{status:405,headers:corsHeaders});
@@ -1359,6 +1453,15 @@ Deno.serve(async(req)=>{
   }
   if(!handled) report.push({retailer:src.retailer,endpoint:used,validity:val,result:links.length?"erro":"sem asset oficial obtível com segurança",files:0,offers:0,error:err||null});
   else report.push({retailer:src.retailer,endpoint:used,result:"resumo",found:links.length,imported,unchanged,failed});
+ }
+ // Follow-ups can also resume valid background jobs that outlived the
+ // previous scheduled collection. Keep manual and 9am runs unchanged.
+ if(body?.recheck===true && !requestedRetailers.length){
+   try{
+     await recoverIncompleteScheduledFlyers(db,report);
+   }catch(error){
+     report.push({retailer:"Sistema",result:"erro ao recuperar jobs",error:error instanceof Error?error.message:String(error)});
+   }
  }
  return new Response(JSON.stringify({
    city:"Marília",
