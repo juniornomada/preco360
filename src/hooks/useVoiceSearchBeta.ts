@@ -120,6 +120,10 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     ["entreco", "Entrecot"],
     ["novax", "Noix"],
     ["noax", "Noix"],
+    ["kaqui", "caqui"],
+    ["kaki", "caqui"],
+    // Only in the VOICE path: "cacique" is a genuine written product/brand.
+    ["cacique", "caqui"],
   ]);
 
   const knownCorrection = knownAsrCorrections.get(key);
@@ -463,9 +467,11 @@ export function useVoiceSearchBeta() {
       const phraseBiasSupported = Boolean(Phrase && "phrases" in recognition);
       if (Phrase && "phrases" in recognition) {
         try {
-          recognition.phrases = PONCAN_CONTEXT_PHRASES.map(
-            (phrase) => new Phrase(phrase, 3),
-          );
+          recognition.phrases = [
+            ...PONCAN_CONTEXT_PHRASES.map((phrase) => new Phrase(phrase, 3)),
+            new Phrase("caqui", 4),
+            new Phrase("caqui fruta", 3),
+          ];
         } catch (phraseError) {
           console.debug("Poncan contextual bias unavailable", phraseError);
         }
@@ -495,7 +501,7 @@ export function useVoiceSearchBeta() {
         ).filter(Boolean);
 
         return (
-          alternatives.find((candidate) => candidate === "poncan") ??
+          alternatives.find((candidate) => candidate === "poncan" || candidate === "caqui") ??
           alternatives[0] ??
           ""
         );
