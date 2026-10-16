@@ -1205,9 +1205,11 @@ async function recoverIncompleteScheduledFlyers(db:any, report:any[]) {
   const now=new Date();
   const cutoff=new Date(now.getTime()-45*60*1000).toISOString();
   const recent=new Date(now.getTime()-7*24*60*60*1000).toISOString();
-  const today=new Intl.DateTimeFormat("en-CA",{
+  const parts=new Intl.DateTimeFormat("en-US",{
     timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit",
-  }).format(now);
+  }).formatToParts(now);
+  const datePart=(type:string)=>parts.find((part)=>part.type===type)?.value??"";
+  const today=[datePart("year"),datePart("month"),datePart("day")].join("-");
   const {data:jobs,error}=await db.from("flyer_import_jobs")
     .select("id,user_id,status,updated_at,created_at,retailer,source_file_name,file_hash,page_count,valid_to,result")
     .eq("user_id",USER_ID)
@@ -1228,7 +1230,7 @@ async function recoverIncompleteScheduledFlyers(db:any, report:any[]) {
     if(oldResult.auto_import!==true) continue;
     const validTo=String(oldResult.valid_to??job.valid_to??"");
     // Never spend AI quota on an expired flyer.
-    if(validTo && /^\\d{4}-\\d{2}-\\d{2}$/.test(validTo) && validTo<today) continue;
+    if(validTo && /^\d{4}-\d{2}-\d{2}$/.test(validTo) && validTo<today) continue;
     const count=Math.max(0,Math.trunc(Number(oldResult.scheduled_recovery_attempts)||0));
     if(count>=3) continue;
     const total=Math.max(1,Math.trunc(Number(job.page_count)||1));
