@@ -36,6 +36,10 @@ export function normalizeProductSearchText(value: string) {
     .replace(/\bsem\s+alcool\b/g, "sem alcool")
     .replace(/\b(?:suco|refresco)\s+em\s+po\b/g, "refresco em po")
     .replace(/\b(?:kaqui|kaki)\b/g, "caqui")
+    // Tangor Murcott appears in receipts as MURCOTE or MORGOTE.
+    // "moricote" was recognized correctly from voice but matched "MOR"
+    // from an unrelated Activia receipt through the broad prefix fallback.
+    .replace(/\b(?:moricote|morgote|murcote|murcott|morcote|morikote|morkote)\b/g, "murcote")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
@@ -71,8 +75,9 @@ export function productMatchesSearch(text: string, query: string) {
 
       return (
         queryToken.length >= 4 &&
-        textToken.length >= 3 &&
-        queryToken.startsWith(textToken)
+        textToken.length >= 4 &&
+        queryToken.startsWith(textToken) &&
+        queryToken.length - textToken.length <= 2
       );
     }),
   );

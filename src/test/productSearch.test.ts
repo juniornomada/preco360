@@ -71,3 +71,23 @@ describe("fruit-name ASR aliases", () => {
     expect(normalizeProductSearchText("Cacique")).toBe("cacique");
   });
 });
+
+describe("Murcott fruit aliases and unrelated short abbreviations", () => {
+  it("finds historic Murcote/Morgote without matching the unrelated Activia MOR", () => {
+    for (const variant of ["moricote", "morgote", "murcote", "murcott", "morcote"]) {
+      expect(productSearchTokens(variant)).toEqual(["murcote"]);
+      expect(productMatchesSearch("MURCOTE", variant)).toBe(true);
+      expect(productMatchesSearch("TANGERINA MORGOTE kg", variant)).toBe(true);
+      expect(productMatchesSearch("LEITE F ACTIVIA MOR", variant)).toBe(false);
+    }
+  });
+
+  it("rejects a misleading three-character suffix of an unrelated product", () => {
+    expect(productMatchesSearch("LEITE F ACTIVIA MOR", "moricote")).toBe(false);
+    expect(productMatchesSearch("MORANGO", "moricote")).toBe(false);
+    expect(productMatchesSearch("MILHO PIP YOKI", "milho")).toBe(true);
+    expect(productMatchesSearch("BANANA NANICA", "banana maçã")).toBe(false);
+    expect(productMatchesSearch("BANANA MAÇÃ", "banana maçã")).toBe(true);
+    expect(productMatchesSearch("LEITE HERCULES INT.1L", "leite")).toBe(true);
+  });
+});
