@@ -1457,7 +1457,11 @@ Deno.serve(async(req)=>{
  // Follow-ups can also resume valid background jobs that outlived the
  // previous scheduled collection. Keep manual and 9am runs unchanged.
  if(body?.recheck===true && !requestedRetailers.length){
-   await recoverIncompleteScheduledFlyers(db,report);
+   try{
+     await recoverIncompleteScheduledFlyers(db,report);
+   }catch(error){
+     report.push({retailer:"Sistema",result:"erro ao recuperar jobs",error:error instanceof Error?error.message:String(error)});
+   }
  }
  return new Response(JSON.stringify({
    city:"Marília",
