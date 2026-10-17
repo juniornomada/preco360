@@ -1306,6 +1306,17 @@ function storeReferenceFamily(row: StoreReferenceRow): OfferFamily {
   );
 }
 
+function comparableOfferGroup(family:OfferFamily,name:string) {
+  const chicken=chickenComparableKey(name);
+  if(chicken) return "chicken:"+chicken;
+  if(family==="fish" || family==="cannedFish" || family==="beef" || family==="pork") {
+    const kind=offerReferenceFamilyKey(name);
+    if(kind) return kind;
+    if(family==="fish") return "fish:"+fishOfferPreparation(name);
+  }
+  return family;
+}
+
 function familyMatchesIntent(family: OfferFamily, intent: SearchFamilyIntent | null) {
   if (!intent) return true;
   if (intent === "milk") {
@@ -2590,7 +2601,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
       const group = groups.find((candidateGroup) =>
         candidateGroup.some(
           (member) =>
-            member.family === entry.family &&
+            comparableOfferGroup(member.family,member.item.raw_name)===
+              comparableOfferGroup(entry.family,entry.item.raw_name) &&
             comparableOfferIdentity(member.item, entry.item),
         ),
       );
@@ -2851,13 +2863,14 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
 
   const bestOfferByFamily = useMemo(() => {
     const bestEntry = new Map<
-      OfferFamily,
+      string,
       { id: string; primaryPrice: number; packagePrice: number }
     >();
 
     for (const entry of analyzed) {
       if (explicitSearchFamily === "corn" && entry.family === "cornDerived") continue;
-      const current = bestEntry.get(entry.family);
+      const group=comparableOfferGroup(entry.family,entry.item.raw_name);
+      const current = bestEntry.get(group);
       const candidatePrice =
         entry.family === "cannedFish"
           ? entry.candidate.price
@@ -2869,7 +2882,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
         (Math.abs(candidatePrice - current.primaryPrice) <= 0.0001 &&
           entry.candidate.price < current.packagePrice)
       ) {
-        bestEntry.set(entry.family, {
+        bestEntry.set(group, {
           id: entry.item.id,
           primaryPrice: candidatePrice,
           packagePrice: entry.candidate.price,
@@ -2883,7 +2896,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
   }, [analyzed, explicitSearchFamily]);
 
   const resultFamilyCount = useMemo(
-    () => new Set(analyzed.map((entry) => entry.family)).size,
+    () => new Set(analyzed.map((entry) =>
+      comparableOfferGroup(entry.family,entry.item.raw_name))).size,
     [analyzed],
   );
 
@@ -3492,7 +3506,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                     )
                   : null;
             const isFamilyBest =
-              bestOfferByFamily.get(entry.family) === item.id;
+              bestOfferByFamily.get(comparableOfferGroup(entry.family,item.raw_name)) === item.id;
             const isTopResult = bananaRelatedOnly ? false : isBroadFamilySearch
               ? hasSearch && isFamilyBest
               : hasSearch && resultFamilyCount !== 1 && index === 0;
