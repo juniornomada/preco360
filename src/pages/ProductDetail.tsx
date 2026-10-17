@@ -22,13 +22,17 @@ export default function ProductDetail() {
   const [editName, setEditName] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editingReceiptPriceId,setEditingReceiptPriceId]=useState<string|null>(null);
+  const [effectivePrice,setEffectivePrice]=useState("");
+  const [priceCorrectionReason,setPriceCorrectionReason]=useState("Desconto aplicado no subtotal do cupom fiscal");
+  const [savingReceiptPrice,setSavingReceiptPrice]=useState(false);
 
   const { data: product } = useQuery({
     queryKey: ["product", id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("products")
-        .select("id,name,category,brand,package_size,unit,prices(id,price,date,supermarket)")
+        .select("id,name,category,brand,package_size,unit,prices(id,price,date,supermarket,source,receipt_text)")
         .eq("id", id!)
         .eq("user_id", user!.id)
         .single();
@@ -104,6 +108,33 @@ export default function ProductDetail() {
     }
   };
 
+  const correctImportedReceiptPrice=async(priceId:string)=>{
+    if(!user||savingReceiptPrice) return;
+    const normalized=Number(effectivePrice.replace(/\s/g,"").replace(/\./g,"").replace(",","."));
+    if(!Number.isFinite(normalized)||normalized<=0||!priceCorrectionReason.trim()){
+      toast({title:"Informe o preço efetivamente pago e o motivo da correção",variant:"destructive"});
+      return;
+    }
+    setSavingReceiptPrice(true);
+    try{
+      const {error}=await (supabase as any).rpc("correct_receipt_price_v1",{
+        p_price_id:priceId,
+        p_effective_price:normalized,
+        p_reason:priceCorrectionReason.trim()
+      });
+      if(error) throw error;
+      setEditingReceiptPriceId(null);
+      await Promise.all([
+        queryClient.invalidateQueries({queryKey:["product",id]}),
+        queryClient.invalidateQueries({queryKey:["product-summaries"]}),
+        queryClient.invalidateQueries({queryKey:["selected-price-history"]}),
+        queryClient.invalidateQueries({queryKey:["prices"]})
+      ]);
+      toast({title:"Valor efetivamente pago atualizado",description:"O preço original do cupom permanece registrado no histórico de correções."});
+    }catch(error:any){
+      toast({title:"Não foi possível corrigir o valor",description:error.message,variant:"destructive"});
+    }finally{setSavingReceiptPrice(false);}
+  };
   const prices = product?.prices ?? [];
   const unitValue=(price:number)=>
     product ? unitPriceForProduct(product.name,product.package_size,product.unit,price) : null;
@@ -212,11 +243,42 @@ export default function ProductDetail() {
                 </div>
               </div>
               <div className="shrink-0 text-right">
-                <p className="font-bold">R$ {p.price.toFixed(2).replace(".", ",")}</p>
-                {unitValue(p.price) && (
-                  <p className="text-xs font-semibold text-primary">
-                    {formatNormalizedPrice(unitValue(p.price)!.normalizedPrice,unitValue(p.price)!.baseUnit)}
-                  </p>
+                {editingReceiptPriceId===p.id ? (
+                  <div className="flex max-w-[200px] flex-col gap-1.5">
+                    <label className="text-xs text-muted-foreground" htmlFor={`receipt-amount-${p.id}`}>Valor efetivamente pago (R$)</label>
+                    <Input id={`receipt-amount-${p.id}`} inputMode="decimal"
+                      value={effectivePrice} onChange={e=>setEffectivePrice(e.target.value)}/>
+                    <label className="text-xs text-muted-foreground" htmlFor={`receipt-reason-${p.id}`}>Motivo da alteração</label>
+                    <Input id={`receipt-reason-${p.id}`}
+                      value={priceCorrectionReason}
+                      onChange={e=>setPriceCorrectionReason(e.target.value)}/>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button size="sm" variant="ghost" onClick={()=>setEditingReceiptPriceId(null)} disabled={savingReceiptPrice}>Cancelar</Button>
+                      <Button size="sm" onClick={()=>void correctImportedReceiptPrice(p.id)} disabled={savingReceiptPrice}>Salvar</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <p className="font-bold">R$ {p.price.toFixed(2).replace(".", ",")}</p>
+                    {unitValue(p.price) && (
+                      <p className="text-xs font-semibold text-primary">
+                        {formatNormalizedPrice(unitValue(p.price)!.normalizedPrice,unitValue(p.price)!.baseUnit)}
+                      </p>
+                    )}
+                    {p.source==="receipt" && (
+                      <>
+                        <Button size="sm" variant="outline" className="mt-1 h-7"
+                          onClick={()=>{setEditingReceiptPriceId(p.id);setEffectivePrice(p.price.toFixed(2).replace(".",","));}}>
+                          <Pencil className="mr-1 h-3 w-3"/>Editar valor pago
+                        </Button>
+                        {p.receipt_text?.match(/total do item\s+([\d.,]+)/i)?.[1] && (
+                          <p className="mt-1 text-[10px] text-muted-foreground">
+                            Valor original do cupom: R$ {p.receipt_text.match(/total do item\s+([\d.,]+)/i)?.[1]?.replace(".",",")}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </>
                 )}
               </div>
             </CardContent>
