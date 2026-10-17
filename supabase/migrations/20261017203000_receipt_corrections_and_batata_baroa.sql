@@ -40,3 +40,11 @@ where pi.user_id=p.user_id
   and pi.normalized_name in ('batata baroa','batata baroa 1kg')
   and p.name='Batata-baroa (mandioquinha) kg'
   and pi.status='verified';
+
+-- Improve the catalog display name for the abbreviated NFC-e product.
+-- The original receipt_text and canonical_key are intentionally unchanged.
+update public.products as p
+set name='Cappuccino 3 Corações 200g',
+    normalized_name='cappuccino 3 coracoes 200g',
+    updated_at=now()
+where p.name ~* '^CAPP[.]?3 CORACOES 200G$';
