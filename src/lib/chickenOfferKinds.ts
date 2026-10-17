@@ -8,7 +8,7 @@ export type ChickenKind =
   | "chickenBreastUnknown" | "chickenBreastFillet" | "chickenTenderloin"
   | "chickenDrumstick" | "chickenThigh" | "chickenLegQuarter"
   | "chickenWing" | "chickenShredded" | "chickenRoasted"
-  | "chickenBreaded" | "chickenOther";
+  | "chickenBreaded" | "chickenMeal" | "chickenOther";
 
 export type ChickenIntent = ChickenKind | "chicken";
 const chickenTerms = /\b(?:frango|frangos|franguinho|ave|aves|galinha|sassami)\b/;
@@ -20,6 +20,10 @@ export function chickenKind(value: string): ChickenKind | null {
   // Do not mistake turkey breast, beef filet or generic frozen foods for chicken.
   if (!chickenTerms.test(n)) return null;
   if (/\b(?:peru|bovino|suino|peixe|tilapia)\b/.test(n)) return null;
+  // A ready meal containing shredded chicken cannot compete with a package
+  // of plain shredded chicken by R$/kg: potatoes/purée occupy part of its weight.
+  if (/\b(?:pure|prato feito|refeicao pronta|marmita|escondidinho|risoto|strogonoff|lasanha|sopa|salada|creme de legumes)\b/.test(n)
+      && /\b(?:frango|galinha)\b/.test(n)) return "chickenMeal";
   if (/\b(?:empanado|empanada|nugget|nuggets)\b/.test(n)) return "chickenBreaded";
   if (/\b(?:desfiad[oa]s?)\b/.test(n)) return "chickenShredded";
   if (/\b(?:assad[oa]s?)\b/.test(n)) return "chickenRoasted";
@@ -44,7 +48,7 @@ export const chickenKinds: ChickenKind[] = [
   "chickenWhole", "chickenBreastBone", "chickenBreastBoneless",
   "chickenBreastUnknown", "chickenBreastFillet", "chickenTenderloin",
   "chickenDrumstick", "chickenThigh", "chickenLegQuarter", "chickenWing",
-  "chickenShredded", "chickenRoasted", "chickenBreaded", "chickenOther",
+  "chickenShredded", "chickenRoasted", "chickenBreaded", "chickenMeal", "chickenOther",
 ];
 
 export const chickenLabels: Record<ChickenKind,string> = {
@@ -61,6 +65,7 @@ export const chickenLabels: Record<ChickenKind,string> = {
   chickenShredded:"Frango desfiado",
   chickenRoasted:"Frango assado",
   chickenBreaded:"Frango empanado",
+  chickenMeal:"Refeição pronta com frango",
   chickenOther:"Frango (corte não identificado)",
 };
 
