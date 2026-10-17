@@ -54,6 +54,22 @@ export function normalizePoncaSearchToken(value: string) {
   return poncaSearchVariantSet.has(normalized) ? "poncan" : normalized;
 }
 
+/**
+ * Keep all catalog/search aliases unified internally, but present the fruit
+ * under the user-facing spelling "Ponkan" (capital P).
+ * This does not mutate saved product names or offer data.
+ */
+export function displayPonkanQuery(query: string) {
+  return isGenericPoncaSearch(query) ? "Ponkan" : query;
+}
+
+export function displayPonkanProductName(name: string) {
+  return name.replace(
+    /(^|[^a-zA-ZÀ-ÿ0-9])(?:poncã|ponca|poncan|poncam|ponka|ponkan|ponkam|poca|pocan|pocam|pokan|pokam)(?=$|[^a-zA-ZÀ-ÿ0-9])/gi,
+    (_found, before: string) => before + "Ponkan",
+  );
+}
+
 export function isGenericPoncaSearch(query: string) {
   const tokens = normalizeSearchText(query)
     .split(/\s+/)

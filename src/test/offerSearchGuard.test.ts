@@ -7,6 +7,8 @@ import {
   isStrawberryProductName,
   isSugarProductName,
   isGenericPoncaSearch,
+  displayPonkanQuery,
+  displayPonkanProductName,
   isPowderedDrinkSearch,
   normalizePoncaSearchToken,
   powderedDrinkSearchRequests,
@@ -62,8 +64,15 @@ describe("offer search guards", () => {
     for (const variant of PONCA_SEARCH_VARIANTS) {
       expect(isGenericPoncaSearch(variant)).toBe(true);
       expect(normalizePoncaSearchToken(variant)).toBe("poncan");
+      expect(displayPonkanQuery(variant)).toBe("Ponkan");
     }
     expect(isGenericPoncaSearch("tangerina")).toBe(false);
+    expect(displayPonkanQuery("PONKÃ")).toBe("Ponkan");
+    expect(displayPonkanQuery("ponkan fruta")).toBe("ponkan fruta");
+    expect(displayPonkanProductName("Mexerica Poncã kg")).toBe("Mexerica Ponkan kg");
+    expect(displayPonkanProductName("Poncan kg")).toBe("Ponkan kg");
+    expect(displayPonkanProductName("Tangerina Ponkan 1kg")).toBe("Tangerina Ponkan 1kg");
+    expect(displayPonkanProductName("Café Ponkan Sabor")) .toBe("Café Ponkan Sabor");
   });
 
   it("treats suco em pó and refresco em pó as the same search family", () => {
