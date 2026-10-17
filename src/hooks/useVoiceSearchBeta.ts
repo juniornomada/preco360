@@ -711,13 +711,14 @@ export function useVoiceSearchBeta() {
 
   const startListening = useCallback(
     (onTranscript: (transcript: string) => void) => {
+      // Prefer the native recognizer validated in production.
+      // Groq remains an opt-in fallback when native speech recognition cannot start.
+      if (getSpeechRecognitionConstructor() && startNativeRecognition(onTranscript)) return true;
       if (navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined") {
-        void startGroqCapture(onTranscript).then((started) => {
-          if (!started) startNativeRecognition(onTranscript);
-        });
+        void startGroqCapture(onTranscript);
         return true;
       }
-      return startNativeRecognition(onTranscript);
+      return false;
     },
     [startGroqCapture, startNativeRecognition],
   );
