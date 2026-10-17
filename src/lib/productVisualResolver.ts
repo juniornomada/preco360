@@ -101,7 +101,7 @@ const specificRules: Rule[] = [
 
   // Potatoes and vegetables.
   { pattern: /batata doce/, visual: "__sweetpotato__", confidence: 0.99 },
-  { pattern: /batata baroa|mandioquinha/, visual: "__sweetpotato__", confidence: 0.96 },
+  { pattern: /batata baroa|mandioquinha/, visual: "🥕", confidence: 0.96 },
   { pattern: /aneis de cebola/, visual: "__onionrings__", confidence: 0.98 },
   { pattern: /batata|snacks|petisco/, visual: "__potatosnack__", confidence: 0.92 },
   { pattern: /ervilha/, visual: "__peas__", confidence: 0.99 },
