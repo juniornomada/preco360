@@ -50,3 +50,12 @@ export function isCornDerivedQuery(value: string) {
   const text = fold(value);
   return /\bmilho\b/.test(text) && cornDerivative.test(text);
 }
+
+
+export function isCoffeeCapsuleProduct(name: string) {
+  const text = fold(name);
+  const hasCoffee = /\bcafe\b/.test(text);
+  const hasCapsule = /\b(?:caps|capsula|capsulas)\b/.test(text);
+  return hasCoffee && hasCapsule &&
+    /^(?:cafe|caps|capsula|capsulas)\b/.test(text);
+}
