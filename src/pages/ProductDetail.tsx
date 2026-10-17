@@ -110,7 +110,10 @@ export default function ProductDetail() {
 
   const correctImportedReceiptPrice=async(priceId:string)=>{
     if(!user||savingReceiptPrice) return;
-    const normalized=Number(effectivePrice.replace(/\s/g,"").replace(/\./g,"").replace(",","."));
+    const inputAmount=effectivePrice.trim().replace(/\s/g,"");
+    const normalized=Number(inputAmount.includes(",")
+      ? inputAmount.replace(/\./g,"").replace(",",".")
+      : inputAmount);
     if(!Number.isFinite(normalized)||normalized<=0||!priceCorrectionReason.trim()){
       toast({title:"Informe o preço efetivamente pago e o motivo da correção",variant:"destructive"});
       return;
