@@ -5,6 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import PriceChart from "@/components/PriceChart";
+import { formatNormalizedPrice } from "@/lib/flyerAnalysis";
+import { unitPriceForProduct,unitPackageFromProduct } from "@/lib/productUnitPricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -103,6 +105,9 @@ export default function ProductDetail() {
   };
 
   const prices = product?.prices ?? [];
+  const unitValue=(price:number)=>
+    product ? unitPriceForProduct(product.name,product.package_size,product.unit,price) : null;
+  const inferredVolume=product && unitPackageFromProduct(product.name,product.package_size,product.unit)?.inferred;
   const sorted = [...prices].sort((a, b) => b.date.localeCompare(a.date));
   const best = prices.reduce(
     (min, p) => (p.price < min.price ? p : min),
@@ -170,7 +175,13 @@ export default function ProductDetail() {
               <p className="text-2xl font-bold text-primary">
                 R$ {best.price.toFixed(2).replace(".", ",")}
               </p>
-              <p className="text-xs text-muted-foreground">@{best.supermarket}</p>
+              {unitValue(best.price) && (
+                  <p className="text-sm font-bold text-primary">
+                    {formatNormalizedPrice(unitValue(best.price)!.normalizedPrice,unitValue(best.price)!.baseUnit)}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">{best.supermarket}</p>
+                {inferredVolume && <p className="text-[10px] text-amber-500">Volume inferido da descrição: 900 ml</p>}
             </div>
           </CardContent>
         </Card>
@@ -200,7 +211,14 @@ export default function ProductDetail() {
                   </div>
                 </div>
               </div>
-              <p className="font-bold">R$ {p.price.toFixed(2).replace(".", ",")}</p>
+              <div className="shrink-0 text-right">
+                <p className="font-bold">R$ {p.price.toFixed(2).replace(".", ",")}</p>
+                {unitValue(p.price) && (
+                  <p className="text-xs font-semibold text-primary">
+                    {formatNormalizedPrice(unitValue(p.price)!.normalizedPrice,unitValue(p.price)!.baseUnit)}
+                  </p>
+                )}
+              </div>
             </CardContent>
           </Card>
         ))}

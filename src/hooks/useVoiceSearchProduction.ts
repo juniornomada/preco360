@@ -194,6 +194,7 @@ export function useVoiceSearchProduction() {
         if (!transcript || deliveredRef.current) return false;
 
         deliveredRef.current = true;
+        setError(null);
         onTranscript(transcript);
         return true;
       };
@@ -269,7 +270,7 @@ export function useVoiceSearchProduction() {
 
         const delivered = deliverPending();
 
-        if (!delivered && event.error !== "aborted") {
+        if (!delivered && !deliveredRef.current && event.error !== "aborted") {
           setError(voiceErrorMessage(event.error));
         }
 
@@ -281,7 +282,7 @@ export function useVoiceSearchProduction() {
 
         const delivered = deliverPending();
 
-        if (!delivered && speechStartedRef.current) {
+        if (!delivered && !deliveredRef.current && speechStartedRef.current) {
           setError(
             "Ouvi sua fala, mas não consegui identificar o produto. Tente falar novamente.",
           );

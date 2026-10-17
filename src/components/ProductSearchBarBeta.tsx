@@ -80,7 +80,10 @@ const ProductSearchBarBeta = forwardRef<HTMLInputElement, ProductSearchBarBetaPr
               }
 
               inputRef.current?.blur();
-              startListening((transcript) => onChange(transcript, "voice"));
+              startListening((transcript) => {
+                clearError();
+                onChange(transcript, "voice");
+              });
             }}
           >
             <Mic className="h-4 w-4" />

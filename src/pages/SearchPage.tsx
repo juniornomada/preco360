@@ -30,13 +30,13 @@ import { analyzePrice, formatBRL } from "@/lib/priceAnalysis";
 import {
   formatNormalizedPrice,
   inferPackage,
-  normalizedUnitPrice,
 } from "@/lib/flyerAnalysis";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import ProductSearchBar from "@/components/ProductSearchBar";
 import { productMatchesSearch } from "@/lib/productSearch";
+import { unitPriceForProduct, unitPackageFromProduct } from "@/lib/productUnitPricing";
 import {
   Store,
   CheckCircle2,
@@ -86,20 +86,8 @@ function displayProductName(product: ProductSummary) {
   return label ? `${clean} ${label}` : clean;
 }
 
-function normalizedSummaryPrice(
-  product: ProductSummary,
-  price: number | string | null,
-) {
-  const numericPrice = Number(price);
-  if (!Number.isFinite(numericPrice) || numericPrice <= 0) return null;
-
-  const pkg =
-    product.package_size && product.unit
-      ? inferPackage(`${product.package_size}${product.unit}`)
-      : inferPackage(product.name);
-  if (!pkg) return null;
-
-  return normalizedUnitPrice(numericPrice, pkg);
+function normalizedSummaryPrice(product: ProductSummary, price:number | string | null) {
+  return unitPriceForProduct(product.name,product.package_size,product.unit,price);
 }
 
 function formatDateBr(value?: string | null) {
@@ -188,6 +176,9 @@ export default function SearchPage() {
       : null;
 
   const numericPrice = Number(currentPrice.replace(",", "."));
+  const normalizedCurrent = selected
+    ? normalizedSummaryPrice(selected, numericPrice)
+    : null;
   const analysis = selected && numericPrice > 0
     ? analyzePrice(
         numericPrice,
@@ -332,6 +323,9 @@ export default function SearchPage() {
                   <div className="min-w-0">
                     <h2 className="text-xl font-bold">{selectedDisplayName}</h2>
                     <p className="text-xs text-muted-foreground">{selected.category}</p>
+                    {unitPackageFromProduct(selected.name,selected.package_size,selected.unit)?.inferred && (
+                      <p className="text-[11px] text-amber-500">Volume de 900 ml inferido da descrição do cupom</p>
+                    )}
                   </div>
                   <Button variant="outline" size="sm" className="shrink-0" onClick={() => navigate(`/product/${selected.id}`)}>Ver histórico</Button>
                 </div>
@@ -366,6 +360,11 @@ export default function SearchPage() {
                   <div className="relative">
                     <span className="absolute left-3 top-2.5 text-sm font-semibold text-muted-foreground">R$</span>
                     <Input inputMode="decimal" placeholder="Ex.: 38,90" className="h-11 pl-10 text-lg font-bold" value={currentPrice} onChange={(event) => setCurrentPrice(event.target.value)} />
+                    {normalizedCurrent && (
+                      <p className="mt-1.5 text-xs font-extrabold text-primary">
+                        Preço equivalente: {formatNormalizedPrice(normalizedCurrent.normalizedPrice,normalizedCurrent.baseUnit)}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div>

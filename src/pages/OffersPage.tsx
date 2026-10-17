@@ -14,6 +14,11 @@ import {
 } from "@/lib/productSearch";
 import ProductVisual from "@/components/ProductVisual";
 import {
+  chickenKind, chickenKinds, chickenLabels, chickenQueryIntent,
+  meatPreparation, requestedChickenPreparation, chickenComparableKey,
+  type ChickenKind,
+} from "@/lib/chickenOfferKinds";
+import {
   fishOfferPreparation,
   isCornDerivedProduct,
   isCornDerivedQuery,
@@ -679,6 +684,7 @@ type OfferFamily =
   | "pork"
   | "fish"
   | "cannedFish"
+  | ChickenKind
   | "sugar"
   | "salt"
   | "strawberry"
@@ -686,7 +692,7 @@ type OfferFamily =
   | "alcoholDisinfectant"
   | "other";
 
-type SearchFamilyIntent = OfferFamily | "milk" | "banana" | "corn" | "cornGreenBroad" | "coffee";
+type SearchFamilyIntent = OfferFamily | "milk" | "banana" | "corn" | "cornGreenBroad" | "coffee" | "chicken";
 
 function hasAny(tokens: Set<string>, values: string[]) {
   return values.some((value) => tokens.has(value));
@@ -714,6 +720,7 @@ function queryOfferFamily(query: string): SearchFamilyIntent | null {
 
   if (isBroadBeefSearch(query)) return "beef";
   if (isBroadPorkSearch(query)) return "pork";
+  if (chickenQueryIntent(query)) return chickenQueryIntent(query);
   if (isBroadFishSearch(query) ||
       /^(?:peixes?|pescados?)\b/.test(normalized)) return "fish";
 
@@ -861,6 +868,8 @@ function inferOfferFamily(
   if (isPorkOfferText(raw)) return "pork";
   if (isCannedFishOffer(raw)) return "cannedFish";
   if (isFishOfferText(raw)) return "fish";
+  const chicken=chickenKind(item.raw_name);
+  if (chicken) return chicken;
   if (/^bolos?\b/.test(raw)) return "cake";
 
   if (/^desinfetante\b/.test(raw)) {
@@ -986,6 +995,7 @@ function familyLabel(family: OfferFamily) {
   if (family === "beef") return "Carne bovina";
   if (family === "pork") return "Carne suína";
   if (family === "fish") return "Peixe";
+  if (chickenKinds.includes(family as ChickenKind)) return chickenLabels[family as ChickenKind];
   if (family === "cannedFish") return "Peixe enlatado";
   if (family === "sugar") return "Açúcar";
   if (family === "salt") return "Sal";
@@ -1239,8 +1249,15 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   }
   if (intent === "beef") add(...BEEF_SEMANTIC_TOKENS);
   if (intent === "pork") add(...PORK_SEMANTIC_TOKENS);
+  if (intent === "chicken" || chickenKinds.includes(intent as ChickenKind)) {
+    add("frango","frangos","franguinho","ave","peito","file","filezinho",
+        "filézinho","inteiro","inteira","sem","com","osso","desossado",
+        "coxa","sobrecoxa","asa","sassami","desfiado","assado",
+        "fresco","fresca","resfriado","resfriada","congelado","congelada");
+  }
   if (intent === "fish") add(
     ...FISH_SEMANTIC_TOKENS,
+    "enlatado","enlatada","enlatados","enlatadas","lata","conserva",
     "fresco", "fresca", "frescos", "frescas",
     "resfriado", "resfriada", "resfriados", "resfriadas",
     "congelado", "congelada", "congelados", "congeladas",
@@ -1290,6 +1307,17 @@ function storeReferenceFamily(row: StoreReferenceRow): OfferFamily {
   );
 }
 
+function comparableOfferGroup(family:OfferFamily,name:string) {
+  const chicken=chickenComparableKey(name);
+  if(chicken) return "chicken:"+chicken;
+  if(family==="fish" || family==="cannedFish" || family==="beef" || family==="pork") {
+    const kind=offerReferenceFamilyKey(name);
+    if(kind) return kind;
+    if(family==="fish") return "fish:"+fishOfferPreparation(name);
+  }
+  return family;
+}
+
 function familyMatchesIntent(family: OfferFamily, intent: SearchFamilyIntent | null) {
   if (!intent) return true;
   if (intent === "milk") {
@@ -1326,6 +1354,7 @@ function familyMatchesIntent(family: OfferFamily, intent: SearchFamilyIntent | n
   if (intent === "fish") {
     return family === "fish" || family === "cannedFish";
   }
+  if (intent === "chicken") return chickenKinds.includes(family as ChickenKind);
   return family === intent;
 }
 
@@ -2035,6 +2064,12 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     // SQL uses literal tokens for compound phrases. Query the parent family
     // first, then apply strict qualifiers to the returned product metadata.
     const intent = queryOfferFamily(normalizedSearch);
+    if (intent === "chicken" || chickenKinds.includes(intent as ChickenKind)) {
+      requests.add("frango");
+      requests.add("peito frango");
+      requests.add("coxa frango");
+      requests.add("sobrecoxa frango");
+    }
     if (intent === "fish") {
       requests.add("peixe");
       requests.add("salmao"); // Includes "Postas de Salmão" without "peixe" in title.
@@ -2147,13 +2182,17 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
       const sameFishPreparation = (previous: FlyerItemRow) =>
         !isFishOfferText(item.raw_name) ||
         fishOfferPreparation(item.raw_name) === fishOfferPreparation(previous.raw_name);
+      const sameChickenCut = (previous: FlyerItemRow) => {
+        const current=chickenComparableKey(item.raw_name);
+        return !current || current===chickenComparableKey(previous.raw_name);
+      };
       const previousAdvertised = linkedHistory.length
         ? linkedHistory.filter((previous) =>
             offerReferenceFamiliesCompatible(item.raw_name, previous.raw_name) !== false &&
-            sameFishPreparation(previous),
+            sameFishPreparation(previous) && sameChickenCut(previous),
           )
         : historicalItems.filter((previous) =>
-            comparableOfferIdentity(item, previous) && sameFishPreparation(previous),
+            comparableOfferIdentity(item, previous) && sameFishPreparation(previous) && sameChickenCut(previous),
           );
 
       const searchText = `${item.raw_name} ${item.brand ?? ""} ${product?.name ?? ""} ${product?.brand ?? ""} ${product?.category ?? ""}`;
@@ -2534,6 +2573,10 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
 
     const matches = preparedOffers.filter((entry) => {
       if (!familyMatchesIntent(entry.family, queryFamily)) return false;
+      const chickenPrep=requestedChickenPreparation(normalizedSearch);
+      if (chickenPrep && meatPreparation(entry.item.raw_name)!==chickenPrep) return false;
+      if (queryFamily==="fish" && /\b(?:enlatad[oa]s?|lata|conserva)\b/.test(normalizeSearchText(normalizedSearch))
+          && entry.family!=="cannedFish") return false;
       if (queryFamily === "fish" &&
           !matchesFishPreparation(entry.item.raw_name, normalizedSearch)) return false;
       if (!wantedTokens.length) return true;
@@ -2561,7 +2604,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
       const group = groups.find((candidateGroup) =>
         candidateGroup.some(
           (member) =>
-            member.family === entry.family &&
+            comparableOfferGroup(member.family,member.item.raw_name)===
+              comparableOfferGroup(entry.family,entry.item.raw_name) &&
             comparableOfferIdentity(member.item, entry.item),
         ),
       );
@@ -2817,18 +2861,20 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     explicitSearchFamily === "beef" ||
     explicitSearchFamily === "pork" ||
     explicitSearchFamily === "fish" ||
+    explicitSearchFamily === "chicken" ||
     explicitSearchFamily === "sugar" ||
     explicitSearchFamily === "salt";
 
   const bestOfferByFamily = useMemo(() => {
     const bestEntry = new Map<
-      OfferFamily,
+      string,
       { id: string; primaryPrice: number; packagePrice: number }
     >();
 
     for (const entry of analyzed) {
       if (explicitSearchFamily === "corn" && entry.family === "cornDerived") continue;
-      const current = bestEntry.get(entry.family);
+      const group=comparableOfferGroup(entry.family,entry.item.raw_name);
+      const current = bestEntry.get(group);
       const candidatePrice =
         entry.family === "cannedFish"
           ? entry.candidate.price
@@ -2840,7 +2886,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
         (Math.abs(candidatePrice - current.primaryPrice) <= 0.0001 &&
           entry.candidate.price < current.packagePrice)
       ) {
-        bestEntry.set(entry.family, {
+        bestEntry.set(group, {
           id: entry.item.id,
           primaryPrice: candidatePrice,
           packagePrice: entry.candidate.price,
@@ -2854,7 +2900,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
   }, [analyzed, explicitSearchFamily]);
 
   const resultFamilyCount = useMemo(
-    () => new Set(analyzed.map((entry) => entry.family)).size,
+    () => new Set(analyzed.map((entry) =>
+      comparableOfferGroup(entry.family,entry.item.raw_name))).size,
     [analyzed],
   );
 
@@ -3107,6 +3154,12 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
         !bananaRelatedOnly && (() => {
           const quickItem = bestCurrentOffer.item;
           const quickCandidate = bestCurrentOffer.candidate;
+          const quickVerdict = bestCurrentOffer.verdict;
+          const quickVerdictUi=verdictUi[quickVerdict.key];
+          const QuickVerdictIcon=quickVerdictUi.Icon;
+          const quickReference=quickVerdict.referencePrice && quickCandidate.baseUnit!=="un"
+            ? formatNormalizedPrice(quickVerdict.referencePrice,quickCandidate.baseUnit)
+            : quickVerdict.referencePrice ? brl(quickVerdict.referencePrice) : null;
           const quickPack = packageLabel(quickItem);
           const quickRetailer =
             canonicalRetailerName(bestCurrentOffer.flyer?.retailer) ||
@@ -3196,6 +3249,23 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                           menor preço por {quickCandidate.baseUnit === "l" ? "litro" : quickCandidate.baseUnit === "kg" ? "kg" : "unidade"}
                         </p>
                       )}
+                      <div className="mt-1.5 space-y-1 text-[10px]">
+                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-bold ${quickVerdictUi.className}`}>
+                          <QuickVerdictIcon className="h-3 w-3" />{quickVerdictUi.label}
+                        </span>
+                        <p className="font-medium text-muted-foreground">
+                          {quickReference
+                            ? `Ref. histórica comparável: ${quickReference}`
+                            : "Sem histórico comparável"}
+                        </p>
+                        {quickReference && quickVerdict.deltaPct !== null && (
+                          <p className={quickVerdict.deltaPct<0?"font-bold text-green-500":
+                            quickVerdict.deltaPct>0?"font-bold text-red-500":"font-bold text-muted-foreground"}>
+                            {quickVerdict.deltaPct<0?"↓":quickVerdict.deltaPct>0?"↑":"="}
+                            {Math.abs(quickVerdict.deltaPct).toFixed(0)}% vs. histórico
+                          </p>
+                        )}
+                      </div>
 
                       {currentVsStore?.currentIsBetter && (
                         <p className="mt-1.5 text-[10px] font-bold text-primary">
@@ -3463,7 +3533,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                     )
                   : null;
             const isFamilyBest =
-              bestOfferByFamily.get(entry.family) === item.id;
+              bestOfferByFamily.get(comparableOfferGroup(entry.family,item.raw_name)) === item.id;
             const isTopResult = bananaRelatedOnly ? false : isBroadFamilySearch
               ? hasSearch && isFamilyBest
               : hasSearch && resultFamilyCount !== 1 && index === 0;
