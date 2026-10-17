@@ -713,7 +713,8 @@ function queryOfferFamily(query: string): SearchFamilyIntent | null {
 
   if (isBroadBeefSearch(query)) return "beef";
   if (isBroadPorkSearch(query)) return "pork";
-  if (isBroadFishSearch(query)) return "fish";
+  if (isBroadFishSearch(query) ||
+      /^(?:peixes?|pescados?)\b/.test(normalized)) return "fish";
 
   const tokens = new Set(searchTokens(query));
   const hasMilk = hasAny(tokens, ["leite", "leites"]);
@@ -2351,15 +2352,13 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     const queryFamily = queryOfferFamily(normalizedSearch);
 
     return storeReferenceRows.filter((row) => {
-      if (
-        !productMatchesSearch(
-          `${row.raw_name} ${row.products?.name ?? ""}`,
-          normalizedSearch,
-        )
-      ) {
+      const text = `${row.raw_name} ${row.products?.name ?? ""}`;
+      if (requestedFishPreparation(normalizedSearch)) {
+        if (!isFishOfferText(row.raw_name) ||
+            !matchesFishPreparation(row.raw_name, normalizedSearch)) return false;
+      } else if (!productMatchesSearch(text, normalizedSearch)) {
         return false;
       }
-
       return familyMatchesIntent(storeReferenceFamily(row), queryFamily);
     });
   }, [hasSearch, normalizedSearch, storeReferenceRows]);
@@ -2414,7 +2413,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
         const product = productById.get(row.product_id);
         if (!product) return false;
 
-        return familyMatchesIntent(productReferenceFamily(product), queryFamily);
+        return familyMatchesIntent(productReferenceFamily(product), queryFamily) &&
+          matchesFishPreparation(product.name, normalizedSearch);
       })
       .sort((a, b) => {
         if (queryFamily === "milk") {
@@ -2455,7 +2455,9 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     if (queryOfferFamily(normalizedSearch) === "corn" ||
         queryOfferFamily(normalizedSearch) === "cornGreenBroad" ||
         queryOfferFamily(normalizedSearch) === "milk" ||
-        queryOfferFamily(normalizedSearch) === "banana") return null;
+        queryOfferFamily(normalizedSearch) === "banana" ||
+        queryOfferFamily(normalizedSearch) === "fish" ||
+        queryOfferFamily(normalizedSearch) === "coffee") return null;
     const candidates: Array<{
       source: "receipt" | "shelf";
       value: number;
