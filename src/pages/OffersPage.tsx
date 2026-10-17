@@ -14,6 +14,13 @@ import {
 } from "@/lib/productSearch";
 import ProductVisual from "@/components/ProductVisual";
 import {
+  fishOfferPreparation,
+  isCornDerivedProduct,
+  isCornDerivedQuery,
+  matchesFishPreparation,
+  requestedFishPreparation,
+} from "@/lib/compoundOfferSearch";
+import {
   bananaProductKind,
   isBananaFruitQuery,
   isFruitBananaProduct,
@@ -628,6 +635,7 @@ function searchTokens(value: string) {
       if (["qj", "qjo"].includes(token)) return "queijo";
       if (["muss", "mussar", "mozzarella"].includes(token)) return "mussarela";
       if (token === "quinino") return "kinino";
+      if (token === "cural") return "curau";
       return normalizePoncaSearchToken(token);
     })
     .filter((token) => !searchStopWords.has(token));
@@ -660,6 +668,7 @@ type OfferFamily =
   | "cornGreen"
   | "cornUnknown"
   | "cornPopcorn"
+  | "cornDerived"
   | "coffeeGround"
   | "coffeeBeans"
   | "coffeeSoluble"
@@ -763,8 +772,8 @@ function queryOfferFamily(query: string): SearchFamilyIntent | null {
   }
 
   if (hasCorn) {
-    if (hasAny(tokens, ["bolo", "bolos"])) return "cake";
-    if (hasAny(tokens, ["suco", "sucos"])) return "juice";
+    // Compound searches for corn preparations are narrower than bare "milho".
+    if (isCornDerivedQuery(query)) return "cornDerived";
 
     // These are derived products where milho is an ingredient/material,
     // not the product family the user means by a plain "milho" search.
@@ -888,6 +897,8 @@ function inferOfferFamily(
     return "tomatoFresh";
   }
 
+  if (isCornDerivedProduct(item.raw_name)) return "cornDerived";
+
   if (/^milho\b/.test(raw)) {
     const kind = cornProductKind(item.raw_name);
     if (kind === "popcorn") return "cornPopcorn";
@@ -902,6 +913,7 @@ function inferOfferFamily(
     return "coffeeCapsule";
   }
   if (/^cafe\b/.test(raw)) {
+    if (/\b(?:capsula|capsulas|caps)\b/.test(raw)) return "coffeeCapsule";
     if (isVolume) return "drink";
     if (/\bsoluvel\b/.test(raw)) return "coffeeSoluble";
     if (/\bgraos?\b/.test(raw)) return "coffeeBeans";
@@ -966,6 +978,7 @@ function familyLabel(family: OfferFamily) {
   if (family === "cornGreen") return "Milho verde em conserva";
   if (family === "cornUnknown") return "Milho (tipo não identificado)";
   if (family === "cornPopcorn") return "Milho para pipoca";
+  if (family === "cornDerived") return "Produto à base de milho";
   if (family === "coffeeGround") return "Café";
   if (family === "coffeeBeans") return "Café em grão";
   if (family === "coffeeSoluble") return "Café solúvel";
@@ -1185,6 +1198,7 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   if (intent === "cornFresh") add("bandeja", "espiga", "espigas", "fresco", "fresca");
   if (intent === "cornGreen") add("conserva", "lata", "latas", "sache", "saches", "vapor");
   if (intent === "cornPopcorn") add("milho", "milhos", "pipoca", "pipocas");
+  if (intent === "cornDerived") add("milho", "milhos");
 
   if (intent === "coffee") add("cafe", "cafes");
   if (intent === "coffeeGround") add("cafe", "cafes", "po");
@@ -1226,7 +1240,13 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   }
   if (intent === "beef") add(...BEEF_SEMANTIC_TOKENS);
   if (intent === "pork") add(...PORK_SEMANTIC_TOKENS);
-  if (intent === "fish") add(...FISH_SEMANTIC_TOKENS);
+  if (intent === "fish") add(
+    ...FISH_SEMANTIC_TOKENS,
+    "fresco", "fresca", "frescos", "frescas",
+    "resfriado", "resfriada", "resfriados", "resfriadas",
+    "congelado", "congelada", "congelados", "congeladas",
+    "ultracongelado", "ultracongelada",
+  );
 
   return result;
 }
@@ -1287,7 +1307,8 @@ function familyMatchesIntent(family: OfferFamily, intent: SearchFamilyIntent | n
       family === "cornFresh" ||
       family === "cornGreen" ||
       family === "cornUnknown" ||
-      family === "cornPopcorn"
+      family === "cornPopcorn" ||
+      family === "cornDerived"
     );
   }
   if (intent === "cornGreenBroad") {
@@ -2012,6 +2033,22 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
       );
     }
 
+    // SQL uses literal tokens for compound phrases. Query the parent family
+    // first, then apply strict qualifiers to the returned product metadata.
+    const intent = queryOfferFamily(normalizedSearch);
+    if (intent === "fish") {
+      requests.add("peixe");
+      requests.add("salmao"); // Includes "Postas de Salmão" without "peixe" in title.
+    }
+    if (intent === "coffeeCapsule") requests.add("cafe");
+    if (intent === "cornGreen" || intent === "cornFresh" ||
+        intent === "cornDerived" || intent === "cornPopcorn" ||
+        intent === "cornGreenBroad") requests.add("milho");
+    if (intent === "corn") {
+      requests.add("curau");
+      requests.add("pamonha");
+    }
+
     return [...requests];
   }, [normalizedSearch, searchRequest]);
 
@@ -2108,12 +2145,16 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
         ? historyByProduct.get(productId) ?? []
         : [];
 
+      const sameFishPreparation = (previous: FlyerItemRow) =>
+        !isFishOfferText(item.raw_name) ||
+        fishOfferPreparation(item.raw_name) === fishOfferPreparation(previous.raw_name);
       const previousAdvertised = linkedHistory.length
         ? linkedHistory.filter((previous) =>
-            offerReferenceFamiliesCompatible(item.raw_name, previous.raw_name) !== false,
+            offerReferenceFamiliesCompatible(item.raw_name, previous.raw_name) !== false &&
+            sameFishPreparation(previous),
           )
         : historicalItems.filter((previous) =>
-            comparableOfferIdentity(item, previous),
+            comparableOfferIdentity(item, previous) && sameFishPreparation(previous),
           );
 
       const searchText = `${item.raw_name} ${item.brand ?? ""} ${product?.name ?? ""} ${product?.brand ?? ""} ${product?.category ?? ""}`;
@@ -2173,12 +2214,17 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     if (!hasSearch || !productContext) return [];
 
     return productContext.products
-      .filter((product) =>
-        productMatchesSearch(
-          `${product.name} ${product.brand ?? ""} ${product.category ?? ""}`,
+      .filter((product) => {
+        const text = `${product.name} ${product.brand ?? ""} ${product.category ?? ""}`;
+        if (requestedFishPreparation(normalizedSearch)) {
+          return isFishOfferText(product.name) &&
+            matchesFishPreparation(product.name, normalizedSearch);
+        }
+        return productMatchesSearch(
+          text,
           isBananaFruitQuery(normalizedSearch) ? "banana" : normalizedSearch,
-        ),
-      )
+        );
+      })
       .map((product) => product.id)
       .sort();
   }, [hasSearch, normalizedSearch, productContext]);
@@ -2488,6 +2534,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
 
     const matches = preparedOffers.filter((entry) => {
       if (!familyMatchesIntent(entry.family, queryFamily)) return false;
+      if (queryFamily === "fish" &&
+          !matchesFishPreparation(entry.item.raw_name, normalizedSearch)) return false;
       if (!wantedTokens.length) return true;
 
       return wantedTokens.every((needle) =>
