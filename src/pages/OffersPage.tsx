@@ -38,6 +38,8 @@ import { isCardOnlyPriceCondition } from "@/lib/priceConditions";
 import { canonicalRetailerName } from "@/lib/retailerNames";
 import {
   isGenericPoncaSearch,
+  displayPonkanQuery,
+  displayPonkanProductName,
   isGenericSaltSearch,
   isGenericStrawberrySearch,
   isPowderedDrinkSearch,
@@ -1071,7 +1073,7 @@ function productHeadRule(
 }
 
 function standardizedOfferName(item: FlyerItemRow, family: OfferFamily) {
-  let compact = compactOfferName(item);
+  let compact = displayPonkanProductName(compactOfferName(item));
   let brand = String(item.brand ?? "").trim();
 
   // Known OCR/catalog corrections that should stay stable across future imports.
@@ -1852,7 +1854,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
   useEffect(() => {
     const query = String(searchParams.get("q") || "").trim();
     if (!query) return;
-    setSearchInput(query);
+    setSearchInput(displayPonkanQuery(query));
     setSearch(query);
   }, [searchParams]);
 
@@ -2934,7 +2936,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
         placeholder="Busque sabão em pó, água sanitária, café..."
         autoFocus
         onChange={(value, source) => {
-          setSearchInput(value);
+          setSearchInput(source === "voice" ? displayPonkanQuery(value) : value);
 
           if (searchTimerRef.current !== null) {
             window.clearTimeout(searchTimerRef.current);
@@ -2959,7 +2961,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
         placeholder="Busque sabão em pó, água sanitária, café..."
         autoFocus
         onChange={(value, source) => {
-          setSearchInput(value);
+          setSearchInput(source === "voice" ? displayPonkanQuery(value) : value);
 
           if (searchTimerRef.current !== null) {
             window.clearTimeout(searchTimerRef.current);
@@ -3312,7 +3314,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
               <Tags className="mx-auto h-8 w-8 text-primary" />
               <p className="mt-3 font-bold">
                 {hasSearch
-                  ? `Nenhuma oferta vigente para “${normalizedSearch}”`
+                  ? `Nenhuma oferta vigente para “${displayPonkanQuery(normalizedSearch)}”`
                   : "Busque um produto"}
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -3653,7 +3655,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                     Sem oferta vigente
                   </h2>
                   <p className="mt-0.5 text-sm text-muted-foreground">
-                    Não há promoção ativa para “{normalizedSearch}”. Use o histórico abaixo como referência.
+                    Não há promoção ativa para “{displayPonkanQuery(normalizedSearch)}”. Use o histórico abaixo como referência.
                   </p>
                 </div>
               </div>
