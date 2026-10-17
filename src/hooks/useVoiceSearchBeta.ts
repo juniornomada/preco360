@@ -134,6 +134,9 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     ["banana massa", "banana maçã"],
     ["moricote", "murcote"],
     ["morgote", "murcote"],
+    // Whisper/Groq returned "Beijo" for three consecutive spoken "Peixe" queries.
+    // Apply only to a standalone VOICE transcript; typed searches for Fini Beijos stay intact.
+    ["beijo", "peixe"],
   ]);
 
   const knownCorrection = knownAsrCorrections.get(key);

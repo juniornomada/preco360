@@ -50,6 +50,14 @@ describe("normalizeVoiceSearchBetaTranscript", () => {
     expect(normalizeVoiceSearchBetaTranscript("PONCÃ")).toBe("poncan");
   });
 
+  it("corrects three observed peixe-to-beijo voice mishearings without affecting other phrases", () => {
+    expect(normalizeVoiceSearchBetaTranscript("Beijo.")).toBe("peixe");
+    expect(normalizeVoiceSearchBetaTranscript("BEIJO!")).toBe("peixe");
+    expect(normalizeVoiceSearchBetaTranscript("Peixe.")).toBe("Peixe");
+    expect(normalizeVoiceSearchBetaTranscript("Bala Fini Beijos")).toBe("Bala Fini Beijos");
+    expect(normalizeVoiceSearchBetaTranscript("Peito de peru.")).toBe("Peito de peru");
+  });
+
   it("normalizes specialty butcher names from observed ASR output", () => {
     expect(normalizeVoiceSearchBetaTranscript("Entrecô.")).toBe("Entrecot");
     expect(normalizeVoiceSearchBetaTranscript("Novax.")).toBe("Noix");
