@@ -36,6 +36,10 @@ export function normalizeProductSearchText(value: string) {
     .replace(/\bsem\s+alcool\b/g, "sem alcool")
     .replace(/\b(?:suco|refresco)\s+em\s+po\b/g, "refresco em po")
     .replace(/\b(?:kaqui|kaki)\b/g, "caqui")
+    // Fiscal receipts shorten cappuccino to CAPP. (e.g. CAPP.3 CORACOES 200g).
+    .replace(/\b(?:capp|capuccino|capucino|capucciono)\b/g, "cappuccino")
+    // Batata-baroa and mandioquinha are the same root, never batata-inglesa.
+    .replace(/\b(?:mandioquinha|mandioquinhas|batata\s+baroa|batata\s+baroas)\b/g, "batata baroa")
     // Tangor Murcott appears in receipts as MURCOTE or MORGOTE.
     // "moricote" was recognized correctly from voice but matched "MOR"
     // from an unrelated Activia receipt through the broad prefix fallback.
