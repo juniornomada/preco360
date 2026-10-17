@@ -14,6 +14,11 @@ import {
 } from "@/lib/productSearch";
 import ProductVisual from "@/components/ProductVisual";
 import {
+  chickenKind, chickenKinds, chickenLabels, chickenQueryIntent,
+  meatPreparation, requestedChickenPreparation, chickenComparableKey,
+  type ChickenKind,
+} from "@/lib/chickenOfferKinds";
+import {
   fishOfferPreparation,
   isCornDerivedProduct,
   isCornDerivedQuery,
@@ -679,6 +684,7 @@ type OfferFamily =
   | "pork"
   | "fish"
   | "cannedFish"
+  | ChickenKind
   | "sugar"
   | "salt"
   | "strawberry"
@@ -686,7 +692,7 @@ type OfferFamily =
   | "alcoholDisinfectant"
   | "other";
 
-type SearchFamilyIntent = OfferFamily | "milk" | "banana" | "corn" | "cornGreenBroad" | "coffee";
+type SearchFamilyIntent = OfferFamily | "milk" | "banana" | "corn" | "cornGreenBroad" | "coffee" | "chicken";
 
 function hasAny(tokens: Set<string>, values: string[]) {
   return values.some((value) => tokens.has(value));
@@ -714,6 +720,7 @@ function queryOfferFamily(query: string): SearchFamilyIntent | null {
 
   if (isBroadBeefSearch(query)) return "beef";
   if (isBroadPorkSearch(query)) return "pork";
+  if (chickenQueryIntent(query)) return chickenQueryIntent(query);
   if (isBroadFishSearch(query) ||
       /^(?:peixes?|pescados?)\b/.test(normalized)) return "fish";
 
@@ -861,6 +868,8 @@ function inferOfferFamily(
   if (isPorkOfferText(raw)) return "pork";
   if (isCannedFishOffer(raw)) return "cannedFish";
   if (isFishOfferText(raw)) return "fish";
+  const chicken=chickenKind(item.raw_name);
+  if (chicken) return chicken;
   if (/^bolos?\b/.test(raw)) return "cake";
 
   if (/^desinfetante\b/.test(raw)) {
@@ -986,6 +995,7 @@ function familyLabel(family: OfferFamily) {
   if (family === "beef") return "Carne bovina";
   if (family === "pork") return "Carne suína";
   if (family === "fish") return "Peixe";
+  if (chickenKinds.includes(family as ChickenKind)) return chickenLabels[family as ChickenKind];
   if (family === "cannedFish") return "Peixe enlatado";
   if (family === "sugar") return "Açúcar";
   if (family === "salt") return "Sal";
@@ -1239,6 +1249,12 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   }
   if (intent === "beef") add(...BEEF_SEMANTIC_TOKENS);
   if (intent === "pork") add(...PORK_SEMANTIC_TOKENS);
+  if (intent === "chicken" || chickenKinds.includes(intent as ChickenKind)) {
+    add("frango","frangos","franguinho","ave","peito","file","filezinho",
+        "filézinho","inteiro","inteira","sem","com","osso","desossado",
+        "coxa","sobrecoxa","asa","sassami","desfiado","assado",
+        "fresco","fresca","resfriado","resfriada","congelado","congelada");
+  }
   if (intent === "fish") add(
     ...FISH_SEMANTIC_TOKENS,
     "fresco", "fresca", "frescos", "frescas",
@@ -1326,6 +1342,7 @@ function familyMatchesIntent(family: OfferFamily, intent: SearchFamilyIntent | n
   if (intent === "fish") {
     return family === "fish" || family === "cannedFish";
   }
+  if (intent === "chicken") return chickenKinds.includes(family as ChickenKind);
   return family === intent;
 }
 
@@ -2035,6 +2052,12 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     // SQL uses literal tokens for compound phrases. Query the parent family
     // first, then apply strict qualifiers to the returned product metadata.
     const intent = queryOfferFamily(normalizedSearch);
+    if (intent === "chicken" || chickenKinds.includes(intent as ChickenKind)) {
+      requests.add("frango");
+      requests.add("peito frango");
+      requests.add("coxa frango");
+      requests.add("sobrecoxa frango");
+    }
     if (intent === "fish") {
       requests.add("peixe");
       requests.add("salmao"); // Includes "Postas de Salmão" without "peixe" in title.
@@ -2147,13 +2170,17 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
       const sameFishPreparation = (previous: FlyerItemRow) =>
         !isFishOfferText(item.raw_name) ||
         fishOfferPreparation(item.raw_name) === fishOfferPreparation(previous.raw_name);
+      const sameChickenCut = (previous: FlyerItemRow) => {
+        const current=chickenComparableKey(item.raw_name);
+        return !current || current===chickenComparableKey(previous.raw_name);
+      };
       const previousAdvertised = linkedHistory.length
         ? linkedHistory.filter((previous) =>
             offerReferenceFamiliesCompatible(item.raw_name, previous.raw_name) !== false &&
-            sameFishPreparation(previous),
+            sameFishPreparation(previous) && sameChickenCut(previous),
           )
         : historicalItems.filter((previous) =>
-            comparableOfferIdentity(item, previous) && sameFishPreparation(previous),
+            comparableOfferIdentity(item, previous) && sameFishPreparation(previous) && sameChickenCut(previous),
           );
 
       const searchText = `${item.raw_name} ${item.brand ?? ""} ${product?.name ?? ""} ${product?.brand ?? ""} ${product?.category ?? ""}`;
@@ -2534,6 +2561,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
 
     const matches = preparedOffers.filter((entry) => {
       if (!familyMatchesIntent(entry.family, queryFamily)) return false;
+      const chickenPrep=requestedChickenPreparation(normalizedSearch);
+      if (chickenPrep && meatPreparation(entry.item.raw_name)!==chickenPrep) return false;
       if (queryFamily === "fish" &&
           !matchesFishPreparation(entry.item.raw_name, normalizedSearch)) return false;
       if (!wantedTokens.length) return true;
