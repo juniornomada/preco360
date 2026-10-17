@@ -1,3 +1,4 @@
+import { chickenComparableKey } from "@/lib/chickenOfferKinds";
 import { canonicalRetailerName } from "@/lib/retailerNames";
 import { isCardOnlyPriceCondition } from "@/lib/priceConditions";
 
@@ -1053,7 +1054,38 @@ export function cornProductKind(value: string): CornProductKind | null {
   return "unknown";
 }
 
+
+function animalProteinReferenceKey(value: string) {
+  const n=normalizeSearchText(value);
+  const prep = /\b(?:congelad[oa]s?)\b/.test(n) ? "congelado"
+    : /\b(?:fresc[oa]s?|resfriad[oa]s?)\b/.test(n) ? "fresco" : "nao-informado";
+  const chicken=chickenComparableKey(value);
+  if(chicken) return "frango:"+chicken;
+  const species=["tilapia","salmao","merluza","pescada","pescadinha",
+    "linguado","panga","bacalhau","atum","sardinha","pacu","tambaqui","corvina"];
+  const fish=species.find(specie=>new RegExp("\\b"+specie+"\\b").test(n));
+  if(fish && !/\b(?:temaki|sushi|poke|creminho|pate)\b/.test(n)) {
+    const preserved=/\b(?:lata|enlatad[oa]|oleo|conserva|ralado|solido)\b/.test(n);
+    return "peixe:"+fish+":"+(preserved?"conserva":prep);
+  }
+  if(/^(?:peixe|file de peixe|posta de peixe)\b/.test(n))
+    return "peixe:nao-identificado:"+prep;
+  const beef=["picanha","alcatra","patinho","acem","fraldinha","maminha",
+    "contra file","coxao mole","coxao duro","musculo","lagarto","paleta",
+    "costela","file mignon","cupim"];
+  const cut=beef.find(c=>n.includes(c));
+  if(cut && !/\b(?:suino|suina|porco|frango)\b/.test(n))
+    return "bovino:"+cut+":"+prep;
+  const pork=["pernil","panceta","bisteca","lombo","copa lombo"];
+  const pc=pork.find(c=>n.includes(c));
+  if(pc && /\b(?:suin[oa]|porco|panceta|bisteca)\b/.test(n))
+    return "suino:"+pc+":"+prep;
+  return null;
+}
+
 function purchaseComparisonKey(value: string) {
+  const proteinKey=animalProteinReferenceKey(value);
+  if(proteinKey) return proteinKey;
   const t = comparisonTokens(value);
   if (!t.length) return null;
 
