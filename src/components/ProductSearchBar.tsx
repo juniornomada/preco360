@@ -77,6 +77,7 @@ const ProductSearchBar = forwardRef<HTMLInputElement, ProductSearchBarProps>(
 
               inputRef.current?.blur();
               startListening((transcript) => {
+                clearError();
                 onChange(transcript, "voice");
               });
             }}
