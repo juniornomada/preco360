@@ -16,6 +16,9 @@ export type Database = {
     Tables: {
       prices: {
         Row: {
+          receipt_original_price: number | null
+          manual_price_corrected_at: string | null
+          manual_price_correction_note: string | null
           created_at: string
           date: string
           id: string
@@ -32,6 +35,9 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          receipt_original_price?: number | null
+          manual_price_corrected_at?: string | null
+          manual_price_correction_note?: string | null
           created_at?: string
           date?: string
           id?: string
@@ -48,6 +54,9 @@ export type Database = {
           user_id: string
         }
         Update: {
+          receipt_original_price?: number | null
+          manual_price_corrected_at?: string | null
+          manual_price_correction_note?: string | null
           created_at?: string
           date?: string
           id?: string
