@@ -17,6 +17,7 @@ import {
   fishOfferPreparation,
   isCornDerivedProduct,
   isCornDerivedQuery,
+  isCoffeeCapsuleProduct,
   matchesFishPreparation,
   requestedFishPreparation,
 } from "@/lib/compoundOfferSearch";
@@ -910,11 +911,8 @@ function inferOfferFamily(
 
   // Coffee is only treated as coffee when coffee itself is the product head.
   // "Bala de café" and "bebida ... café" therefore stay in their own families.
-  if (/^(?:caps|capsula|capsulas)\b/.test(raw) && /\bcafe\b/.test(raw)) {
-    return "coffeeCapsule";
-  }
+  if (isCoffeeCapsuleProduct(item.raw_name)) return "coffeeCapsule";
   if (/^cafe\b/.test(raw)) {
-    if (/\b(?:capsula|capsulas|caps)\b/.test(raw)) return "coffeeCapsule";
     if (isVolume) return "drink";
     if (/\bsoluvel\b/.test(raw)) return "coffeeSoluble";
     if (/\bgraos?\b/.test(raw)) return "coffeeBeans";
