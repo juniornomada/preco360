@@ -259,8 +259,14 @@ export default function ProductVisual({
   const visual = productVisual(safeName, safeCategory);
   // A valid product image always wins. Visual rules are fallback-only.
   // This prevents malformed DB values from breaking the whole search result.
+  const normalizedName = safeName.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const freshMandioquinha = /\b(?:mandioquinha|batata[\s-]+baroa)\b/.test(normalizedName) &&
+    !/\b(?:pure|chips|palha|sopa|frita|congelada|cozida|creme|nhoque)\b/.test(normalizedName);
   const safeImageUrl =
-    typeof imageUrl === "string" && imageUrl.trim() ? imageUrl.trim() : null;
+    typeof imageUrl === "string" && imageUrl.trim()
+      ? imageUrl.trim()
+      : freshMandioquinha ? "/product-images/mandioquinha.webp" : null;
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
