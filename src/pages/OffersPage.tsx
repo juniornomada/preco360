@@ -2861,6 +2861,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     explicitSearchFamily === "beef" ||
     explicitSearchFamily === "pork" ||
     explicitSearchFamily === "fish" ||
+    explicitSearchFamily === "chicken" ||
     explicitSearchFamily === "sugar" ||
     explicitSearchFamily === "salt";
 
