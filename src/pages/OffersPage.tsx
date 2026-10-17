@@ -1257,6 +1257,7 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   }
   if (intent === "fish") add(
     ...FISH_SEMANTIC_TOKENS,
+    "enlatado","enlatada","enlatados","enlatadas","lata","conserva",
     "fresco", "fresca", "frescos", "frescas",
     "resfriado", "resfriada", "resfriados", "resfriadas",
     "congelado", "congelada", "congelados", "congeladas",
@@ -2574,6 +2575,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
       if (!familyMatchesIntent(entry.family, queryFamily)) return false;
       const chickenPrep=requestedChickenPreparation(normalizedSearch);
       if (chickenPrep && meatPreparation(entry.item.raw_name)!==chickenPrep) return false;
+      if (queryFamily==="fish" && /\b(?:enlatad[oa]s?|lata|conserva)\b/.test(normalizeSearchText(normalizedSearch))
+          && entry.family!=="cannedFish") return false;
       if (queryFamily === "fish" &&
           !matchesFishPreparation(entry.item.raw_name, normalizedSearch)) return false;
       if (!wantedTokens.length) return true;
@@ -3150,6 +3153,12 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
         !bananaRelatedOnly && (() => {
           const quickItem = bestCurrentOffer.item;
           const quickCandidate = bestCurrentOffer.candidate;
+          const quickVerdict = bestCurrentOffer.verdict;
+          const quickVerdictUi=verdictUi[quickVerdict.key];
+          const QuickVerdictIcon=quickVerdictUi.Icon;
+          const quickReference=quickVerdict.referencePrice && quickCandidate.baseUnit!=="un"
+            ? formatNormalizedPrice(quickVerdict.referencePrice,quickCandidate.baseUnit)
+            : quickVerdict.referencePrice ? brl(quickVerdict.referencePrice) : null;
           const quickPack = packageLabel(quickItem);
           const quickRetailer =
             canonicalRetailerName(bestCurrentOffer.flyer?.retailer) ||
@@ -3239,6 +3248,23 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                           menor preço por {quickCandidate.baseUnit === "l" ? "litro" : quickCandidate.baseUnit === "kg" ? "kg" : "unidade"}
                         </p>
                       )}
+                      <div className="mt-1.5 space-y-1 text-[10px]">
+                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-bold ${quickVerdictUi.className}`}>
+                          <QuickVerdictIcon className="h-3 w-3" />{quickVerdictUi.label}
+                        </span>
+                        <p className="font-medium text-muted-foreground">
+                          {quickReference
+                            ? `Ref. histórica comparável: ${quickReference}`
+                            : "Sem histórico comparável"}
+                        </p>
+                        {quickReference && quickVerdict.deltaPct !== null && (
+                          <p className={quickVerdict.deltaPct<0?"font-bold text-green-500":
+                            quickVerdict.deltaPct>0?"font-bold text-red-500":"font-bold text-muted-foreground"}>
+                            {quickVerdict.deltaPct<0?"↓":quickVerdict.deltaPct>0?"↑":"="}
+                            {Math.abs(quickVerdict.deltaPct).toFixed(0)}% vs. histórico
+                          </p>
+                        )}
+                      </div>
 
                       {currentVsStore?.currentIsBetter && (
                         <p className="mt-1.5 text-[10px] font-bold text-primary">
