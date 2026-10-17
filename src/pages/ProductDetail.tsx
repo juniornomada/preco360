@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import PriceChart from "@/components/PriceChart";
 import { formatNormalizedPrice } from "@/lib/flyerAnalysis";
 import { unitPriceForProduct,unitPackageFromProduct } from "@/lib/productUnitPricing";
+import { correctedPriceMetadata, parsedPaidPrice } from "@/lib/receiptPriceCorrection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,13 +23,17 @@ export default function ProductDetail() {
   const [editName, setEditName] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
+  const [correctedPrice, setCorrectedPrice] = useState("");
+  const [correctionNote, setCorrectionNote] = useState("");
+  const [savingPaidPrice, setSavingPaidPrice] = useState(false);
 
   const { data: product } = useQuery({
     queryKey: ["product", id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("products")
-        .select("id,name,category,brand,package_size,unit,prices(id,price,date,supermarket)")
+        .select("id,name,category,brand,package_size,unit,image_url,prices(id,price,date,supermarket,source,receipt_text,package_quantity,package_unit,normalized_price,base_unit,receipt_original_price,manual_price_corrected_at,manual_price_correction_note)")
         .eq("id", id!)
         .eq("user_id", user!.id)
         .single();
@@ -105,6 +110,56 @@ export default function ProductDetail() {
   };
 
   const prices = product?.prices ?? [];
+
+  const editPaidPrice = (entry: (typeof prices)[number]) => {
+    setEditingPriceId(entry.id);
+    setCorrectedPrice(Number(entry.price).toFixed(2).replace(".", ","));
+    setCorrectionNote(entry.manual_price_correction_note ?? "");
+  };
+  const savePaidPrice = async (entry: (typeof prices)[number]) => {
+    if (!user || !product || savingPaidPrice) return;
+    const effectivePaid=parsedPaidPrice(correctedPrice);
+    if (effectivePaid===null) {
+      toast({title:"Preço inválido",description:"Informe um valor maior que zero, com até duas casas decimais.",variant:"destructive"});
+      return;
+    }
+    if (effectivePaid===Number(entry.price)) {
+      setEditingPriceId(null);
+      return;
+    }
+    setSavingPaidPrice(true);
+    try {
+      const normalizedByProduct=unitPriceForProduct(
+        product.name,entry.package_quantity ?? product.package_size,
+        entry.package_unit ?? product.unit,effectivePaid
+      );
+      const adjustment=correctedPriceMetadata(entry,effectivePaid,normalizedByProduct);
+      const {data,error}=await supabase.from("prices")
+        .update({
+          ...adjustment,
+          manual_price_correction_note: correctionNote.trim() || null,
+          manual_price_corrected_at: new Date().toISOString(),
+        })
+        .eq("id",entry.id)
+        .eq("product_id",product.id)
+        .eq("user_id",user.id)
+        .select("id").single();
+      if(error || !data) throw error ?? new Error("Registro não encontrado.");
+      await Promise.all([
+        queryClient.invalidateQueries({queryKey:["product",id]}),
+        queryClient.invalidateQueries({queryKey:["selected-price-history"]}),
+        queryClient.invalidateQueries({queryKey:["products"]}),
+        queryClient.invalidateQueries({queryKey:["prices"]}),
+        queryClient.invalidateQueries({queryKey:["live-market"]}),
+      ]);
+      setEditingPriceId(null);
+      toast({title:"Preço pago atualizado",description:"O valor original do cupom foi preservado."});
+    } catch (err: any) {
+      toast({title:"Não consegui atualizar o valor pago",description:err?.message ?? "Tente novamente.",variant:"destructive"});
+    } finally {
+      setSavingPaidPrice(false);
+    }
+  };
   const unitValue=(price:number)=>
     product ? unitPriceForProduct(product.name,product.package_size,product.unit,price) : null;
   const inferredVolume=product && unitPackageFromProduct(product.name,product.package_size,product.unit)?.inferred;
@@ -165,6 +220,12 @@ export default function ProductDetail() {
         </div>
       </div>
 
+      {product?.image_url && (
+        <div className="mb-3 flex items-center gap-3">
+          <img src={product.image_url} alt={product.name} className="h-20 w-20 rounded-xl border bg-muted/40 object-contain p-1" />
+          <p className="text-xs text-muted-foreground">Imagem do produto</p>
+        </div>
+      )}
       {/* Best price highlight */}
       {prices.length > 0 && (
         <Card className="mb-4 border-primary/30 bg-primary/5">
@@ -200,7 +261,8 @@ export default function ProductDetail() {
       <div className="space-y-2">
         {sorted.map((p) => (
           <Card key={p.id}>
-            <CardContent className="flex items-center justify-between p-3">
+            <CardContent className="flex flex-col gap-3 p-3">
+            <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-muted-foreground" />
                 <div>
@@ -219,6 +281,37 @@ export default function ProductDetail() {
                   </p>
                 )}
               </div>
+              <div className="flex justify-end">
+                <Button type="button" variant="outline" size="sm" onClick={() => editPaidPrice(p)}
+                  disabled={savingPaidPrice || editingPriceId===p.id}>
+                  <Pencil className="mr-1.5 h-3.5 w-3.5" /> Corrigir preço pago
+                </Button>
+              </div>
+              {editingPriceId===p.id && (
+                <div className="space-y-2 rounded-xl border bg-muted/30 p-3">
+                  <p className="text-xs font-semibold">Valor efetivamente pago neste lançamento</p>
+                  <Input aria-label="Novo preço pago" inputMode="decimal" value={correctedPrice}
+                    onChange={(e)=>setCorrectedPrice(e.target.value)} placeholder="Ex.: 16,90" />
+                  <label className="block text-xs text-muted-foreground">
+                    Motivo (opcional)
+                    <Input value={correctionNote} onChange={(e)=>setCorrectionNote(e.target.value)}
+                      placeholder="Desconto aplicado no subtotal da NFC-e" className="mt-1" />
+                  </label>
+                  {p.source==="receipt" && (
+                    <p className="text-xs text-muted-foreground">
+                      Valor original do cupom: R$ {Number(p.receipt_original_price ?? p.price).toFixed(2).replace(".", ",")}.
+                      O valor original e o texto fiscal serão preservados.
+                    </p>
+                  )}
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="outline" disabled={savingPaidPrice} onClick={() => setEditingPriceId(null)}>Cancelar</Button>
+                    <Button size="sm" disabled={savingPaidPrice || parsedPaidPrice(correctedPrice)===null}
+                      onClick={()=>void savePaidPrice(p)}>
+                      {savingPaidPrice ? "Salvando..." : "Salvar preço pago"}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         ))}
