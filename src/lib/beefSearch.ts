@@ -144,7 +144,7 @@ const FISH_PRODUCT_HEAD_RE = new RegExp(
     "^(?:peixe|peixes|pescado|pescados)(?: |$)",
     `^(?:file|files) (?:de )?(?:peixe )?${FISH_SPECIES}(?: |$)`,
     `^file ${FISH_SPECIES}(?: |$)`,
-    `^posta (?:de )?${FISH_SPECIES}(?: |$)`,
+    `^postas? (?:de )?${FISH_SPECIES}(?: |$)`,
     `^costelinha (?:de )?(?:pacu|tambaqui)(?: |$)`,
     `^${FISH_SPECIES}(?: |$)`,
   ].join("|"),
