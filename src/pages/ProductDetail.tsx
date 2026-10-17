@@ -262,27 +262,35 @@ export default function ProductDetail() {
         {sorted.map((p) => (
           <Card key={p.id}>
             <CardContent className="flex flex-col gap-3 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <MapPin className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <p className="text-sm font-medium">{p.supermarket}</p>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Calendar className="h-3 w-3" />
-                    {new Date(p.date).toLocaleDateString("pt-BR")}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <div>
+                    <p className="text-sm font-medium">{p.supermarket}</p>
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Calendar className="h-3 w-3" />
+                      {new Date(p.date).toLocaleDateString("pt-BR")}
+                    </div>
                   </div>
                 </div>
+                <div className="shrink-0 text-right">
+                  <p className="font-bold">R$ {Number(p.price).toFixed(2).replace(".", ",")}</p>
+                  {unitValue(Number(p.price)) && (
+                    <p className="text-xs font-semibold text-primary">
+                      {formatNormalizedPrice(unitValue(Number(p.price))!.normalizedPrice,unitValue(Number(p.price))!.baseUnit)}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="shrink-0 text-right">
-                <p className="font-bold">R$ {p.price.toFixed(2).replace(".", ",")}</p>
-                {unitValue(p.price) && (
-                  <p className="text-xs font-semibold text-primary">
-                    {formatNormalizedPrice(unitValue(p.price)!.normalizedPrice,unitValue(p.price)!.baseUnit)}
-                  </p>
-                )}
-              </div>
+              {p.receipt_original_price !== null && p.receipt_original_price !== undefined && (
+                <p className="text-[11px] text-muted-foreground">
+                  Valor original NFC-e: R$ {Number(p.receipt_original_price).toFixed(2).replace(".", ",")}
+                  {p.manual_price_correction_note ? ` · ${p.manual_price_correction_note}` : ""}
+                </p>
+              )}
               <div className="flex justify-end">
-                <Button type="button" variant="outline" size="sm" onClick={() => editPaidPrice(p)}
+                <Button type="button" variant="outline" size="sm"
+                  onClick={() => editPaidPrice(p)}
                   disabled={savingPaidPrice || editingPriceId===p.id}>
                   <Pencil className="mr-1.5 h-3.5 w-3.5" /> Corrigir preço pago
                 </Button>
@@ -304,7 +312,8 @@ export default function ProductDetail() {
                     </p>
                   )}
                   <div className="flex justify-end gap-2">
-                    <Button size="sm" variant="outline" disabled={savingPaidPrice} onClick={() => setEditingPriceId(null)}>Cancelar</Button>
+                    <Button size="sm" variant="outline" disabled={savingPaidPrice}
+                      onClick={() => setEditingPriceId(null)}>Cancelar</Button>
                     <Button size="sm" disabled={savingPaidPrice || parsedPaidPrice(correctedPrice)===null}
                       onClick={()=>void savePaidPrice(p)}>
                       {savingPaidPrice ? "Salvando..." : "Salvar preço pago"}
