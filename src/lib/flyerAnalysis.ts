@@ -1084,6 +1084,8 @@ function animalProteinReferenceKey(value: string) {
 }
 
 function purchaseComparisonKey(value: string) {
+  if (/\b(?:mandioquinha|batata baroa)\b/.test(normalizeSearchText(value)))
+    return "hortifruti:batata-baroa";
   const proteinKey=animalProteinReferenceKey(value);
   if(proteinKey) return proteinKey;
   const t = comparisonTokens(value);
@@ -1268,6 +1270,7 @@ function purchaseKeysCompatible(left: string, right: string) {
 
 export function offerReferenceFamilyKey(value: string) {
   const text = normalizeSearchText(value);
+  if (/\b(?:mandioquinha|batata baroa)\b/.test(text)) return "hortifruti:batata-baroa";
 
   if (/^(?:papel toalha|toalha de papel)\b/.test(text)) {
     return /\binterfolh(?:a|ado|ada|ados|adas)?\b/.test(text)
