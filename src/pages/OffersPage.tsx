@@ -2620,10 +2620,15 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
   }, [preparedOffers, hasSearch, normalizedSearch]);
 
   const bestCurrentOffer = useMemo(() => {
+    // Generic milho can display curau, pamonha and juice, but their package
+    // prices must not compete with the per-kg price of corn kernels.
+    const comparableOffers = queryOfferFamily(normalizedSearch) === "corn"
+      ? analyzed.filter((entry) => entry.family !== "cornDerived")
+      : analyzed;
     const candidates =
       packageFilters.length === 0
-        ? analyzed
-        : analyzed.filter((entry) =>
+        ? comparableOffers
+        : comparableOffers.filter((entry) =>
             packageFilters.includes(packageLabel(entry.item) ?? ""),
           );
 
@@ -2638,7 +2643,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
 
       return a.candidate.price - b.candidate.price;
     })[0];
-  }, [analyzed, packageFilters]);
+  }, [analyzed, packageFilters, normalizedSearch]);
 
   const currentVsReference = useMemo(() => {
     if (!bestCurrentOffer || !reference360) return null;
@@ -2822,6 +2827,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     >();
 
     for (const entry of analyzed) {
+      if (explicitSearchFamily === "corn" && entry.family === "cornDerived") continue;
       const current = bestEntry.get(entry.family);
       const candidatePrice =
         entry.family === "cannedFish"
@@ -2845,7 +2851,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     return new Map(
       [...bestEntry.entries()].map(([family, entry]) => [family, entry.id]),
     );
-  }, [analyzed]);
+  }, [analyzed, explicitSearchFamily]);
 
   const resultFamilyCount = useMemo(
     () => new Set(analyzed.map((entry) => entry.family)).size,
