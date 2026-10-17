@@ -13,6 +13,11 @@ describe("comparable chicken cuts and preparations",()=>{
     expect(chickenKind("Sobrecoxa de Frango Seara Bandeja")).toBe("chickenThigh");
     expect(chickenKind("Coxa de Frango Sadia IQF Congelada")).toBe("chickenDrumstick");
     expect(chickenKind("Frango assado Confiança")).toBe("chickenRoasted");
+    expect(chickenKind("Purê de Batata Doce com Frango Desfiado Swift Pro&Fit Prato Feito 300g"))
+      .toBe("chickenMeal");
+    expect(chickenKind("Peito de Frango Desfiado Seara 400g")).toBe("chickenShredded");
+    expect(chickenComparableKey("Purê de Batata Doce com Frango Desfiado Swift Pro&Fit"))
+      .not.toBe(chickenComparableKey("Peito de Frango Desfiado Seara 400g"));
     expect(chickenKind("Peito de peru defumado")).toBeNull();
   });
   it("keeps historical benchmarks within cuts AND preparation",()=>{
