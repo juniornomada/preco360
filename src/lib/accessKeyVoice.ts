@@ -107,3 +107,34 @@ export function accessKeyDigitsFromTranscript(value: string) {
 export function sanitizeAccessKeyDigits(value: string) {
   return value.replace(/\D/g, "").slice(0, 44);
 }
+
+
+/**
+ * Some Android/Chrome speech sessions produce the same words as both a
+ * completed result and the next provisional hypothesis. Discard only an
+ * overlapping *provisional phrase* (at least three digits), never individual
+ * repeated digits such as "00" or "333" from normal dictation.
+ */
+export function removeInterimEcho(finalDigits: string, interimDigits: string) {
+  const overlap = speechReplayOverlap(finalDigits, interimDigits);
+  return interimDigits.slice(overlap);
+}
+
+/**
+ * Reconcile the short-lived replay of an unconfirmed hypothesis when Chrome
+ * automatically starts another speech-recognition session. Return the number
+ * of duplicated leading digits rather than modifying the entire key.
+ *
+ * Requiring >= 3 characters prevents collapsing ordinary repeated numbers.
+ * Call this ONLY for provisional text retained from the immediately previous
+ * recognition session, never for the whole 44-digit access key.
+ */
+export function speechReplayOverlap(previous: string, incoming: string) {
+  if (!previous || !incoming) return 0;
+
+  for (let size = Math.min(previous.length, incoming.length); size >= 3; size--) {
+    if (previous.slice(-size) === incoming.slice(0, size)) return size;
+  }
+
+  return 0;
+}
