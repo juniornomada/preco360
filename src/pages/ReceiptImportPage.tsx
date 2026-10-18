@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { QrScanner } from "@/components/QrScanner";
 import { buildOfficialConsultationUrl, extractAccessKey, fiscalDocumentKind, fiscalDocumentLabel, validateAccessKey, validateNfceUrl } from "@/lib/nfceKey";
 import { inferPackage } from "@/lib/flyerAnalysis";
+import { currentLocalReceiptDate, possibleRecentReceiptDuplicate } from "@/lib/receiptRepeatGuard";
 import {
   applyPrintedReceiptDiscounts,
   type PrintedReceiptDiscount,
@@ -454,6 +455,7 @@ export default function ReceiptImportPage() {
   const [items, setItems] = useState<ParsedItem[]>([]);
   const [supermarket, setSupermarket] = useState("");
   const [receiptDate, setReceiptDate] = useState("");
+  const [receiptDateAssumed, setReceiptDateAssumed] = useState(false);
   const [source, setSource] = useState<ImportSource>("qr");
   const [blocked, setBlocked] = useState<BlockedState | null>(null);
   const [pageText, setPageText] = useState("");
@@ -531,6 +533,7 @@ export default function ReceiptImportPage() {
     setItems([]);
     setSupermarket("");
     setReceiptDate("");
+    setReceiptDateAssumed(false);
     setBlocked(null);
     setPageText("");
     setFileProgress("");
@@ -577,7 +580,8 @@ export default function ReceiptImportPage() {
 
     setItems(parsed);
     setSupermarket(data?.supermarket ?? "");
-    setReceiptDate(data?.date ?? new Date().toISOString().slice(0, 10));
+    setReceiptDate(data?.date || currentLocalReceiptDate());
+    setReceiptDateAssumed(!data?.date);
     setSource(importSource);
     setBlocked(null);
     toast({ title: `${parsed.length} itens encontrados`, description: "Revise os produtos antes de salvar." });
@@ -758,7 +762,8 @@ export default function ReceiptImportPage() {
 
       setItems(merged);
       setSupermarket(detectedSupermarket);
-      setReceiptDate(detectedDate || new Date().toISOString().slice(0, 10));
+      setReceiptDate(detectedDate || currentLocalReceiptDate());
+      setReceiptDateAssumed(!detectedDate);
       setBlocked(null);
       setFileProgress("");
 
@@ -1101,7 +1106,7 @@ export default function ReceiptImportPage() {
     setSaving(true);
 
     try {
-      const date = receiptDate || new Date().toISOString().slice(0, 10);
+      const date = receiptDate || currentLocalReceiptDate();
       const itemsToSave = consolidateReceiptItemsForSave(items);
 
       const batchItems = itemsToSave
@@ -1166,6 +1171,41 @@ export default function ReceiptImportPage() {
         source !== "image" && currentKeyCheck.valid
           ? currentKeyCheck.clean
           : null;
+
+      // Printed receipts can be re-read with a different store name, and a
+      // missing date can default to the next UTC calendar day in Brazil.
+      // Warn before re-importing a large, very similar basket. The user can
+      // still continue if it is genuinely a separate purchase.
+      if (source === "image" && items.length >= 8) {
+        const since = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+        const { data: previousReceipts, error: previousError } = await db
+          .from("receipt_imports")
+          .select("supermarket,receipt_date,imported_at,original_line_count,saved_price_count")
+          .eq("user_id", user.id)
+          .gte("imported_at", since)
+          .order("imported_at", { ascending: false })
+          .limit(50);
+        if (previousError) throw previousError;
+        const match = possibleRecentReceiptDuplicate(previousReceipts ?? [], {
+          supermarket: supermarket.trim(),
+          receiptDate: date,
+          originalLineCount: items.length,
+          savedProductCount: batchItems.length,
+        });
+        if (match) {
+          const confirmed = window.confirm(
+            "Possível cupom já importado!\n\n" +
+            "Encontrei uma importação recente da mesma rede, com quantidade de itens semelhante " +
+            "e data próxima (" + String(match.receipt_date) + ").\n\n" +
+            "Salvar novamente criará novos registros de preço. " +
+            "Selecione Cancelar para evitar duplicidades; OK apenas se for outra compra."
+          );
+          if (!confirmed) {
+            toast({ title: "Importação cancelada para evitar duplicidade", description: "Os itens continuam na tela para revisão." });
+            return;
+          }
+        }
+      }
 
       const { data: saved, error: saveError } = await db.rpc(
         "save_receipt_price_batch_v2",
@@ -1528,7 +1568,11 @@ export default function ReceiptImportPage() {
           <CardContent className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <div><label className="mb-1 block text-xs font-medium text-muted-foreground">Supermercado</label><Input value={supermarket} onChange={(e) => setSupermarket(e.target.value)} placeholder="Nome do supermercado" /></div>
-              <div><label className="mb-1 block text-xs font-medium text-muted-foreground">Data da compra</label><Input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} /></div>
+              <div><label className="mb-1 block text-xs font-medium text-muted-foreground">Data da compra</label><Input type="date" value={receiptDate} onChange={(e) => { setReceiptDate(e.target.value); setReceiptDateAssumed(false); }} />
+                {receiptDateAssumed && (
+                  <p className="mt-1 text-xs font-medium text-amber-500">Data não encontrada no arquivo. Preenchi a data local de hoje: confira e ajuste a data da compra antes de salvar.</p>
+                )}
+              </div>
             </div>
             <div className="space-y-2">
               {items.map((item, index) => {
