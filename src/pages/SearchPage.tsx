@@ -39,6 +39,7 @@ import { Input } from "@/components/ui/input";
 import ProductSearchBar from "@/components/ProductSearchBar";
 import PriceQuoteSearchResult from "@/components/PriceQuoteSearchResult";
 import { readableQuoteProductName } from "@/lib/quoteNamePresentation";
+import { displayCatalogCategory } from "@/lib/catalogCategoryPresentation";
 import { productMatchesSearch } from "@/lib/productSearch";
 import { unitPriceForProduct, unitPackageFromProduct } from "@/lib/productUnitPricing";
 import {
@@ -278,7 +279,7 @@ export default function SearchPage() {
               <PriceQuoteSearchResult
                 key={product.id}
                 name={displayName}
-                category={product.category}
+                category={displayCatalogCategory(product.name, product.category)}
                 imageUrl={
                   product.image_url &&
                   /^(?:external_verified_(?:name_package|ean)|product_library_verified|manual_user_asset|duplicate_master_verified)$/.test(product.image_source ?? "")
@@ -318,7 +319,7 @@ export default function SearchPage() {
                 <div className="mt-1 flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <h2 className="text-xl font-bold">{selectedDisplayName}</h2>
-                    <p className="text-xs text-muted-foreground">{selected.category}</p>
+                    <p className="text-xs text-muted-foreground">{displayCatalogCategory(selected.name, selected.category)}</p>
                     {unitPackageFromProduct(selected.name,selected.package_size,selected.unit)?.inferred && (
                       <p className="text-[11px] text-amber-500">Volume de 900 ml inferido da descrição do cupom</p>
                     )}
