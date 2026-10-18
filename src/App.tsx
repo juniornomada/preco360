@@ -43,6 +43,7 @@ const Index = resilientLazy(() => import("./pages/Index"));
 const AuthPage = resilientLazy(() => import("./pages/AuthPage"));
 const ProductDetail = resilientLazy(() => import("./pages/ProductDetail"));
 const SearchPage = resilientLazy(() => import("./pages/SearchPage"));
+const SearchPageBeta = resilientLazy(() => import("./pages/SearchPageBeta"));
 const OffersPage = resilientLazy(() => import("./pages/OffersPage"));
 const OfferImagesAuditPage = resilientLazy(() => import("./pages/OfferImagesAuditPage"));
 const ReceiptImportPage = resilientLazy(() => import("./pages/ReceiptImportPage"));
@@ -153,6 +154,7 @@ function AppRoutes() {
         <Route path="/" element={<Index />} />
         <Route path="/product/:id" element={<ProductDetail />} />
         <Route path="/search" element={<SearchPage />} />
+        <Route path="/search-beta" element={<SearchPageBeta />} />
         <Route path="/upload" element={<ReceiptImportPage />} />
         <Route path="/sefaz-sp-nfce" element={<SefazSpNfcePage />} />
         <Route path="/offers" element={<OffersPage />} />
