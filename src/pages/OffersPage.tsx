@@ -3156,16 +3156,11 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
           const quickItem = bestCurrentOffer.item;
           const quickCandidate = bestCurrentOffer.candidate;
           const quickVerdict = bestCurrentOffer.verdict;
-          const quickVerdictUi=verdictUi[quickVerdict.key];
-          const QuickVerdictIcon=quickVerdictUi.Icon;
           const quickReference=quickVerdict.referencePrice && quickCandidate.baseUnit!=="un"
             ? formatNormalizedPrice(quickVerdict.referencePrice,quickCandidate.baseUnit)
             : quickVerdict.referencePrice ? brl(quickVerdict.referencePrice) : null;
           const quickHistoryScope=quickVerdict.provenance?.referenceScope==="same_brand"
             ? "da mesma marca" : "da categoria";
-          const quickVerdictLabel = quickVerdict.provenance?.referenceScope==="category"
-            ? quickVerdictUi.label.replace("histórico","categoria")
-            : quickVerdictUi.label;
           const quickPack = packageLabel(quickItem);
           const quickRetailer =
             canonicalRetailerName(bestCurrentOffer.flyer?.retailer) ||
@@ -3195,15 +3190,17 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
           return (
             <section
               id={`best-current-offer-${quickItem.id}`}
-              className="mb-4 rounded-[22px] border-2 border-primary/50 bg-primary/[0.10] p-3 shadow-[0_8px_28px_hsl(var(--primary)/0.08)]"
+              className="mb-4 rounded-[20px] border border-primary/40 bg-primary/[0.06] p-3 shadow-sm"
             >
               <div className="mb-2 flex items-center justify-between gap-3">
                 <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">
-                  Melhor custo-benefício agora
+                  Menor preço agora
                 </p>
-                <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
-                  {visibleAnalyzed.length} oferta{visibleAnalyzed.length === 1 ? "" : "s"} vigente{visibleAnalyzed.length === 1 ? "" : "s"}
-                </span>
+                {visibleAnalyzed.length > 1 && (
+                  <span className="text-[10px] font-semibold text-muted-foreground">
+                    {visibleAnalyzed.length} ofertas vigentes
+                  </span>
+                )}
               </div>
 
               <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3">
@@ -3229,60 +3226,26 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
 
                   <div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                        <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-background/30 px-2 py-0.5 font-bold">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px]">
+                        <span className="inline-flex items-center gap-1 font-semibold text-foreground">
                           <Store className="h-3.5 w-3.5 text-primary" />
                           {quickRetailer}
                         </span>
+                        <span className="text-muted-foreground">
+                          · {expiryLabel(bestCurrentOffer.flyer?.valid_to, today)}
+                        </span>
                         {quickClubPrice !== null && (
-                          <span className="inline-flex items-center rounded-full border border-primary/25 bg-primary/15 px-2 py-0.5 font-extrabold uppercase tracking-[0.08em] text-primary">
+                          <span className="font-extrabold text-primary">
                             {normalizeSearchText(quickRetailer) === "max atacadista" ? "Clube Max" : "Clube"}
                           </span>
                         )}
                         {quickActivationState !== "none" && (
-                          <span className="inline-flex items-center rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 font-bold text-amber-500">
+                          <span className="font-semibold text-amber-500">
                             {quickActivationState === "activated" ? "APP ativado" : "ativar no APP"}
                           </span>
                         )}
-                        <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-background/25 px-2 py-0.5 text-muted-foreground">
-                          <Clock3 className="h-3.5 w-3.5" />
-                          {expiryLabel(bestCurrentOffer.flyer?.valid_to, today)}
-                        </span>
                       </div>
 
-                      {quickUnit && (
-                        <p className="mt-1 text-[10px] font-semibold text-muted-foreground">
-                          menor preço por {quickCandidate.baseUnit === "l" ? "litro" : quickCandidate.baseUnit === "kg" ? "kg" : "unidade"}
-                        </p>
-                      )}
-                      <div className="mt-1.5 space-y-1 text-[10px]">
-                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-bold ${quickVerdictUi.className}`}>
-                          <QuickVerdictIcon className="h-3 w-3" />{quickVerdictLabel}
-                        </span>
-                        <p className="font-medium text-muted-foreground">
-                          {quickReference
-                            ? `Referência ${quickHistoryScope}: ${quickReference}`
-                            : "Sem histórico comparável"}
-                        </p>
-                        {quickReference && quickVerdict.provenance && (
-                          <p className="leading-relaxed font-medium text-muted-foreground">
-                            {historicalReferenceScopeLabel(quickVerdict.provenance)}
-                          </p>
-                        )}
-                        {quickReference && quickVerdict.deltaPct !== null && (
-                          <p className={quickVerdict.deltaPct<0?"font-bold text-green-500":
-                            quickVerdict.deltaPct>0?"font-bold text-red-500":"font-bold text-muted-foreground"}>
-                            {quickVerdict.deltaPct<0?"↓":quickVerdict.deltaPct>0?"↑":"="}
-                            {Math.abs(quickVerdict.deltaPct).toFixed(0)}% vs. referência {quickHistoryScope}
-                          </p>
-                        )}
-                      </div>
-
-                      {currentVsStore?.currentIsBetter && (
-                        <p className="mt-1.5 text-[10px] font-bold text-primary">
-                          {Math.abs(currentVsStore.diffPct).toFixed(0)}% mais barato que o preço de gôndola registrado
-                        </p>
-                      )}
                     </div>
 
                     <div className="shrink-0 text-right">
@@ -3310,6 +3273,42 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                   </div>
                 </div>
               </div>
+              {quickReference && quickVerdict.deltaPct !== null ? (
+                <details key={quickItem.id} className="group mt-3 rounded-xl bg-background/40 px-3 py-2 text-[11px]">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-semibold [&::-webkit-details-marker]:hidden">
+                    <span className={quickVerdict.deltaPct < -0.5
+                      ? "text-primary" : quickVerdict.deltaPct > 0.5 ? "text-red-500" : "text-foreground"}>
+                      {quickVerdict.deltaPct < -0.5 ? "↓" : quickVerdict.deltaPct > 0.5 ? "↑" : "≈"}
+                      {quickVerdict.deltaPct < -0.5
+                        ? Math.abs(quickVerdict.deltaPct).toFixed(0) + "% abaixo"
+                        : quickVerdict.deltaPct > 0.5
+                          ? Math.abs(quickVerdict.deltaPct).toFixed(0) + "% acima"
+                          : "Na faixa"}
+                      {" da referência " + quickHistoryScope}
+                    </span>
+                    <span className="inline-flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+                      Detalhes <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+                    </span>
+                  </summary>
+                  <div className="mt-2 space-y-1 border-t border-border/50 pt-2 text-muted-foreground">
+                    <p className="font-semibold text-foreground">
+                      {"Referência " + quickHistoryScope + ": " + quickReference}
+                    </p>
+                    {quickVerdict.provenance && (
+                      <p>{historicalReferenceScopeLabel(quickVerdict.provenance)}</p>
+                    )}
+                    {quickVerdict.provenance?.referenceScope === "category" && (
+                      <p>Comparação entre marcas equivalentes, não o histórico do produto anunciado.</p>
+                    )}
+                    {currentVsStore?.currentIsBetter && (
+                      <p>{Math.abs(currentVsStore.diffPct).toFixed(0)}% abaixo do preço de gôndola registrado.</p>
+                    )}
+                    {latestReceiptReference && <p>Seu último preço pago aparece no resumo abaixo.</p>}
+                  </div>
+                </details>
+              ) : (
+                <p className="mt-2 text-[11px] text-muted-foreground">Sem histórico comparável.</p>
+              )}
             </section>
           );
         })()}
@@ -4007,7 +4006,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                     </p>
                   </div>
                   <p className="text-[9px] text-muted-foreground sm:text-[10px]" title={latestReceiptProduct?.name ?? undefined}>
-                    último pago {latestReceiptProduct?.name ? `· ${latestReceiptProduct.name}` : ""}
+                    último pago
                   </p>
                   {latestReceiptReference ? (
                     <>
@@ -4145,7 +4144,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                   </span>
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-foreground">
-                      Referência das suas compras:{" "}
+                      Referência do seu histórico:{" "}
                       {formatNormalizedPrice(
                         decisionReference.central,
                         decisionReference.baseUnit,
@@ -4158,7 +4157,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                         decisionReference.baseUnit,
                       )}
                       , vale esperar outra oferta se a compra puder aguardar.
-                      Esta referência considera suas compras anteriores, que podem ser de outra marca.
+                      Pode incluir compras e preços de gôndola de marcas equivalentes.
                     </p>
                   </div>
                 </div>
