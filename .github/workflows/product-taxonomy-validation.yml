@@ -12,6 +12,8 @@ on:
       - 'src/pages/SearchPage.tsx'
       - 'src/components/PriceQuoteSearchResult.tsx'
       - 'src/test/priceQuoteSearchResult.test.tsx'
+      - 'src/test/quoteNamePresentation.test.ts'
+      - 'src/lib/quoteNamePresentation.ts'
       - 'src/test/*Taxonomy*.test.ts'
       - 'src/test/potatoOfferReference.test.ts'
   workflow_dispatch:
