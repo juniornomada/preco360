@@ -503,14 +503,27 @@ function packageBonus(a: PackageInfo | null, b: PackageInfo | null) {
 
 export function matchFlyerItem(candidate: FlyerCandidate, products: ProductForMatch[], savedAliases: AliasForMatch[], retailer?: string) {
   const normalized = normalizeSearchText(candidate.rawName);
-  const alias = savedAliases.find((item) => item.normalized_alias === normalized &&
-    (!item.retailer || !retailer || canonicalRetailerName(item.retailer) === canonicalRetailerName(retailer)));
+  const candidatePotato = potatoProductKind(candidate.rawName);
+  const potatoSafeMatch = (name: string) => {
+    const productPotato = potatoProductKind(name);
+    if (!candidatePotato && !productPotato) return true;
+    if (!candidatePotato || !productPotato || candidatePotato !== productPotato) return false;
+    // Unidentified subtypes may only be matched by the complete exact name.
+    return candidatePotato !== "potatoUnknown" || normalizeSearchText(name) === normalized;
+  };
+  const alias = savedAliases.find((item) => {
+    if (item.normalized_alias !== normalized ||
+      (item.retailer && retailer && canonicalRetailerName(item.retailer) !== canonicalRetailerName(retailer))) return false;
+    const linkedProduct = products.find((product) => product.id === item.product_id);
+    return !!linkedProduct && potatoSafeMatch(linkedProduct.name);
+  });
   if (alias) return { productId: alias.product_id, confidence: 1, type: "exact" as const };
 
   const candidateTokens = tokens(candidate.rawName);
   let best: { id: string; score: number } | null = null;
 
   for (const product of products) {
+    if (!potatoSafeMatch(product.name)) continue;
     const productTokens = tokens(`${product.name} ${product.brand ?? ""}`);
     if (!identityCompatible(candidate, candidateTokens, productTokens)) continue;
     if (!brandCompatible(candidate, productTokens)) continue;
