@@ -3083,6 +3083,14 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
       />
       )}
 
+      {betaVoice && hasSearch && !isLoading && !error && (
+        <p className="mb-2 px-1 text-[10px] text-muted-foreground" data-testid="beta-search-diagnostics">
+          Diagnóstico Beta: {searchRows.length} registro(s) retornado(s) pelo banco;
+          {" "}{baseOffers.length} oferta(s) ativa(s) preparada(s);
+          {" "}{analyzed.length} oferta(s) após filtros.
+        </p>
+      )}
+
       {hasSearch && !isLoading && !error && broadBananaFruit && (
         <section className="mb-4 rounded-2xl border border-primary/25 bg-primary/[0.05] p-3">
           <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
