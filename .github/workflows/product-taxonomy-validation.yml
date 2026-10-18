@@ -40,3 +40,19 @@ jobs:
       - name: Build
         if: always()
         run: npm run build
+
+  baseline-main-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out main to identify pre-existing failures
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - name: Current production baseline (informational)
+        run: npm test
+        continue-on-error: true
