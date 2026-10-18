@@ -1,0 +1,71 @@
+name: Taxonomy SQL Migration and Rollback Smoke Test
+
+on:
+  push:
+    branches:
+      - feat/product-taxonomy-and-potato-families
+    paths:
+      - 'supabase/migrations/20261018*.sql'
+      - 'docs/rollback-product-taxonomy-20261018.sql'
+      - 'scripts/taxonomy-smoke-*.sql'
+      - '.github/workflows/taxonomy-sql-smoke.yml'
+  pull_request:
+    paths:
+      - 'supabase/migrations/20261018*.sql'
+      - 'docs/rollback-product-taxonomy-20261018.sql'
+      - 'scripts/taxonomy-smoke-*.sql'
+      - '.github/workflows/taxonomy-sql-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-postgres:
+    name: Ephemeral PostgreSQL schema, backfill and rollback
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: taxonomy_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d taxonomy_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: taxonomy_test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make PostgreSQL client available
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql-client
+          fi
+      - name: Seed harmless fixture records
+        run: psql -v ON_ERROR_STOP=1 -f scripts/taxonomy-smoke-setup.sql
+      - name: Apply all taxonomy migrations in chronological order
+        run: |
+          set -euo pipefail
+          for file in supabase/migrations/2026101818*.sql supabase/migrations/2026101819*.sql; do
+            test -f "$file"
+            echo "Applying $file"
+            psql -v ON_ERROR_STOP=1 -f "$file" >/dev/null
+          done
+      - name: Assert classifications, isolation and historical integrity
+        run: psql -v ON_ERROR_STOP=1 -f scripts/taxonomy-smoke-verify.sql
+      - name: Execute the documented manual rollback
+        run: psql -v ON_ERROR_STOP=1 -f docs/rollback-product-taxonomy-20261018.sql
+      - name: Assert metadata is restored without changing historical prices
+        run: psql -v ON_ERROR_STOP=1 -f scripts/taxonomy-smoke-rollback-verify.sql

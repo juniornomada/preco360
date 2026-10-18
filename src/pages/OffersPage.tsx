@@ -36,6 +36,7 @@ import {
   milkProductKind,
 } from "@/lib/offerProductKinds";
 import RetailerLogo from "@/components/RetailerLogo";
+import { potatoProductKind, potatoCategories, type PotatoKind } from "@/lib/productTaxonomy";
 import {
   BEEF_SEMANTIC_TOKENS,
   FISH_SEMANTIC_TOKENS,
@@ -667,6 +668,7 @@ type OfferFamily =
   | "milkSweet"
   | "bananaFresh"
   | "bananaRelated"
+  | PotatoKind
   | "tomatoFresh"
   | "tomatoSauce"
   | "tomatoExtract"
@@ -694,7 +696,7 @@ type OfferFamily =
   | "alcoholDisinfectant"
   | "other";
 
-type SearchFamilyIntent = OfferFamily | "milk" | "banana" | "corn" | "cornGreenBroad" | "coffee" | "chicken";
+type SearchFamilyIntent = OfferFamily | "milk" | "banana" | "corn" | "cornGreenBroad" | "coffee" | "chicken" | "potato";
 
 function hasAny(tokens: Set<string>, values: string[]) {
   return values.some((value) => tokens.has(value));
@@ -706,6 +708,10 @@ function queryOfferFamily(query: string): SearchFamilyIntent | null {
   if (isGenericStrawberrySearch(query)) return "strawberry";
 
   const normalized = normalizeSearchText(query);
+  // Bare potato finds all subtypes, while explicit names narrow the search.
+  if (/^batatas?$/.test(normalized)) return "potato";
+  const potatoIntent = potatoProductKind(query);
+  if (potatoIntent && potatoIntent !== "potatoUnknown") return potatoIntent;
 
   if (/^(?:nata|creme\s+de\s+leite\s+(?:nata|fresc[oa]))\b/.test(normalized)) {
     return "milkCreamNata";
@@ -863,6 +869,8 @@ function inferOfferFamily(
 
   // Product-head rules: the beginning of the name is more reliable than a
   // keyword appearing later as flavor, ingredient or accompaniment.
+  const potatoKind = potatoProductKind(item.raw_name);
+  if (potatoKind) return potatoKind;
   if (isSaltProductName(raw)) return "salt";
   if (isSugarProductName(raw)) return "sugar";
   if (isStrawberryProductName(raw)) return "strawberry";
@@ -962,6 +970,7 @@ function inferOfferFamily(
 }
 
 function familyLabel(family: OfferFamily) {
+  if (family.startsWith("potato")) return potatoCategories[family as PotatoKind];
   if (family === "powder") return "Achocolatado em pó";
   if (family === "powderedDrink") return "Refresco em pó";
   if (family === "drink") return "Bebida";
@@ -1166,6 +1175,15 @@ function familySemanticTokens(intent: SearchFamilyIntent | null) {
   const add = (...tokens: string[]) => tokens.forEach((token) => result.add(token));
   if (!intent) return result;
 
+  if (intent === "potato" || intent.startsWith("potato")) {
+    add("batata", "batatas");
+    if (intent === "potatoFrozen") add("congelada", "congelado", "pre", "frita", "fritas", "palito", "rustica", "air", "fryer");
+    if (intent === "potatoStraw") add("palha");
+    if (intent === "potatoFreshBaroa") add("baroa", "mandioquinha");
+    if (intent === "potatoFreshSweet") add("doce");
+    if (intent === "potatoFreshCommon") add("inglesa", "lavada", "asterix", "in", "natura");
+    if (intent === "potatoSnack") add("chips", "salgadinho");
+  }
   if (intent === "milk" || intent === "milkLiquid") add("leite", "leites");
   if (intent === "milkPowder") add("leite", "leites", "po");
   if (intent === "milkCream") add("creme", "cremes", "leite", "leites");
@@ -1310,6 +1328,7 @@ function storeReferenceFamily(row: StoreReferenceRow): OfferFamily {
 }
 
 function comparableOfferGroup(family:OfferFamily,name:string) {
+  if (family === "potatoUnknown") return "potato:review:" + normalizeSearchText(name);
   const chicken=chickenComparableKey(name);
   if(chicken) return "chicken:"+chicken;
   if(family==="fish" || family==="cannedFish" || family==="beef" || family==="pork") {
@@ -1322,6 +1341,7 @@ function comparableOfferGroup(family:OfferFamily,name:string) {
 
 function familyMatchesIntent(family: OfferFamily, intent: SearchFamilyIntent | null) {
   if (!intent) return true;
+  if (intent === "potato") return family.startsWith("potato");
   if (intent === "milk") {
     return [
       "milkLiquid", "milkPowder", "milkCondensed", "milkFermented",
@@ -1869,6 +1889,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [packageFilters, setPackageFilters] = useState<string[]>([]);
+  const [potatoKindFilter, setPotatoKindFilter] = useState<PotatoKind | null>(null);
   const searchTimerRef = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const normalizedSearch = normalizeProductSearchText(search.trim());
@@ -1919,6 +1940,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
 
   useEffect(() => {
     setPackageFilters([]);
+    setPotatoKindFilter(null);
   }, [normalizedSearch]);
 
   useEffect(() => {
@@ -2496,7 +2518,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
         queryOfferFamily(normalizedSearch) === "milk" ||
         queryOfferFamily(normalizedSearch) === "banana" ||
         queryOfferFamily(normalizedSearch) === "fish" ||
-        queryOfferFamily(normalizedSearch) === "coffee") return null;
+        queryOfferFamily(normalizedSearch) === "coffee" ||
+        queryOfferFamily(normalizedSearch) === "potato") return null;
     const candidates: Array<{
       source: "receipt" | "shelf";
       value: number;
@@ -2666,15 +2689,24 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
   }, [preparedOffers, hasSearch, normalizedSearch]);
 
   const bestCurrentOffer = useMemo(() => {
+    // An uncertain subtype has no safe comparison basis.
+    if (potatoKindFilter === "potatoUnknown") return null;
+    // A generic potato search spans in-natura, frozen, palha and snacks.
+    // Do not crown the cheapest kilo of a different product "best overall".
+    if (queryOfferFamily(normalizedSearch) === "potato" && !potatoKindFilter &&
+        new Set(analyzed.map(entry => entry.family)).size > 1) return null;
     // Generic milho can display curau, pamonha and juice, but their package
     // prices must not compete with the per-kg price of corn kernels.
     const comparableOffers = queryOfferFamily(normalizedSearch) === "corn"
       ? analyzed.filter((entry) => entry.family !== "cornDerived")
       : analyzed;
+    const filteredByPotato = potatoKindFilter
+      ? comparableOffers.filter(entry => entry.family === potatoKindFilter)
+      : comparableOffers;
     const candidates =
       packageFilters.length === 0
-        ? comparableOffers
-        : comparableOffers.filter((entry) =>
+        ? filteredByPotato
+        : filteredByPotato.filter((entry) =>
             packageFilters.includes(packageLabel(entry.item) ?? ""),
           );
 
@@ -2689,7 +2721,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
 
       return a.candidate.price - b.candidate.price;
     })[0];
-  }, [analyzed, packageFilters, normalizedSearch]);
+  }, [analyzed, packageFilters, normalizedSearch, potatoKindFilter]);
 
   const currentVsReference = useMemo(() => {
     if (!bestCurrentOffer || !reference360) return null;
@@ -2857,6 +2889,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     explicitSearchFamily === null ||
     explicitSearchFamily === "milk" ||
     explicitSearchFamily === "banana" ||
+    explicitSearchFamily === "potato" ||
     explicitSearchFamily === "corn" ||
     explicitSearchFamily === "cornGreenBroad" ||
     explicitSearchFamily === "coffee" ||
@@ -2874,6 +2907,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     >();
 
     for (const entry of analyzed) {
+      if (entry.family === "potatoUnknown") continue;
       if (explicitSearchFamily === "corn" && entry.family === "cornDerived") continue;
       const group=comparableOfferGroup(entry.family,entry.item.raw_name);
       const current = bestEntry.get(group);
@@ -2907,6 +2941,19 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     [analyzed],
   );
 
+  const potatoFilterOptions = useMemo(() => {
+    if (queryOfferFamily(normalizedSearch) !== "potato") return [];
+    const counts = new Map<PotatoKind, number>();
+    for (const entry of analyzed) {
+      if (!entry.family.startsWith("potato")) continue;
+      const kind = entry.family as PotatoKind;
+      counts.set(kind, (counts.get(kind) ?? 0) + 1);
+    }
+    return [...counts].map(([kind, count]) => ({
+      kind, count, label: potatoCategories[kind],
+    }));
+  }, [analyzed, normalizedSearch]);
+
   const packageFilterOptions = useMemo(() => {
     const options = new Map<
       string,
@@ -2919,6 +2966,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     >();
 
     for (const entry of analyzed) {
+      if (potatoKindFilter && entry.family !== potatoKindFilter) continue;
       const label = packageLabel(entry.item);
       if (!label) continue;
 
@@ -2950,16 +2998,15 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
 
       return a.label.localeCompare(b.label, "pt-BR");
     });
-  }, [analyzed]);
+  }, [analyzed, potatoKindFilter]);
 
   const visibleAnalyzed = useMemo(
     () =>
-      packageFilters.length === 0
-        ? analyzed
-        : analyzed.filter((entry) =>
-            packageFilters.includes(packageLabel(entry.item) ?? ""),
-          ),
-    [analyzed, packageFilters],
+      analyzed.filter(entry =>
+        (!potatoKindFilter || entry.family === potatoKindFilter) &&
+        (packageFilters.length === 0 ||
+          packageFilters.includes(packageLabel(entry.item) ?? ""))),
+    [analyzed, packageFilters, potatoKindFilter],
   );
 
   const listedAnalyzed = useMemo(() => {
@@ -3283,8 +3330,9 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
       {hasSearch &&
         !isLoading &&
         !error &&
-        bestCurrentOffer &&
-        resultFamilyCount > 1 && (
+        analyzed.length > 0 &&
+        resultFamilyCount > 1 &&
+        !potatoKindFilter && (
           <section className="mb-4 rounded-2xl border border-primary/30 bg-primary/[0.07] p-3">
             <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">
               Há mais de um tipo de produto
@@ -3299,6 +3347,26 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
         )}
 
 
+
+      {hasSearch && !isLoading && !error && potatoFilterOptions.length > 1 && (
+        <div aria-label="Categorias de batata" className="mb-3 -mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button type="button" aria-pressed={potatoKindFilter === null}
+            onClick={() => { setPotatoKindFilter(null); setPackageFilters([]); }}
+            className={"shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold " +
+              (potatoKindFilter === null ? "border-primary bg-primary/15 text-primary" : "border-border bg-card/40 text-muted-foreground")}>
+            Todos ({analyzed.length})
+          </button>
+          {potatoFilterOptions.map(option => (
+            <button type="button" key={option.kind}
+              aria-pressed={potatoKindFilter === option.kind}
+              onClick={() => { setPotatoKindFilter(option.kind); setPackageFilters([]); }}
+              className={"shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold " +
+                (potatoKindFilter === option.kind ? "border-primary bg-primary/15 text-primary" : "border-border bg-card/40 text-muted-foreground")}>
+              {option.label} ({option.count})
+            </button>
+          ))}
+        </div>
+      )}
 
       {hasSearch &&
         !isLoading &&

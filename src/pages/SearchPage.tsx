@@ -9,6 +9,8 @@ type ProductSummary = {
   id: string;
   name: string;
   category: string | null;
+  image_url?: string | null;
+  image_source?: string | null;
   package_size: number | string | null;
   unit: string | null;
   price_count: number | string;
@@ -35,6 +37,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import ProductSearchBar from "@/components/ProductSearchBar";
+import PriceQuoteSearchResult from "@/components/PriceQuoteSearchResult";
+import { readableQuoteProductName } from "@/lib/quoteNamePresentation";
+import { displayCatalogCategory } from "@/lib/catalogCategoryPresentation";
 import { productMatchesSearch } from "@/lib/productSearch";
 import { unitPriceForProduct, unitPackageFromProduct } from "@/lib/productUnitPricing";
 import {
@@ -45,7 +50,6 @@ import {
   Minus,
   Sparkles,
   Save,
-  ChevronRight,
 } from "lucide-react";
 
 const verdictStyle = {
@@ -78,7 +82,7 @@ function packageLabel(
 }
 
 function displayProductName(product: ProductSummary) {
-  const clean = product.name.trim();
+  const clean = readableQuoteProductName(product.name);
   if (!clean) return clean;
   if (inferPackage(clean)) return clean;
 
@@ -272,34 +276,27 @@ export default function SearchPage() {
               ? normalizedSummaryPrice(product, latest.price)
               : null;
             return (
-              <button
-                type="button"
+              <PriceQuoteSearchResult
                 key={product.id}
-                onClick={() => selectProduct(product.id)}
-                className="flex w-full items-center gap-3 rounded-xl border bg-card p-4 text-left transition hover:border-primary/40 hover:shadow-sm"
-              >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-                  <TrendingDown className="h-5 w-5 text-primary" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold">{displayName}</p>
-                  <p className="text-xs text-muted-foreground">{Number(product.price_count ?? 0)} preço(s) no histórico</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold">{latest ? formatBRL(latest.price) : "Sem preço"}</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {latest
-                      ? normalizedLatest
-                        ? `${formatNormalizedPrice(
-                            normalizedLatest.normalizedPrice,
-                            normalizedLatest.baseUnit,
-                          )} · ${formatDateBr(latest.date)}`
-                        : formatDateBr(latest.date)
-                      : "sem histórico"}
-                  </p>
-                </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-              </button>
+                name={displayName}
+                category={displayCatalogCategory(product.name, product.category)}
+                imageUrl={
+                  product.image_url &&
+                  /^(?:external_verified_(?:name_package|ean)|product_library_verified|manual_user_asset|duplicate_master_verified)$/.test(product.image_source ?? "")
+                    ? product.image_url
+                    : null
+                }
+                price={latest ? formatBRL(latest.price) : "Sem preço"}
+                normalizedPrice={normalizedLatest
+                  ? formatNormalizedPrice(
+                      normalizedLatest.normalizedPrice,
+                      normalizedLatest.baseUnit,
+                    )
+                  : null}
+                historyCount={Number(product.price_count ?? 0)}
+                date={latest ? formatDateBr(latest.date) : null}
+                onSelect={() => selectProduct(product.id)}
+              />
             );
           })}
 
@@ -322,7 +319,7 @@ export default function SearchPage() {
                 <div className="mt-1 flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <h2 className="text-xl font-bold">{selectedDisplayName}</h2>
-                    <p className="text-xs text-muted-foreground">{selected.category}</p>
+                    <p className="text-xs text-muted-foreground">{displayCatalogCategory(selected.name, selected.category)}</p>
                     {unitPackageFromProduct(selected.name,selected.package_size,selected.unit)?.inferred && (
                       <p className="text-[11px] text-amber-500">Volume de 900 ml inferido da descrição do cupom</p>
                     )}

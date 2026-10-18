@@ -1,0 +1,66 @@
+-- Minimal isolated PostgreSQL fixture for the Preco360 taxonomy migration.
+-- This runs only in a throwaway GitHub Actions service, never in Supabase.
+CREATE ROLE authenticated;
+CREATE ROLE anon;
+CREATE SCHEMA auth;
+CREATE TABLE public.products (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  name text NOT NULL,
+  category text NOT NULL DEFAULT 'Geral',
+  package_size numeric,
+  unit text,
+  image_url text,
+  image_source text
+);
+CREATE TABLE public.flyer_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  raw_name text NOT NULL,
+  product_id uuid
+);
+CREATE TABLE public.prices (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  product_id uuid NOT NULL,
+  price numeric NOT NULL
+);
+ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.flyer_items ENABLE ROW LEVEL SECURITY;
+
+INSERT INTO public.products(id,user_id,name,category,package_size,unit)
+VALUES
+ ('e3e3f5c2-7b74-4d84-ae02-abac851255cd','11111111-1111-4111-8111-111111111111','MASSA P/PASTEL SAO JUDAS 500G','Geral',500,'g'),
+ ('f05ca0d7-06b1-488e-bc36-0c6fdc45b283','11111111-1111-4111-8111-111111111111','MASSA PASTEL DA FEIRA','Geral',NULL,NULL),
+ ('00000000-0000-4000-8000-000000000101','11111111-1111-4111-8111-111111111111','BATATA BAROA 1KG','Geral',1,'kg'),
+ ('00000000-0000-4000-8000-000000000102','11111111-1111-4111-8111-111111111111','BATATA UNI 130G','Geral',130,'g'),
+ ('00000000-0000-4000-8000-000000000103','11111111-1111-4111-8111-111111111111','BATATA PALHA YOKI 100G','Minhas compras',100,'g'),
+ ('00000000-0000-4000-8000-000000000104','11111111-1111-4111-8111-111111111111','PAO QJO MASSALEV 1KG','Geral',1,'kg');
+
+INSERT INTO public.flyer_items(id,user_id,raw_name,product_id)
+VALUES
+ ('00000000-0000-4000-8000-000000000201','11111111-1111-4111-8111-111111111111','BATATA BAROA 1KG',NULL),
+ ('00000000-0000-4000-8000-000000000202','11111111-1111-4111-8111-111111111111','BATATA INGLESA KG',NULL),
+ ('00000000-0000-4000-8000-000000000203','11111111-1111-4111-8111-111111111111','BATATA PALHA YOKI 100G',NULL),
+ ('00000000-0000-4000-8000-000000000204','11111111-1111-4111-8111-111111111111','BATATA UNI 130G',NULL),
+ ('00000000-0000-4000-8000-000000000205','11111111-1111-4111-8111-111111111111','MACARRAO MARCA X 500G',NULL),
+ ('00000000-0000-4000-8000-000000000206','11111111-1111-4111-8111-111111111111','PAO DE BATATA',NULL);
+
+
+-- Synthetic volume similar to the observed production flyer table.
+-- All data are generated INSIDE the ephemeral CI database.
+INSERT INTO public.flyer_items(user_id,raw_name)
+SELECT
+  '11111111-1111-4111-8111-111111111111',
+  CASE i % 5
+    WHEN 0 THEN 'BATATA INGLESA KG'
+    WHEN 1 THEN 'BATATA BAROA 1KG'
+    WHEN 2 THEN 'BATATA PALHA YOKI 100G'
+    WHEN 3 THEN 'MASSA PASTEL DA FEIRA 1KG'
+    ELSE 'BATATA UNI 130G'
+  END
+FROM generate_series(1,8000) AS i;
+
+
+INSERT INTO public.prices(user_id,product_id,price) VALUES
+ ('11111111-1111-4111-8111-111111111111','e3e3f5c2-7b74-4d84-ae02-abac851255cd',7.44);
