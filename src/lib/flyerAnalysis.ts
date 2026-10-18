@@ -1,4 +1,5 @@
 import { chickenComparableKey } from "@/lib/chickenOfferKinds";
+import { chooseHistoricalReference, type HistoricalReferenceProvenance, type ReferenceSample } from "@/lib/referenceBrandScope";
 import { canonicalRetailerName } from "@/lib/retailerNames";
 import { isCardOnlyPriceCondition } from "@/lib/priceConditions";
 
@@ -69,6 +70,7 @@ export type OfferVerdict = {
   purchaseCount: number;
   advertisedCount: number;
   confidence: "alta" | "média" | "baixa";
+  provenance: HistoricalReferenceProvenance | null;
 };
 
 const aliases: Record<string, string> = {
@@ -1501,6 +1503,7 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
     package_quantity?: number | string | null;
     package_unit?: string | null;
     raw_name?: string | null;
+    brand?: string | null;
     base_unit?: string | null;
     offer_notes?: string[] | null;
   }> = [],
@@ -1517,11 +1520,15 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
     purchaseSources.set(comparable.id, comparable);
   }
 
-  const purchases = [...purchaseSources.values()].flatMap((source) =>
+  const purchases: ReferenceSample[] = [...purchaseSources.values()].flatMap((source) =>
     (source.prices ?? [])
       .map((entry) => normalizedHistorical(source, entry))
       .filter((entry) => entry?.baseUnit === candidate.baseUnit)
-      .map((entry) => entry!.normalizedPrice),
+      .map((entry) => ({
+        value: entry!.normalizedPrice,
+        brand: source.brand,
+        name: source.name,
+      })),
   );
   const advertised = previousAdvertised
     // Enforce subtype compatibility at the point of evaluation as well.
@@ -1559,7 +1566,7 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
       if (pkg && Number.isFinite(effectivePrice) && effectivePrice > 0) {
         const normalized = normalizedUnitPrice(effectivePrice, pkg);
         return normalized.baseUnit === candidate.baseUnit
-          ? normalized.normalizedPrice
+          ? { value: normalized.normalizedPrice, brand: entry.brand, name: entry.raw_name }
           : null;
       }
 
@@ -1575,24 +1582,24 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
           Number.isFinite(regularPrice) &&
           regularPrice > 0
         ) {
-          return storedNormalized * (clubPrice / regularPrice);
+          return { value: storedNormalized * (clubPrice / regularPrice), brand: entry.brand, name: entry.raw_name };
         }
-        return storedNormalized;
+        return { value: storedNormalized, brand: entry.brand, name: entry.raw_name };
       }
 
       return null;
     })
     .filter(
-      (value): value is number =>
-        value !== null && Number.isFinite(value) && value > 0,
+      (value): value is NonNullable<typeof value> =>
+        value !== null && Number.isFinite(value.value) && value.value > 0,
     );
-  // A price the user actually paid is stronger evidence than an advertised
-  // price. Use paid history first; fall back to older flyer offers only when
-  // there is no comparable purchase history.
+  // Prefer history of the advertised brand. Category-level comparisons
+  // remain useful as a fallback, but must be explicitly labeled as such.
   // Current live offers must be excluded by the caller from previousAdvertised.
-  const reference = purchases.length
-    ? median(purchases)
-    : median(advertised);
+  const chosen = chooseHistoricalReference(candidate.brand, purchases, advertised);
+  const reference = chosen ? median(chosen.samples.map((entry) => entry.value)) : null;
+  const chosenPurchases=chosen?.provenance.referenceSource === "purchase" ? chosen.samples.length : 0;
+  const chosenOffers=chosen?.provenance.referenceSource === "offer" ? chosen.samples.length : 0;
   if (!reference) return {
     key: "unknown",
     label: product ? "Pouco histórico" : "Novo no radar",
@@ -1601,23 +1608,25 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
       : "Ainda não há preços anteriores comparáveis para este produto.",
     deltaPct: null,
     referencePrice: null,
-    bestPurchase: purchases.length ? Math.min(...purchases) : null,
-    bestAdvertised: advertised.length ? Math.min(...advertised) : null,
-    purchaseCount: purchases.length,
-    advertisedCount: advertised.length,
+    bestPurchase: purchases.length ? Math.min(...purchases.map((entry)=>entry.value)) : null,
+    bestAdvertised: advertised.length ? Math.min(...advertised.map((entry)=>entry.value)) : null,
+    purchaseCount: chosenPurchases,
+    advertisedCount: chosenOffers,
     confidence: "baixa",
+    provenance: null,
   };
 
   const deltaPct = ((candidate.normalizedPrice - reference) / reference) * 100;
-  const total = purchases.length + advertised.length;
-  const confidence = purchases.length >= 3 || total >= 5 ? "alta" : total >= 2 ? "média" : "baixa";
+  const total = chosen?.samples.length ?? 0;
+  const confidence = chosenPurchases >= 3 || total >= 5 ? "alta" : total >= 2 ? "média" : "baixa";
   let key: OfferVerdict["key"] = "normal", label = "Na faixa", message = "O preço está próximo do seu histórico.";
   if (deltaPct <= -15) { key = "exceptional"; label = "Preço raro"; message = `Está ${Math.abs(deltaPct).toFixed(0)}% abaixo da sua referência. Priorize esta oferta.`; }
   else if (deltaPct <= -5) { key = "good"; label = "Vale a pena"; message = `Está ${Math.abs(deltaPct).toFixed(0)}% abaixo da sua referência histórica.`; }
   else if (deltaPct > 5) { key = "high"; label = "Já esteve melhor"; message = `Está ${deltaPct.toFixed(0)}% acima da sua referência. Se não for urgente, vale esperar.`; }
 
   return { key, label, message, deltaPct, referencePrice: reference,
-    bestPurchase: purchases.length ? Math.min(...purchases) : null,
-    bestAdvertised: advertised.length ? Math.min(...advertised) : null,
-    purchaseCount: purchases.length, advertisedCount: advertised.length, confidence };
+    bestPurchase: purchases.length ? Math.min(...purchases.map((entry)=>entry.value)) : null,
+    bestAdvertised: advertised.length ? Math.min(...advertised.map((entry)=>entry.value)) : null,
+    purchaseCount: chosenPurchases, advertisedCount: chosenOffers, confidence,
+    provenance: chosen?.provenance ?? null };
 }

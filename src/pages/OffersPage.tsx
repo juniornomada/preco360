@@ -13,6 +13,7 @@ import {
   productSearchRequestVariants,
 } from "@/lib/productSearch";
 import ProductVisual from "@/components/ProductVisual";
+import { historicalReferenceScopeLabel } from "@/lib/referenceBrandScope";
 import {
   chickenKind, chickenKinds, chickenLabels, chickenQueryIntent,
   meatPreparation, requestedChickenPreparation, chickenComparableKey,
@@ -3160,6 +3161,11 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
           const quickReference=quickVerdict.referencePrice && quickCandidate.baseUnit!=="un"
             ? formatNormalizedPrice(quickVerdict.referencePrice,quickCandidate.baseUnit)
             : quickVerdict.referencePrice ? brl(quickVerdict.referencePrice) : null;
+          const quickHistoryScope=quickVerdict.provenance?.referenceScope==="same_brand"
+            ? "da mesma marca" : "da categoria";
+          const quickVerdictLabel = quickVerdict.provenance?.referenceScope==="category"
+            ? quickVerdictUi.label.replace("histórico","categoria")
+            : quickVerdictUi.label;
           const quickPack = packageLabel(quickItem);
           const quickRetailer =
             canonicalRetailerName(bestCurrentOffer.flyer?.retailer) ||
@@ -3251,18 +3257,23 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                       )}
                       <div className="mt-1.5 space-y-1 text-[10px]">
                         <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-bold ${quickVerdictUi.className}`}>
-                          <QuickVerdictIcon className="h-3 w-3" />{quickVerdictUi.label}
+                          <QuickVerdictIcon className="h-3 w-3" />{quickVerdictLabel}
                         </span>
                         <p className="font-medium text-muted-foreground">
                           {quickReference
-                            ? `Ref. histórica comparável: ${quickReference}`
+                            ? `Referência ${quickHistoryScope}: ${quickReference}`
                             : "Sem histórico comparável"}
                         </p>
+                        {quickReference && quickVerdict.provenance && (
+                          <p className="leading-relaxed font-medium text-muted-foreground">
+                            {historicalReferenceScopeLabel(quickVerdict.provenance)}
+                          </p>
+                        )}
                         {quickReference && quickVerdict.deltaPct !== null && (
                           <p className={quickVerdict.deltaPct<0?"font-bold text-green-500":
                             quickVerdict.deltaPct>0?"font-bold text-red-500":"font-bold text-muted-foreground"}>
                             {quickVerdict.deltaPct<0?"↓":quickVerdict.deltaPct>0?"↑":"="}
-                            {Math.abs(quickVerdict.deltaPct).toFixed(0)}% vs. histórico
+                            {Math.abs(quickVerdict.deltaPct).toFixed(0)}% vs. referência {quickHistoryScope}
                           </p>
                         )}
                       </div>
@@ -3488,6 +3499,11 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
             const { item, flyer, candidate, verdict, productId } = entry;
             const ui = verdictUi[verdict.key];
             const VerdictIcon = ui.Icon;
+            const verdictHistoryScope=verdict.provenance?.referenceScope==="same_brand"
+              ? "da marca" : "da categoria";
+            const scopedVerdictLabel=verdict.provenance?.referenceScope==="category"
+              ? ui.label.replace("histórico","categoria")
+              : ui.label;
             const regularPrice = Number(item.advertised_price) || 0;
             const clubPrice = validClubPrice(item);
             const appActivationState =
@@ -3597,7 +3613,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                               className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${ui.className}`}
                             >
                               <VerdictIcon className="h-3.5 w-3.5" />
-                              {ui.label}
+                              {scopedVerdictLabel}
                             </span>
                             <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground">
                               <Clock3 className="h-3.5 w-3.5" />
@@ -3719,7 +3735,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                               )}
 
                               {verdict.referencePrice &&
-                                (productId ? (
+                                (productId && verdict.provenance?.referenceScope==="same_brand"
+                                  && verdict.provenance?.referenceSource==="purchase" ? (
                                   <button
                                     type="button"
                                     onClick={() =>
@@ -3728,14 +3745,16 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                                     className="inline-flex items-center gap-0.5 font-semibold text-muted-foreground transition-colors hover:text-primary"
                                     aria-label="Ver histórico do produto"
                                   >
-                                    {verdict.purchaseCount > 0 ? "Pago " : "Ref. "}
-                                    {referenceLabel}
+                                    Histórico {verdictHistoryScope}: {referenceLabel}
                                     <ChevronRight className="h-3 w-3" />
                                   </button>
                                 ) : (
-                                  <span className="font-semibold text-muted-foreground">
-                                    {verdict.purchaseCount > 0 ? "Pago " : "Ref. "}
-                                    {referenceLabel}
+                                  <span className="font-semibold text-muted-foreground"
+                                    title={verdict.provenance ? historicalReferenceScopeLabel(verdict.provenance) : undefined}>
+                                    Ref. {verdictHistoryScope}: {referenceLabel}
+                                    {verdict.provenance?.referenceScope==="category"
+                                      && verdict.provenance.referenceBrands.length>0
+                                      ? ` · ${verdict.provenance.referenceBrands.join(", ")}` : ""}
                                   </span>
                                 ))}
 
@@ -3987,8 +4006,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                       Histórico
                     </p>
                   </div>
-                  <p className="text-[9px] text-muted-foreground sm:text-[10px]">
-                    último pago
+                  <p className="text-[9px] text-muted-foreground sm:text-[10px]" title={latestReceiptProduct?.name ?? undefined}>
+                    último pago {latestReceiptProduct?.name ? `· ${latestReceiptProduct.name}` : ""}
                   </p>
                   {latestReceiptReference ? (
                     <>
@@ -4126,7 +4145,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                   </span>
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-foreground">
-                      Bom preço até{" "}
+                      Referência das suas compras:{" "}
                       {formatNormalizedPrice(
                         decisionReference.central,
                         decisionReference.baseUnit,
@@ -4139,6 +4158,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                         decisionReference.baseUnit,
                       )}
                       , vale esperar outra oferta se a compra puder aguardar.
+                      Esta referência considera suas compras anteriores, que podem ser de outra marca.
                     </p>
                   </div>
                 </div>
