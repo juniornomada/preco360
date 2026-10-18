@@ -41,6 +41,20 @@ WHERE p.id = s.product_id
   AND p.category = p.taxonomy_category
   AND p.category IS DISTINCT FROM s.original_category;
 
+-- Products created after the snapshot do not have original metadata.
+-- If they still carry a classifier-generated high-confidence category,
+-- return them to Geral. A user explicitly choosing that same category
+-- is indistinguishable and should be reviewed if applicable.
+UPDATE public.products p
+SET category = 'Geral'
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.product_taxonomy_rollback_snapshot_20261018 s
+  WHERE s.product_id = p.id AND s.user_id = p.user_id
+)
+  AND p.taxonomy_confidence = 'high'
+  AND p.taxonomy_category IS NOT NULL
+  AND p.category = p.taxonomy_category;
+
 -- Restore exact previous image values only for the two URLs installed by
 -- this release. Leave a subsequent manual image change untouched.
 UPDATE public.products p
@@ -48,6 +62,7 @@ SET image_url = s.original_image_url,
     image_source = s.original_image_source
 FROM public.product_taxonomy_rollback_snapshot_20261018 s
 WHERE p.id = s.product_id AND p.user_id = s.user_id
+  AND p.image_source = 'external_verified_name_package'
   AND (
     (p.id = 'e3e3f5c2-7b74-4d84-ae02-abac851255cd'::uuid
       AND p.image_url = 'https://tauste.com.br/media/catalog/product/cache/207e23213cf636ccdef205098cf3c8a3/1/4/1435561747774851.jpg')
