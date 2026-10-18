@@ -9,6 +9,9 @@ on:
       - 'src/lib/productTaxonomy.ts'
       - 'src/lib/flyerAnalysis.ts'
       - 'src/pages/OffersPage.tsx'
+      - 'src/pages/SearchPage.tsx'
+      - 'src/components/PriceQuoteSearchResult.tsx'
+      - 'src/test/priceQuoteSearchResult.test.tsx'
       - 'src/test/*Taxonomy*.test.ts'
       - 'src/test/potatoOfferReference.test.ts'
   workflow_dispatch:
@@ -28,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Taxonomy regression tests
-        run: npx vitest run src/test/productTaxonomy.test.ts src/test/potatoOfferReference.test.ts
+        run: npx vitest run src/test/productTaxonomy.test.ts src/test/potatoOfferReference.test.ts src/test/priceQuoteSearchResult.test.tsx
       - name: Full existing unit tests
         if: always()
         run: npm test
