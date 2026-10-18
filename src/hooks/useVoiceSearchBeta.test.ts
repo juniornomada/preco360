@@ -11,6 +11,8 @@ describe("beta voice supermarket transcription", () => {
     ["Mírio verde bandeja", "milho verde bandeja"],
     ["Tarrou 5 quilos", "arroz 5 quilos"],
     ["Iorgute", "iogurte"],
+    ["Ovo Maltini", "Ovomaltine"],
+    ["Ovo malchini", "Ovomaltine"],
   ])("corrects observed ASR output %s", (heard, expected) => {
     expect(normalizeVoiceSearchBetaTranscript(heard)).toBe(expected);
   });
