@@ -169,10 +169,12 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     return "Ovomaltine" + normalized.slice(ovomaltineMatch[0].length);
   }
 
-  const mortadelaMatch = key.match(/^(?:mortadela|mortandela|mortandella|mortadella)(?=$|\s)/);
+  const mortadelaMatch = key.match(/^(?:mortadela|mortandela|mortandella|mortadella|bortandela|morta\s+dela|mortando)(?=$|\s)/);
   if (mortadelaMatch) {
     return "mortadela" + normalized.slice(mortadelaMatch[0].length);
   }
+
+  if (/^ovo[\s-]+(?:mocinho|molchini|maltinho)(?=$|\s)/.test(key)) return "Ovomaltine" + normalized.slice(key.match(/^ovo[\s-]+(?:mocinho|molchini|maltinho)/)![0].length);
 
   const knownCorrection = knownAsrCorrections.get(key);
   if (knownCorrection) return knownCorrection;
@@ -279,6 +281,7 @@ export function useVoiceSearchBeta() {
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastTimingMs, setLastTimingMs] = useState<number | null>(null);
+  const [lastRawTranscript, setLastRawTranscript] = useState<string | null>(null);
 
   const isSupported =
     getSpeechRecognitionConstructor() !== null ||
@@ -372,7 +375,9 @@ export function useVoiceSearchBeta() {
             const payload = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(payload?.error ?? "TRANSCRIPTION_FAILED");
 
-            const transcript = normalizeVoiceSearchBetaTranscript(String(payload?.transcript ?? ""));
+            const rawTranscript = String(payload?.transcript ?? "");
+            const transcript = normalizeVoiceSearchBetaTranscript(rawTranscript);
+            setLastRawTranscript(rawTranscript);
             if (!transcript) {
               setError("Não consegui reconhecer o produto. Toque novamente e tente outra vez.");
               return;
@@ -565,6 +570,7 @@ export function useVoiceSearchBeta() {
       };
 
       const deliverPending = () => {
+        setLastRawTranscript(pendingTranscriptRef.current);
         const transcript = normalizeVoiceSearchBetaTranscript(
           pendingTranscriptRef.current,
         );
