@@ -43,14 +43,19 @@ export function chooseHistoricalReference(
   const advertised = offers.filter(valid);
   const samePaid = brand ? paid.filter(sample => explicitlyMatchesBrand(brand, sample)) : [];
   const sameOffers = brand ? advertised.filter(sample => explicitlyMatchesBrand(brand, sample)) : [];
-  const sameBrand = samePaid.length > 0 || sameOffers.length > 0;
-
-  const referenceSource = samePaid.length || (!sameBrand && paid.length)
-    ? "purchase" : "offer";
-  const samples = samePaid.length ? samePaid
-    : sameOffers.length ? sameOffers
-    : paid.length ? paid : advertised;
-  if (!samples.length) return null;
+  // A single price is not sufficient to assert "SIM" or "NÃO".
+  // Prefer a benchmark with 2+ observations, prioritizing same-brand data,
+  // then category data. Do not hide four comparable offers behind one receipt.
+  const candidates = [
+    { samples: samePaid, scope: "same_brand" as const, source: "purchase" as const },
+    { samples: sameOffers, scope: "same_brand" as const, source: "offer" as const },
+    { samples: paid, scope: "category" as const, source: "purchase" as const },
+    { samples: advertised, scope: "category" as const, source: "offer" as const },
+  ];
+  const selected = candidates.find(candidate => candidate.samples.length >= 2)
+    ?? candidates.find(candidate => candidate.samples.length > 0);
+  if (!selected) return null;
+  const {samples} = selected;
 
   const brands = [...new Map(samples
     .filter(sample => !!sample.brand?.trim())
@@ -62,8 +67,8 @@ export function chooseHistoricalReference(
   return {
     samples,
     provenance: {
-      referenceScope: sameBrand ? "same_brand" : "category",
-      referenceSource,
+      referenceScope: selected.scope,
+      referenceSource: selected.source,
       referenceSampleCount: samples.length,
       referenceBrands: brands,
     },
