@@ -1,5 +1,6 @@
 import { chickenComparableKey } from "@/lib/chickenOfferKinds";
 import { chooseHistoricalReference, type HistoricalReferenceProvenance, type ReferenceSample } from "@/lib/referenceBrandScope";
+import { potatoProductKind, potatoReferenceKey } from "@/lib/productTaxonomy";
 import { canonicalRetailerName } from "@/lib/retailerNames";
 import { isCardOnlyPriceCondition } from "@/lib/priceConditions";
 
@@ -1340,17 +1341,9 @@ export function offerReferenceFamilyKey(value: string) {
     return "higiene:shampoo-humano";
   }
 
-  if (/^batata\b/.test(text)) {
-    if (/\bpalha\b/.test(text)) return "batata:palha";
-    if (
-      /\b(?:palito|rustica|congelada|congelado|air fryer|frita|fritas)\b/.test(
-        text,
-      )
-    ) {
-      return "batata:congelada";
-    }
-    return "hortifruti:batata";
-  }
+  // Same root word is not sufficient evidence: fresh baroa, common potatoes,
+  // frozen fries, palha and snacks must never share the same reference.
+  if (/^batatas?\b/.test(text)) return potatoReferenceKey(value);
 
   if (/^bolo\b/.test(text)) {
     return /\bpote\b/.test(text) ? "padaria:bolo-pote" : "padaria:bolo";
@@ -1379,6 +1372,10 @@ export function offerReferenceFamiliesCompatible(
   const leftKey = offerReferenceFamilyKey(left);
   const rightKey = offerReferenceFamilyKey(right);
 
+  // An unidentified potato subtype must never borrow a confident history.
+  if (potatoProductKind(left) || potatoProductKind(right)) {
+    return !!leftKey && !!rightKey && leftKey === rightKey;
+  }
   if (!leftKey && !rightKey) return null;
   if (!leftKey || !rightKey) return false;
   return purchaseKeysCompatible(leftKey, rightKey);
