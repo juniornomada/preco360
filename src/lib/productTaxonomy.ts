@@ -74,10 +74,11 @@ type Rule = readonly [RegExp, string, string, string];
  * based on a keyword appearing anywhere in a description.
  */
 const catalogRules: readonly Rule[] = [
+  [/^pao (?:de )?(?:queijo|qjo)\b/, "Padaria", "Pão de queijo", "padaria:pao-queijo"],
   [/^pao de batata\b/, "Padaria", "Pão de batata", "padaria:pao-de-batata"],
   [/^pa(?:o|es)\b/, "Padaria", "Pães", "padaria:paes"],
   [/^bolos?\b/, "Padaria", "Bolos", "padaria:bolos"],
-  [/^massa (?:de )?pastel\b/, "Padaria", "Massa para pastel", "padaria:massa-pastel"],
+  [/^massa (?:(?:de |para )?pastel|p pastel)\b/, "Padaria", "Massa para pastel", "padaria:massa-pastel"],
   [/^p(?:ure|urezinho) de batata\b/, "Pratos prontos", "Purê de batata", "prontos:pure-batata"],
   [/^cappucc?inos?\b|^capucinos?\b/, "Mercearia", "Cappuccino", "mercearia:cappuccino"],
   [/^cafe\b/, "Mercearia", "Café", "mercearia:cafe"],
