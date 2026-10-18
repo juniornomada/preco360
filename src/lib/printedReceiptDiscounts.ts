@@ -101,13 +101,20 @@ export function applyPrintedReceiptDiscounts(
       unresolved += 1;
       continue;
     }
+    // Whole-currency units usually divide evenly into cents (e.g. 1 UN).
+    // Keep extra internal precision only when a weighted/quantity purchase
+    // requires it (e.g. 1.496 kg with a R$ 1,00 discount).
+    const centsValue = Math.round((effectiveUnit + Number.EPSILON) * 100) / 100;
+    const effectiveText = Math.abs(effectiveUnit - centsValue) < 0.00000001
+      ? money(effectiveUnit)
+      : effectiveUnit.toFixed(6);
     result[index] = {
       ...item,
       originalUnitPrice: money(originalUnit),
       originalTotalPrice: money(totalBefore),
       discountAmount: money(discount),
-      price: effectiveUnit.toFixed(6),
-      unitPrice: effectiveUnit.toFixed(6),
+      price: effectiveText,
+      unitPrice: effectiveText,
       totalPrice: money(netTotal),
     };
     applied += 1;

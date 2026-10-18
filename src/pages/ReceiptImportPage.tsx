@@ -74,6 +74,15 @@ function brl(value: number) {
   });
 }
 
+// Keep full precision in the imported data, but never expose six decimals
+// in a price-entry preview. Once the user starts typing, preserve their input.
+function receiptPriceDisplay(value: string) {
+  const normalized = Number(String(value).replace(",", "."));
+  return Number.isFinite(normalized)
+    ? normalized.toFixed(2).replace(".", ",")
+    : value;
+}
+
 function isReceiptCapacitySpecification(item: ParsedItem) {
   const text = item.name
     .normalize("NFD")
@@ -1529,7 +1538,7 @@ export default function ReceiptImportPage() {
                     <div className="flex gap-2">
                       <Input value={item.name} onChange={(e) => updateItem(index, "name", e.target.value)} className="flex-1" />
                       <Input
-                        value={item.price}
+                        value={item.manuallyEdited ? item.price : receiptPriceDisplay(item.price)}
                         onChange={(e) => updateItem(index, "price", e.target.value)}
                         className="w-24"
                         inputMode="decimal"
