@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   offerReferenceFamiliesCompatible, offerReferenceFamilyKey,
+  matchFlyerItem, inferPackage, normalizeSearchText,
 } from "@/lib/flyerAnalysis";
 
 describe("potato historical reference isolation", () => {
@@ -42,5 +43,33 @@ describe("potato historical reference isolation", () => {
     expect(offerReferenceFamiliesCompatible(
       "Pão de batata", "Batata inglesa",
     )).toBe(false);
+  });
+});
+
+describe("safe imported potato catalog matching", () => {
+  const candidate = (name: string) => ({
+    rawName: name, price: 9.99, packageInfo: inferPackage(name),
+    normalizedPrice: 9.99, baseUnit: "kg" as const,
+    clubPrice: false, sourcePage: 1,
+  });
+  const products = [
+    { id: "palha", name: "Batata Palha UNI 100G" },
+    { id: "unknown", name: "BATATA UNI 130G" },
+    { id: "baroa", name: "Batata Baroa 1kg" },
+    { id: "inglesa", name: "Batata Inglesa 1kg" },
+  ];
+  it("blocks a bad stored alias from falsely linking unknown batata to palha", () => {
+    const result = matchFlyerItem(candidate("Batata Uni 130g"), products.filter(p=>p.id!=="unknown"), [
+      { product_id: "palha", normalized_alias: normalizeSearchText("Batata Uni 130g") },
+    ]);
+    expect(result.productId).toBeNull();
+  });
+  it("accepts only an exact unknown-subtype catalog name", () => {
+    const result = matchFlyerItem(candidate("Batata Uni 130g"), products, []);
+    expect(result.productId).toBe("unknown");
+  });
+  it("will not match a known fresh type to a different fresh type", () => {
+    const result = matchFlyerItem(candidate("Batata Baroa 1kg"), [products[3]], []);
+    expect(result.productId).toBeNull();
   });
 });
