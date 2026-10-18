@@ -13,6 +13,7 @@ import {
   productSearchRequestVariants,
 } from "@/lib/productSearch";
 import ProductVisual from "@/components/ProductVisual";
+import OfferBuyDecision from "@/components/OfferBuyDecision";
 import { historicalReferenceScopeLabel } from "@/lib/referenceBrandScope";
 import {
   chickenKind, chickenKinds, chickenLabels, chickenQueryIntent,
@@ -3156,11 +3157,6 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
           const quickItem = bestCurrentOffer.item;
           const quickCandidate = bestCurrentOffer.candidate;
           const quickVerdict = bestCurrentOffer.verdict;
-          const quickReference=quickVerdict.referencePrice && quickCandidate.baseUnit!=="un"
-            ? formatNormalizedPrice(quickVerdict.referencePrice,quickCandidate.baseUnit)
-            : quickVerdict.referencePrice ? brl(quickVerdict.referencePrice) : null;
-          const quickHistoryScope=quickVerdict.provenance?.referenceScope==="same_brand"
-            ? "da mesma marca" : "da categoria";
           const quickPack = packageLabel(quickItem);
           const quickRetailer =
             canonicalRetailerName(bestCurrentOffer.flyer?.retailer) ||
@@ -3273,42 +3269,13 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                   </div>
                 </div>
               </div>
-              {quickReference && quickVerdict.deltaPct !== null ? (
-                <details key={quickItem.id} className="group mt-3 rounded-xl bg-background/40 px-3 py-2 text-[11px]">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-semibold [&::-webkit-details-marker]:hidden">
-                    <span className={quickVerdict.deltaPct < -0.5
-                      ? "text-primary" : quickVerdict.deltaPct > 0.5 ? "text-red-500" : "text-foreground"}>
-                      {quickVerdict.deltaPct < -0.5 ? "↓" : quickVerdict.deltaPct > 0.5 ? "↑" : "≈"}
-                      {quickVerdict.deltaPct < -0.5
-                        ? Math.abs(quickVerdict.deltaPct).toFixed(0) + "% abaixo"
-                        : quickVerdict.deltaPct > 0.5
-                          ? Math.abs(quickVerdict.deltaPct).toFixed(0) + "% acima"
-                          : "Na faixa"}
-                      {" da referência " + quickHistoryScope}
-                    </span>
-                    <span className="inline-flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
-                      Detalhes <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
-                    </span>
-                  </summary>
-                  <div className="mt-2 space-y-1 border-t border-border/50 pt-2 text-muted-foreground">
-                    <p className="font-semibold text-foreground">
-                      {"Referência " + quickHistoryScope + ": " + quickReference}
-                    </p>
-                    {quickVerdict.provenance && (
-                      <p>{historicalReferenceScopeLabel(quickVerdict.provenance)}</p>
-                    )}
-                    {quickVerdict.provenance?.referenceScope === "category" && (
-                      <p>Comparação entre marcas equivalentes, não o histórico do produto anunciado.</p>
-                    )}
-                    {currentVsStore?.currentIsBetter && (
-                      <p>{Math.abs(currentVsStore.diffPct).toFixed(0)}% abaixo do preço de gôndola registrado.</p>
-                    )}
-                    {latestReceiptReference && <p>Seu último preço pago aparece no resumo abaixo.</p>}
-                  </div>
-                </details>
-              ) : (
-                <p className="mt-2 text-[11px] text-muted-foreground">Sem histórico comparável.</p>
-              )}
+              <OfferBuyDecision
+                normalizedPrice={quickCandidate.normalizedPrice}
+                packagePrice={quickCandidate.price}
+                packageBaseQuantity={quickCandidate.packageInfo?.baseQuantity}
+                baseUnit={quickCandidate.baseUnit}
+                verdict={quickVerdict}
+              />
             </section>
           );
         })()}
@@ -3948,7 +3915,12 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
         !loadingStoreReferences &&
         !!bestCurrentOffer && (
           <>
-            <section className="mt-4 mb-4 rounded-[22px] border border-primary/35 bg-gradient-to-br from-primary/[0.08] via-card to-card p-3 sm:p-4 shadow-sm">
+            <details className="group mt-4 mb-4 rounded-2xl border border-border bg-card/40 p-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-xs font-bold text-muted-foreground [&::-webkit-details-marker]:hidden">
+                <span>Ver outras comparações e histórico</span>
+                <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
+              </summary>
+              <div className="mt-3">
               <div className="mb-3 flex items-start gap-3">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/15">
                   <TrendingUp className="h-5 w-5 text-primary" />
@@ -4162,7 +4134,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                   </div>
                 </div>
               )}
-            </section>
+              </div>
+            </details>
 
             {networkReferences.length > 0 && (
               <section className="mb-4">
