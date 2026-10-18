@@ -1590,7 +1590,7 @@ export function evaluateFlyerOffer(candidate: FlyerCandidate, product: ProductFo
       return null;
     })
     .filter(
-      (value): value is ReferenceSample =>
+      (value): value is NonNullable<typeof value> =>
         value !== null && Number.isFinite(value.value) && value.value > 0,
     );
   // Prefer history of the advertised brand. Category-level comparisons
