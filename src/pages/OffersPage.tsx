@@ -2689,6 +2689,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
   }, [preparedOffers, hasSearch, normalizedSearch]);
 
   const bestCurrentOffer = useMemo(() => {
+    // An uncertain subtype has no safe comparison basis.
+    if (potatoKindFilter === "potatoUnknown") return null;
     // A generic potato search spans in-natura, frozen, palha and snacks.
     // Do not crown the cheapest kilo of a different product "best overall".
     if (queryOfferFamily(normalizedSearch) === "potato" && !potatoKindFilter &&
@@ -2905,6 +2907,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
     >();
 
     for (const entry of analyzed) {
+      if (entry.family === "potatoUnknown") continue;
       if (explicitSearchFamily === "corn" && entry.family === "cornDerived") continue;
       const group=comparableOfferGroup(entry.family,entry.item.raw_name);
       const current = bestEntry.get(group);
