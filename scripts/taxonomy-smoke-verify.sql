@@ -75,6 +75,18 @@ INSERT INTO public.flyer_items(id,user_id,raw_name)
 VALUES ('00000000-0000-4000-8000-000000000207',
         '11111111-1111-4111-8111-111111111111','BATATA DOCE 1KG');
 
+-- A user might make manual changes after the migration. Rollback must not
+-- overwrite these later choices.
+UPDATE public.products
+SET category='Minhas escolhas depois'
+WHERE id='00000000-0000-4000-8000-000000000101';
+
+UPDATE public.products
+SET image_url='https://example.invalid/my-photo.jpg',
+    image_source='manual_user_asset'
+WHERE id='e3e3f5c2-7b74-4d84-ae02-abac851255cd';
+
+
 DO $check$
 BEGIN
   IF (SELECT category FROM public.products WHERE id='00000000-0000-4000-8000-000000000105')
