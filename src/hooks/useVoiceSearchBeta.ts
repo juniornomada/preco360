@@ -122,6 +122,21 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     ["noax", "Noix"],
     ["kaqui", "caqui"],
     ["capuchino", "cappuccino"],
+    ["capuchinho", "cappuccino"],
+    ["capucino", "cappuccino"],
+    ["capuccino", "cappuccino"],
+    ["porta dela", "mortadela"],
+    ["mortandela", "mortadela"],
+    ["iorgute", "iogurte"],
+    ["green tease", "cream cheese"],
+    ["mirio verde bandeja", "milho verde bandeja"],
+    ["tarrou 5 quilos", "arroz 5 quilos"],
+    ["mozzarella", "muçarela"],
+    ["mozarela", "muçarela"],
+    ["muzzarela", "muçarela"],
+    ["muzarela", "muçarela"],
+    ["mussarela", "muçarela"],
+    ["moçarela", "muçarela"],
     ["caputino", "cappuccino"],
     ["capuccino", "cappuccino"],
     ["cappucino", "cappuccino"],
@@ -156,8 +171,8 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
   // Whisper can confuse the supermarket cut "coxão duro" with acoustically
   // similar phrases. Keep this correction intentionally narrow so a genuine
   // search for "colchão" by itself is not rewritten.
-  if (key === "colchao duro" || key === "cochao duro" || key === "poxao duro") return "coxão duro";
-  if (key === "colchao mole" || key === "cochao mole" || key === "poxao mole") return "coxão mole";
+  if (key === "cochao duro" || key === "poxao duro") return "coxão duro";
+  if (key === "cochao mole" || key === "poxao mole") return "coxão mole";
 
   // Android/Chrome often recognizes the difficult short term when the user
   // supplies a harmless second word ("poncan fruta") or repeats it
