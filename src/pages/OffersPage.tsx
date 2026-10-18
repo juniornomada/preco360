@@ -3226,25 +3226,24 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
 
                   <div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                        <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-background/30 px-2 py-0.5 font-bold">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px]">
+                        <span className="inline-flex items-center gap-1 font-semibold text-foreground">
                           <Store className="h-3.5 w-3.5 text-primary" />
                           {quickRetailer}
                         </span>
+                        <span className="text-muted-foreground">
+                          · {expiryLabel(bestCurrentOffer.flyer?.valid_to, today)}
+                        </span>
                         {quickClubPrice !== null && (
-                          <span className="inline-flex items-center rounded-full border border-primary/25 bg-primary/15 px-2 py-0.5 font-extrabold uppercase tracking-[0.08em] text-primary">
+                          <span className="font-extrabold text-primary">
                             {normalizeSearchText(quickRetailer) === "max atacadista" ? "Clube Max" : "Clube"}
                           </span>
                         )}
                         {quickActivationState !== "none" && (
-                          <span className="inline-flex items-center rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 font-bold text-amber-500">
+                          <span className="font-semibold text-amber-500">
                             {quickActivationState === "activated" ? "APP ativado" : "ativar no APP"}
                           </span>
                         )}
-                        <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-background/25 px-2 py-0.5 text-muted-foreground">
-                          <Clock3 className="h-3.5 w-3.5" />
-                          {expiryLabel(bestCurrentOffer.flyer?.valid_to, today)}
-                        </span>
                       </div>
 
                     </div>
@@ -4007,7 +4006,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                     </p>
                   </div>
                   <p className="text-[9px] text-muted-foreground sm:text-[10px]" title={latestReceiptProduct?.name ?? undefined}>
-                    último pago {latestReceiptProduct?.name ? `· ${latestReceiptProduct.name}` : ""}
+                    último pago
                   </p>
                   {latestReceiptReference ? (
                     <>
@@ -4145,7 +4144,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                   </span>
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-foreground">
-                      Referência das suas compras:{" "}
+                      Referência do seu histórico:{" "}
                       {formatNormalizedPrice(
                         decisionReference.central,
                         decisionReference.baseUnit,
@@ -4158,7 +4157,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                         decisionReference.baseUnit,
                       )}
                       , vale esperar outra oferta se a compra puder aguardar.
-                      Esta referência considera suas compras anteriores, que podem ser de outra marca.
+                      Pode incluir compras e preços de gôndola de marcas equivalentes.
                     </p>
                   </div>
                 </div>
