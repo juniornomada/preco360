@@ -1,5 +1,24 @@
 # Auditoria e plano de classificação do catálogo — 18/10/2026
 
+## Resultados medidos na continuação (18/10/2026)
+
+- Catálogo **268**: **225** com categoria de alta confiança, **37** classificados por família ampla mas com subtipo pendente, **6** sem categoria segura (**262/268 = 97,8% com família identificada**).
+- Os **6 pendentes**: `AM DORI TORRA BOTECO LASCAS ALHO 320G`, `AM DORI TORRA BOTECO LASCAS CEB 320G`, `BATATA UNI 130G`, `CREME NESTLE 200g`, `DELIKET ACIDO CONF 700G`, `MOL STELLA DORO 300G`. Não inferir pelo preço ou por marca isolada.
+- Ofertas: a última auditoria completa concluída, com 157 regras, classificou **6.351/8.148 (77,9%)**, deixando **1.797 registros pendentes** e 1.441 nomes únicos pendentes. **A branch já evoluiu para um conjunto maior de regras, mas um novo recálculo global excedeu o tempo limite SQL; não declarar uma porcentagem nova sem medição.**
+- O mapeamento usa o nome principal e sinais explícitos; é diagnóstico **read-only**, não atualiza as tabelas.
+- Foram incluídos testes para impedir que uma oferta de tipo desconhecido (`Batata Uni 130g`) herde por alias o histórico de `Batata Palha Uni 100g`.
+- Testes específicos `productTaxonomy.test.ts` e `potatoOfferReference.test.ts` **passaram** no workflow de 18/10; o `npm run build` **passou**.
+- A suíte completa ainda falha em testes preexistentes ou não relacionados de voz (variáveis de ambiente ausentes no CI), referência histórica de marcas, grupos de cesta básica e imagens; não afirmar que a suíte geral está limpa até comparar com a main e resolver as falhas.
+- Não houve alteração no Supabase de produção, e nenhum PR/merge foi realizado para a taxonomia.
+
+### Critérios para liberar o PR futuro
+1. Avaliar risco de falso positivo nos casos com `confidence='review'`; só famílias de alta confiança podem ser usadas como referência automática, jamais sozinhas como chave de identidade.
+2. Rodar regressões direcionadas e build em branch, corrigindo os casos atribuíveis ao patch e comparando falhas antigas com o baseline.
+3. Implementar persistência/backfill controlado e idempotente *depois* de revisão dos impactos na autenticação, RLS e históricos; não forçar nomes ambíguos.
+4. Validar no preview a busca `batata`, o filtro entre frutas/raízes, batata frita congelada, palha e chips, sem vencedor global que compare famílias heterogêneas.
+5. Abrir PR só após essas verificações e aprovação do comportamento visual.
+
+
 ## Escopo identificado por consulta de leitura ao Supabase
 
 - `products`: **268** produtos, todos com `category='Geral'`.
