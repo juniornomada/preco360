@@ -19,7 +19,7 @@ describe("production taxonomy deployment safeguards", () => {
     expect(snapshot).toContain("original_image_url");
     expect(snapshot).toContain("ON CONFLICT (product_id) DO NOTHING");
     expect(snapshot).toContain("REVOKE ALL");
-    expect("20261018184000").toBeLessThan("20261018184500");
+    expect(Number("20261018184000")).toBeLessThan(Number("20261018184500"));
   });
 
   it("never alters prices or product matching keys in backfill", () => {
