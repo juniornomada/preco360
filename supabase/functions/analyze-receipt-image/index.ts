@@ -31,13 +31,17 @@ REGRAS IMPORTANTES
 7. unitPrice é o valor unitário cobrado. Em item vendido por KG, é o preço por kg mostrado na nota.
 8. totalPrice é o total daquele item/linha após quantidade × preço unitário, quando legível.
 9. price deve repetir unitPrice quando unitPrice existir; caso contrário use totalPrice. Nunca use o total geral da nota como preço de um produto.
-10. Desconto geral, troco, pagamento, tributos, CPF/CNPJ, chave de acesso e total da nota NÃO são produtos.
+10. Desconto geral, troco, pagamento, tributos, CPF/CNPJ, chave de acesso e total da nota NÃO são produtos. IMPORTANTE: descontos identificados como "Desconto Item:020 -1,00" NÃO são produtos, mas DEVEM ser capturados separadamente na lista discounts, ligados ao número EXATO do item 020.
 11. Se a mesma descrição aparecer duas vezes em linhas diferentes da própria nota, preserve as duas linhas; não una sem evidência.
 12. Não transforme código/EAN em nome do produto.
 13. Se algum campo do item não estiver legível, use null. Para aceitar um item, name e pelo menos unitPrice ou totalPrice precisam estar legíveis.
 14. confidence deve refletir a confiança real da leitura. Omita itens com confidence abaixo de 0,65.
 15. Examine todo o arquivo, inclusive todas as páginas do PDF, texto pequeno, linhas parcialmente visíveis e colunas de quantidade/valor.
 16. Retorne SOMENTE JSON válido, sem markdown.
+17. Cada produto tem itemNumber: número ordinal impresso à esquerda da descrição (ex.: 20 ou 020). Não use o EAN/código de barras como itemNumber. Se o número não estiver legível, use null.
+18. Para cada linha impressa como "Desconto Item:020 -1,00", retorne um registro em discounts com itemNumber="020", amount=1.00 e confidence apropriada. NÃO some, rateie, infira nem aplique descontos genéricos de subtotal. Se não houver desconto com número de item explícito, retorne discounts=[].
+19. unitPrice e totalPrice do item são os valores ORIGINAIS impressos, antes do desconto em linha separada. Não aplique descontos em items; o aplicativo associará pelo número impresso.
+20. Se o mesmo trecho do cupom for enviado em partes, extraia os números dos itens e os descontos de cada parte, mesmo que o item correspondente esteja em outra parte.
 
 Estrutura exata:
 {
@@ -45,6 +49,7 @@ Estrutura exata:
   "date": "YYYY-MM-DD ou null",
   "items": [
     {
+      "itemNumber": "020",
       "name": "descrição do item",
       "quantity": null,
       "unit": null,
@@ -53,7 +58,8 @@ Estrutura exata:
       "price": 0,
       "confidence": 0.95
     }
-  ]
+  ],
+  "discounts": []
 }
 
 Se não houver nenhum item legível, retorne {"supermarket":null,"date":null,"items":[]}.
@@ -120,6 +126,11 @@ function moneyText(value: unknown) {
   const number = positive(value);
   if (number == null) return undefined;
   return number.toFixed(2);
+}
+
+function discountMoneyText(value: unknown) {
+  const normalized=String(value ?? "").replace(/R\$/gi, "").trim().replace(/^[-−]/, "");
+  return moneyText(normalized);
 }
 
 function normalizeUnit(value: unknown) {
@@ -273,6 +284,9 @@ Deno.serve(async (req: Request) => {
               return null;
             }
             return {
+              itemNumber: /^0*\d{1,4}$/.test(String(item?.itemNumber ?? "").trim())
+                ? String(item.itemNumber).trim()
+                : undefined,
               name,
               price,
               quantity: decimalText(item?.quantity),
@@ -285,6 +299,19 @@ Deno.serve(async (req: Request) => {
           .filter(Boolean)
           .slice(0, 350);
 
+        const discounts = (Array.isArray(parsed?.discounts) ? parsed.discounts : [])
+          .map((discount: any) => {
+            const number = String(discount?.itemNumber ?? "").trim();
+            const value = discountMoneyText(discount?.amount);
+            const confidence = Number(discount?.confidence);
+            if (!/^0*\d{1,4}$/.test(number) ||
+                !value || Number(value) <= 0 ||
+                !Number.isFinite(confidence) || confidence < 0.8) return null;
+            return { itemNumber: number, amount: value };
+          })
+          .filter(Boolean)
+          .slice(0, 150);
+
         attempts[attempts.length - 1].outcome = items.length ? "success" : "no_items";
         return json(200, {
           supermarket: parsed?.supermarket
@@ -292,6 +319,7 @@ Deno.serve(async (req: Request) => {
             : "",
           date: normalizeDate(parsed?.date),
           items,
+          discounts,
           model,
           attempted_models: attempts,
         });

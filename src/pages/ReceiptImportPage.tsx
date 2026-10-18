@@ -6,6 +6,11 @@ import { useToast } from "@/hooks/use-toast";
 import { QrScanner } from "@/components/QrScanner";
 import { buildOfficialConsultationUrl, extractAccessKey, fiscalDocumentKind, fiscalDocumentLabel, validateAccessKey, validateNfceUrl } from "@/lib/nfceKey";
 import { inferPackage } from "@/lib/flyerAnalysis";
+import {
+  applyPrintedReceiptDiscounts,
+  type PrintedReceiptDiscount,
+  type PrintedReceiptItem,
+} from "@/lib/printedReceiptDiscounts";
 import { sanitizeAccessKeyDigits } from "@/lib/accessKeyVoice";
 import { useAccessKeyVoice } from "@/hooks/useAccessKeyVoice";
 import { Button } from "@/components/ui/button";
@@ -17,15 +22,7 @@ import { AlertCircle, Camera, CheckCircle2, ExternalLink, Key, Loader2, Mic, QrC
 
 const db = supabase as any;
 
-type ParsedItem = {
-  name: string;
-  price: string;
-  quantity?: string;
-  unit?: string;
-  unitPrice?: string;
-  totalPrice?: string;
-  barcode?: string;
-};
+type ParsedItem = PrintedReceiptItem & { manuallyEdited?: boolean };
 type ImportSource = "qr" | "key" | "image";
 const RECEIPT_CHANNEL = "preco360-receipt-import";
 type Diagnostics = {
@@ -160,7 +157,14 @@ function receiptItemSummary(item: ParsedItem) {
       `${quantity.toLocaleString("pt-BR", { maximumFractionDigits: 4 })} ${unit.toLowerCase()} × ${brl(unitPrice)}`,
     );
   }
-  if (total) parts.push(`total ${brl(total)}`);
+  if (item.discountAmount && item.originalTotalPrice) {
+    parts.push(`original ${brl(Number(item.originalTotalPrice))}`);
+    parts.push(`desconto item ${brl(Number(item.discountAmount))}`);
+    if (total) parts.push(`pago ${brl(total)}`);
+  } else if (total) {
+    parts.push(`total ${brl(total)}`);
+  }
+  if (item.manuallyEdited) parts.push("valor final ajustado manualmente");
   if (normalized) parts.push(`${brl(normalized.value)}/${normalized.unit}`);
 
   return [...new Set(parts)].join(" · ");
@@ -176,8 +180,8 @@ function receiptItemKey(item: ParsedItem) {
       .replace(/\s+/g, " ")
       .trim(),
     item.quantity ?? "",
-    item.unitPrice ?? item.price ?? "",
-    item.totalPrice ?? "",
+    item.originalUnitPrice ?? item.unitPrice ?? item.price ?? "",
+    item.originalTotalPrice ?? item.totalPrice ?? "",
   ].join("|");
 }
 
@@ -214,6 +218,8 @@ function consolidateReceiptItemsForSave(items: ParsedItem[]) {
       identity,
       unitPrice.toFixed(6),
       saleUnit,
+      item.originalUnitPrice ?? "",
+      item.discountAmount ? "printed-discount" : "no-discount",
     ].join("|");
 
     const quantity = decimalValue(item.quantity);
@@ -242,6 +248,16 @@ function consolidateReceiptItemsForSave(items: ParsedItem[]) {
       nextQuantity > 0 ? nextQuantity : undefined;
     existing.__itemTotal =
       nextTotal > 0 ? nextTotal : undefined;
+    if (item.discountAmount) {
+      existing.discountAmount = (
+        (Number(existing.discountAmount) || 0) + Number(item.discountAmount)
+      ).toFixed(2);
+    }
+    if (item.originalTotalPrice) {
+      existing.originalTotalPrice = (
+        (Number(existing.originalTotalPrice) || 0) + Number(item.originalTotalPrice)
+      ).toFixed(2);
+    }
   }
 
   return [...grouped.values()].map((item) => ({
@@ -256,6 +272,11 @@ function consolidateReceiptItemsForSave(items: ParsedItem[]) {
       ? item.__itemTotal.toFixed(2)
       : item.totalPrice,
     barcode: item.barcode,
+    itemNumber: item.itemNumber,
+    originalUnitPrice: item.originalUnitPrice,
+    originalTotalPrice: item.originalTotalPrice,
+    discountAmount: item.discountAmount,
+    manuallyEdited: item.manuallyEdited,
   }));
 }
 
@@ -528,6 +549,7 @@ export default function ReceiptImportPage() {
       ? data.items
           .map((item: any) => ({
             name: String(item?.name ?? "").trim(),
+            itemNumber: item?.itemNumber ? String(item.itemNumber) : undefined,
             price: String(item?.price ?? ""),
             quantity: item?.quantity ? String(item.quantity) : undefined,
             unit: item?.unit ? String(item.unit) : undefined,
@@ -557,6 +579,7 @@ export default function ReceiptImportPage() {
     (Array.isArray(data?.items) ? data.items : [])
       .map((item: any) => ({
         name: String(item?.name ?? "").trim(),
+        itemNumber: item?.itemNumber ? String(item.itemNumber) : undefined,
         price: String(item?.price ?? item?.unitPrice ?? item?.totalPrice ?? ""),
         quantity: item?.quantity ? String(item.quantity) : undefined,
         unit: item?.unit ? String(item.unit) : undefined,
@@ -614,6 +637,7 @@ export default function ReceiptImportPage() {
 
       for (const group of groups) {
         let groupItems: ParsedItem[] = [];
+        const groupDiscounts: PrintedReceiptDiscount[] = [];
 
         for (const file of group.parts) {
           partNumber += 1;
@@ -673,8 +697,19 @@ export default function ReceiptImportPage() {
           }
 
           const parsed = normalizeReceiptItems(data);
+          const partDiscounts = group.kind !== "html" && Array.isArray(data?.discounts)
+            ? data.discounts
+            : [];
+          for (const row of partDiscounts) {
+            groupDiscounts.push({
+              itemNumber: String(row?.itemNumber ?? ""),
+              amount: String(row?.amount ?? ""),
+            });
+          }
           if (!parsed.length) {
-            failures.push(`${file.name}: nenhum item legível encontrado`);
+            if (!partDiscounts.length) {
+              failures.push(`${file.name}: nenhum item legível encontrado`);
+            }
             continue;
           }
 
@@ -691,6 +726,13 @@ export default function ReceiptImportPage() {
           }
         }
 
+        if (group.kind !== "html" && groupDiscounts.length) {
+          const adjusted = applyPrintedReceiptDiscounts(groupItems, groupDiscounts);
+          groupItems = adjusted.items;
+          if (adjusted.unresolved) failures.push(
+            `${group.original.name}: ${adjusted.unresolved} desconto(s) sem vínculo seguro com um item. Confira manualmente.`
+          );
+        }
         merged = [...merged, ...groupItems];
       }
 
@@ -1030,7 +1072,15 @@ export default function ReceiptImportPage() {
       current.map((item, i) => {
         if (i !== index) return item;
         if (field === "price") {
-          return { ...item, price: value, unitPrice: value };
+          const quantity = decimalValue(item.quantity);
+          const nextUnit = decimalValue(value);
+          return {
+            ...item,
+            price: value,
+            unitPrice: value,
+            totalPrice: quantity && nextUnit ? (quantity * nextUnit).toFixed(2) : item.totalPrice,
+            manuallyEdited: true,
+          };
         }
         return { ...item, [field]: value };
       }),
@@ -1068,7 +1118,14 @@ export default function ReceiptImportPage() {
                 : "Importado via arquivo da nota fiscal (imagem/PDF/HTML)",
             quantity && unit ? `quantidade ${quantity} ${unit}` : null,
             unit ? `preço unitário ${price.toFixed(2)}/${unit}` : null,
-            total ? `total do item ${total.toFixed(2)}` : null,
+            item.originalUnitPrice
+              ? `preço original unitário ${item.originalUnitPrice}` : null,
+            item.originalTotalPrice
+              ? `total original do item ${item.originalTotalPrice}` : null,
+            item.discountAmount
+              ? `desconto identificado no item ${item.itemNumber ?? "?"}: ${item.discountAmount}` : null,
+            item.manuallyEdited ? "valor líquido ajustado manualmente" : null,
+            total ? `total líquido do item ${total.toFixed(2)}` : null,
             item.barcode ? `GTIN ${item.barcode}` : null,
           ]
             .filter(Boolean)
