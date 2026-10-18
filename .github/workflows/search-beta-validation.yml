@@ -1,0 +1,40 @@
+name: Search Beta Validation
+
+on:
+  push:
+    branches:
+      - feat/search-beta-mobile-layout-20261018
+  pull_request:
+    paths:
+      - 'src/App.tsx'
+      - 'src/pages/SearchPageBeta.tsx'
+      - 'src/components/PriceQuoteSearchResult.tsx'
+      - 'src/lib/quoteNamePresentation.ts'
+      - 'src/test/priceQuoteSearchResult.test.tsx'
+      - 'src/test/quoteNamePresentation.test.ts'
+      - '.github/workflows/search-beta-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  beta-layout-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Beta layout and fiscal product display tests
+        run: npx vitest run src/test/priceQuoteSearchResult.test.tsx src/test/quoteNamePresentation.test.ts
+      - name: Ensure legacy /search remains and /search-beta exists
+        run: |
+          grep -F '<Route path="/search" element={<SearchPage />} />' src/App.tsx
+          grep -F '<Route path="/search-beta" element={<SearchPageBeta />} />' src/App.tsx
+          grep -F 'const SearchPageBeta = resilientLazy' src/App.tsx
+      - name: Production build
+        run: npm run build
