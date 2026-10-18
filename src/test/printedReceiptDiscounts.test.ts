@@ -20,8 +20,8 @@ describe("printed receipt item discounts", () => {
       originalTotalPrice: "17.90",
       discountAmount: "1.00",
       totalPrice: "16.90",
-      price: "16.900000",
-      unitPrice: "16.900000",
+      price: "16.90",
+      unitPrice: "16.90",
     });
     expect(Number(result.items[0].price) / 0.2).toBeCloseTo(84.5, 2);
   });
@@ -35,7 +35,7 @@ describe("printed receipt item discounts", () => {
       { itemNumber: "20", amount: "1.00" },
     ]);
     expect(result.items[0].price).toBe("15.89");
-    expect(result.items[1].price).toBe("16.900000");
+    expect(result.items[1].price).toBe("16.90");
   });
 
   it("never allocates a generic subtotal reduction to arbitrary items", () => {
@@ -77,6 +77,7 @@ describe("printed receipt item discounts", () => {
     expect(result.applied).toBe(1);
     expect(result.items[0].totalPrice).toBe("22.77");
     expect(Number(result.items[0].price)).toBeCloseTo(22.77/1.496, 5);
+    expect(result.items[0].price).toMatch(/^\d+\.\d{6}$/);
   });
 
   it("rejects discounts greater than the original line value", () => {
