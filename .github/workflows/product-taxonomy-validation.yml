@@ -27,7 +27,11 @@ jobs:
           node-version: '20'
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-      - name: Unit tests
+      - name: Taxonomy regression tests
+        run: npx vitest run src/test/productTaxonomy.test.ts src/test/potatoOfferReference.test.ts
+      - name: Full existing unit tests
+        if: always()
         run: npm test
       - name: Build
+        if: always()
         run: npm run build
