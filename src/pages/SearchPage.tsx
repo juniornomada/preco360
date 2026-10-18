@@ -38,6 +38,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import ProductSearchBar from "@/components/ProductSearchBar";
 import PriceQuoteSearchResult from "@/components/PriceQuoteSearchResult";
+import { readableQuoteProductName } from "@/lib/quoteNamePresentation";
 import { productMatchesSearch } from "@/lib/productSearch";
 import { unitPriceForProduct, unitPackageFromProduct } from "@/lib/productUnitPricing";
 import {
@@ -80,7 +81,7 @@ function packageLabel(
 }
 
 function displayProductName(product: ProductSummary) {
-  const clean = product.name.trim();
+  const clean = readableQuoteProductName(product.name);
   if (!clean) return clean;
   if (inferPackage(clean)) return clean;
 
