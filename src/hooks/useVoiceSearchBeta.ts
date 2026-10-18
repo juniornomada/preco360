@@ -122,6 +122,7 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     ["noax", "Noix"],
     ["kaqui", "caqui"],
     ["capuchino", "cappuccino"],
+    ["caputino", "cappuccino"],
     ["capuccino", "cappuccino"],
     ["cappucino", "cappuccino"],
     ["cappuccino", "cappuccino"],
