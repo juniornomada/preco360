@@ -789,6 +789,7 @@ export function useVoiceSearchBeta() {
     isListening,
     error,
     lastTimingMs,
+    lastRawTranscript,
     clearError,
     startListening,
     stopListening,
