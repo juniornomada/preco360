@@ -162,6 +162,18 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     ["beijo", "peixe"],
   ]);
 
+  // Voice-only equivalences: ASR may split a brand into multiple words.
+  // Preserve trailing product qualifiers such as package size.
+  const ovomaltineMatch = key.match(/^(?:ovo[\s-]*)?mal(?:t|ch)(?:ine|ini|ino|inni)(?=$|\s)/);
+  if (ovomaltineMatch && (key.startsWith("ovo") || key.startsWith("malt"))) {
+    return "Ovomaltine" + normalized.slice(ovomaltineMatch[0].length);
+  }
+
+  const mortadelaMatch = key.match(/^(?:mortadela|mortandela|mortandella|mortadella)(?=$|\s)/);
+  if (mortadelaMatch) {
+    return "mortadela" + normalized.slice(mortadelaMatch[0].length);
+  }
+
   const knownCorrection = knownAsrCorrections.get(key);
   if (knownCorrection) return knownCorrection;
 
