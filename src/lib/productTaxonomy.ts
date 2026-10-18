@@ -199,6 +199,7 @@ const catalogRules: readonly Rule[] = [
   // More product heads found in the remaining unclassified flyer offers.
   [/^toalha umedecida\b|^lenco umedecido\b/, "Higiene", "Lenços umedecidos", "higiene:lencos"],
   [/^toalha (?:de )?(?:mesa|piso|cozinha|praia)\b/, "Casa e utilidades", "Toalhas de uso doméstico", "casa:toalhas-domesticas"],
+  [/^toalha papel\b/, "Casa e limpeza", "Papel toalha", "casa:papel-toalha"],
   [/^toalha\b/, "Casa e utilidades", "Toalhas — verificar tipo", "casa:toalhas-revisar"],
   [/^esfiha\b/, "Padaria", "Esfihas", "padaria:esfihas"],
   [/^licor\b/, "Bebidas", "Licores", "bebida:licores"],
