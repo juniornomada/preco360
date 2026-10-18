@@ -1,4 +1,6 @@
-import { normalizeSearchText } from "@/lib/flyerAnalysis";
+const normalizeSearchText = (text: string) =>
+  text.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 export type ReferenceSample = {
   value: number;
