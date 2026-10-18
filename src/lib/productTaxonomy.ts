@@ -19,6 +19,7 @@ export type ProductClassification = {
   category: string;
   /** Safe group label, NOT a substitute for brand, package or price matching. */
   kind: string;
+  confidence: "high" | "review";
 };
 
 function normalize(value: string) {
@@ -135,6 +136,43 @@ const catalogRules: readonly Rule[] = [
   [/^sorvete\b|^acai\b/, "Congelados", "Sorvetes e sobremesas geladas", "congelados:sobremesas"],
   [/^hamburguer\b|^hamb\b|^kibe\b|^big chicken\b/, "Congelados", "Empanados e preparados", "congelados:preparados"],
   [/^filme pvc\b|^papel aluminio\b|^kit meia\b/, "Casa e utilidades", "Utilidades domésticas", "casa:utilidades"],
+  // Conservative product-head mappings for recognized NFC-e abbreviations.
+  [/^amido (?:de )?milho\b/, "Mercearia", "Amido de milho", "mercearia:amido-milho"],
+  [/^azeit\b|^azeitona\b/, "Mercearia", "Azeitonas", "mercearia:azeitonas"],
+  [/^broto feijao\b/, "Hortifruti", "Brotos", "hortifruti:brotos"],
+  [/^canjica\b/, "Mercearia", "Canjica", "mercearia:canjica"],
+  [/^cereal\b/, "Mercearia", "Cereais", "mercearia:cereais"],
+  [/^ch nestle kit kat\b/, "Doces", "Chocolates", "doces:chocolate"],
+  [/^cha\b/, "Mercearia", "Chás", "mercearia:chas"],
+  [/^ervilha\b/, "Hortifruti e conservas", "Ervilhas — verificar apresentação", "hortifruti:ervilha"],
+  [/^erva doce\b|^louro\b/, "Mercearia", "Ervas e temperos", "mercearia:ervas"],
+  [/^farofa\b/, "Mercearia", "Farofas", "mercearia:farofas"],
+  [/^ferm\b|^fermento\b/, "Mercearia", "Fermentos", "mercearia:fermentos"],
+  [/^goiabada\b/, "Doces", "Doces de frutas", "doces:frutas"],
+  [/^inset\b|^inseticida\b/, "Limpeza", "Inseticidas", "limpeza:inseticidas"],
+  [/^jubes\b/, "Doces", "Balas e gomas", "doces:balas"],
+  [/^kit elseve\b|^kit shamp\b/, "Higiene", "Kits capilares", "higiene:kit-capilar"],
+  [/^maracuja\b|^murcote\b|^tangerina\b/, "Hortifruti", "Frutas", "hortifruti:frutas"],
+  [/^miolo sete\b|^patinho\b|^moida\b/, "Açougue", "Carne bovina — verificar corte", "acougue:bovino"],
+  [/^mort\b|^mortadela\b/, "Frios e embutidos", "Mortadela", "frios:mortadela"],
+  [/^mostarda\b|^pimenta reino\b|^paprica\b|^tempero\b/, "Mercearia", "Temperos e condimentos", "mercearia:condimentos"],
+  [/^nozes\b/, "Biscoitos e snacks", "Oleaginosas e amendoins", "snacks:oleaginosas"],
+  [/^palmit\b|^palmito\b/, "Mercearia", "Palmitos", "mercearia:palmito"],
+  [/^pepino\b|^pimentao\b|^quiabo\b|^repolho\b|^tomate\b/, "Hortifruti", "Legumes e verduras", "hortifruti:legumes"],
+  [/^pirulito\b|^trident\b/, "Doces", "Balas e gomas", "doces:balas"],
+  [/^qj\b|^qjo\b|^req\b|^requeijao\b/, "Laticínios", "Queijos e requeijões — verificar tipo", "laticinio:queijos-revisar"],
+  [/^refresc\b|^refresco\b/, "Bebidas", "Refrescos — verificar apresentação", "bebida:refresco"],
+  [/^ref\b|^refrig\b|^sprite\b/, "Bebidas", "Refrigerantes", "bebida:refrigerante"],
+  [/^rosca\b/, "Padaria", "Roscas", "padaria:roscas"],
+  [/^saco lixo\b|^sc lixo\b|^saco p alim\b/, "Casa e limpeza", "Sacos para casa", "casa:sacos"],
+  [/^salg\b|^sn (?:cheetos|doritos)\b/, "Biscoitos e snacks", "Salgadinhos", "snacks:salgadinhos"],
+  [/^sals\b|^salsicha\b/, "Frios e embutidos", "Salsichas", "frios:salsichas"],
+  [/^sushi\b/, "Pratos prontos", "Sushi", "prontos:sushi"],
+  [/^svt kibon\b/, "Congelados", "Sorvetes e sobremesas geladas", "congelados:sobremesas"],
+  [/^toalha papel\b/, "Casa e limpeza", "Papel toalha", "casa:papel-toalha"],
+  [/^yakult\b/, "Laticínios", "Leite fermentado", "laticinio:leite-fermentado"],
+  [/^fgo\b|^file coxa\b|^b chicken\b/, "Açougue", "Frango — verificar corte", "acougue:frango"],
+  [/^lg tp calab\b/, "Frios e embutidos", "Linguiças", "frios:linguica"],
 ];
 
 /** A deliberate null prevents automated incorrect substitutions. */
@@ -149,10 +187,15 @@ export function classifyProductName(value: string): ProductClassification | null
         potato === "potatoFrozen" ? "Congelados" : "Biscoitos e snacks",
       category: potatoCategories[potato],
       kind: "batata:" + potato,
+      confidence: "high",
     };
   }
   const rule = catalogRules.find(([regex]) => regex.test(text));
   return rule
-    ? { department: rule[1], category: rule[2], kind: rule[3] }
+    ? {
+      department: rule[1], category: rule[2], kind: rule[3],
+      confidence: /verificar|revisar/.test(normalize(rule[2])) || /revisar/.test(rule[3])
+        ? "review" : "high",
+    }
     : null;
 }
