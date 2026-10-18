@@ -16,6 +16,9 @@ on:
       - 'src/lib/quoteNamePresentation.ts'
       - 'src/lib/catalogCategoryPresentation.ts'
       - 'src/test/catalogCategoryPresentation.test.ts'
+      - 'src/test/taxonomyMigrationSafety.test.ts'
+      - 'supabase/migrations/*taxonomy*.sql'
+      - 'docs/rollback-product-taxonomy-20261018.sql'
       - 'src/test/*Taxonomy*.test.ts'
       - 'src/test/potatoOfferReference.test.ts'
   workflow_dispatch:
@@ -35,7 +38,7 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Taxonomy regression tests
-        run: npx vitest run src/test/productTaxonomy.test.ts src/test/potatoOfferReference.test.ts src/test/priceQuoteSearchResult.test.tsx src/test/quoteNamePresentation.test.ts src/test/catalogCategoryPresentation.test.ts
+        run: npx vitest run src/test/productTaxonomy.test.ts src/test/potatoOfferReference.test.ts src/test/priceQuoteSearchResult.test.tsx src/test/quoteNamePresentation.test.ts src/test/catalogCategoryPresentation.test.ts src/test/taxonomyMigrationSafety.test.ts
       - name: Full existing unit tests
         if: always()
         run: npm test
