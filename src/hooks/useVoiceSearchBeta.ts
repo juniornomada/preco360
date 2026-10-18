@@ -121,6 +121,10 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     ["novax", "Noix"],
     ["noax", "Noix"],
     ["kaqui", "caqui"],
+    ["capuchino", "cappuccino"],
+    ["capuccino", "cappuccino"],
+    ["cappucino", "cappuccino"],
+    ["cappuccino", "cappuccino"],
     ["kaki", "caqui"],
     // Only in the VOICE path: "cacique" is a genuine written product/brand.
     ["cacique", "caqui"],
