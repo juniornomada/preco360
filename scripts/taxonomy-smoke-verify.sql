@@ -4,6 +4,12 @@ DECLARE
   k text;
   c text;
 BEGIN
+  IF (SELECT count(*) FROM public.flyer_items) <> 8006
+  THEN RAISE EXCEPTION 'Expected 8,006 synthetic and fixture flyers'; END IF;
+
+  IF (SELECT count(*) FROM public.flyer_items WHERE taxonomy_confidence='high') <> 6405
+  THEN RAISE EXCEPTION 'Synthetic flyer classification coverage mismatch'; END IF;
+
   IF (SELECT count(*) FROM public.product_taxonomy_rollback_snapshot_20261018) <> 6
   THEN RAISE EXCEPTION 'Missing pre-migration product snapshot'; END IF;
   IF (SELECT count(*) FROM public.product_taxonomy_rules) <> 185
