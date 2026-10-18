@@ -3274,7 +3274,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                 </div>
               </div>
               {quickReference && quickVerdict.deltaPct !== null ? (
-                <details className="group mt-3 rounded-xl bg-background/40 px-3 py-2 text-[11px]">
+                <details key={quickItem.id} className="group mt-3 rounded-xl bg-background/40 px-3 py-2 text-[11px]">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-semibold [&::-webkit-details-marker]:hidden">
                     <span className={quickVerdict.deltaPct < -0.5
                       ? "text-primary" : quickVerdict.deltaPct > 0.5 ? "text-red-500" : "text-foreground"}>
@@ -3303,7 +3303,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                     {currentVsStore?.currentIsBetter && (
                       <p>{Math.abs(currentVsStore.diffPct).toFixed(0)}% abaixo do preço de gôndola registrado.</p>
                     )}
-                    <p>Seu último preço pago aparece no resumo abaixo.</p>
+                    {latestReceiptReference && <p>Seu último preço pago aparece no resumo abaixo.</p>}
                   </div>
                 </details>
               ) : (
