@@ -17,6 +17,12 @@ describe("beta voice supermarket transcription", () => {
     ["ovo maltino", "Ovomaltine"],
     ["ovomaltine", "Ovomaltine"],
     ["Mortandela fatiada 200g", "mortadela fatiada 200g"],
+    ["Bortandela", "mortadela"],
+    ["Morta dela", "mortadela"],
+    ["Mortando", "mortadela"],
+    ["Ovo Mocinho", "Ovomaltine"],
+    ["Ovo-Molchini", "Ovomaltine"],
+    ["Ovo Maltinho", "Ovomaltine"],
   ])("corrects observed ASR output %s", (heard, expected) => {
     expect(normalizeVoiceSearchBetaTranscript(heard)).toBe(expected);
   });
