@@ -49,7 +49,7 @@ Estrutura exata:
   "date": "YYYY-MM-DD ou null",
   "items": [
     {
-      "itemNumber": "020 ou null",
+      "itemNumber": "020",
       "name": "descrição do item",
       "quantity": null,
       "unit": null,
@@ -59,9 +59,7 @@ Estrutura exata:
       "confidence": 0.95
     }
   ],
-  "discounts": [
-    { "itemNumber": "020", "amount": "1.00", "confidence": 0.95 }
-  ]
+  "discounts": []
 }
 
 Se não houver nenhum item legível, retorne {"supermarket":null,"date":null,"items":[]}.
@@ -128,6 +126,11 @@ function moneyText(value: unknown) {
   const number = positive(value);
   if (number == null) return undefined;
   return number.toFixed(2);
+}
+
+function discountMoneyText(value: unknown) {
+  const normalized=String(value ?? "").replace(/R\$/gi, "").trim().replace(/^[-−]/, "");
+  return moneyText(normalized);
 }
 
 function normalizeUnit(value: unknown) {
@@ -299,7 +302,7 @@ Deno.serve(async (req: Request) => {
         const discounts = (Array.isArray(parsed?.discounts) ? parsed.discounts : [])
           .map((discount: any) => {
             const number = String(discount?.itemNumber ?? "").trim();
-            const value = moneyText(discount?.amount);
+            const value = discountMoneyText(discount?.amount);
             const confidence = Number(discount?.confidence);
             if (!/^0*\d{1,4}$/.test(number) ||
                 !value || Number(value) <= 0 ||
