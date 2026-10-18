@@ -3613,7 +3613,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                               className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${ui.className}`}
                             >
                               <VerdictIcon className="h-3.5 w-3.5" />
-                              {ui.label}
+                              {scopedVerdictLabel}
                             </span>
                             <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground">
                               <Clock3 className="h-3.5 w-3.5" />
@@ -3735,7 +3735,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                               )}
 
                               {verdict.referencePrice &&
-                                (productId ? (
+                                (productId && verdict.provenance?.referenceScope==="same_brand"
+                                  && verdict.provenance?.referenceSource==="purchase" ? (
                                   <button
                                     type="button"
                                     onClick={() =>
@@ -3744,14 +3745,16 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                                     className="inline-flex items-center gap-0.5 font-semibold text-muted-foreground transition-colors hover:text-primary"
                                     aria-label="Ver histórico do produto"
                                   >
-                                    {verdict.purchaseCount > 0 ? "Pago " : "Ref. "}
-                                    {referenceLabel}
+                                    Histórico {verdictHistoryScope}: {referenceLabel}
                                     <ChevronRight className="h-3 w-3" />
                                   </button>
                                 ) : (
-                                  <span className="font-semibold text-muted-foreground">
-                                    {verdict.purchaseCount > 0 ? "Pago " : "Ref. "}
-                                    {referenceLabel}
+                                  <span className="font-semibold text-muted-foreground"
+                                    title={verdict.provenance ? historicalReferenceScopeLabel(verdict.provenance) : undefined}>
+                                    Ref. {verdictHistoryScope}: {referenceLabel}
+                                    {verdict.provenance?.referenceScope==="category"
+                                      && verdict.provenance.referenceBrands.length>0
+                                      ? ` · ${verdict.provenance.referenceBrands.join(", ")}` : ""}
                                   </span>
                                 ))}
 
@@ -4003,8 +4006,8 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                       Histórico
                     </p>
                   </div>
-                  <p className="text-[9px] text-muted-foreground sm:text-[10px]">
-                    último pago
+                  <p className="text-[9px] text-muted-foreground sm:text-[10px]" title={latestReceiptProduct?.name ?? undefined}>
+                    último pago {latestReceiptProduct?.name ? `· ${latestReceiptProduct.name}` : ""}
                   </p>
                   {latestReceiptReference ? (
                     <>
@@ -4142,7 +4145,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                   </span>
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-foreground">
-                      Bom preço até{" "}
+                      Referência das suas compras:{" "}
                       {formatNormalizedPrice(
                         decisionReference.central,
                         decisionReference.baseUnit,
@@ -4155,6 +4158,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                         decisionReference.baseUnit,
                       )}
                       , vale esperar outra oferta se a compra puder aguardar.
+                      Esta referência considera suas compras anteriores, que podem ser de outra marca.
                     </p>
                   </div>
                 </div>
