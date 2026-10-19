@@ -1,4 +1,3 @@
-import { useVoiceSearchProduction } from "@/hooks/useVoiceSearchProduction";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -272,7 +271,6 @@ function voiceErrorMessage(error?: string) {
 }
 
 export function useVoiceSearchBeta() {
-  const productionVoice = useVoiceSearchProduction();
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -757,23 +755,16 @@ export function useVoiceSearchBeta() {
 
   const startListening = useCallback(
     (onTranscript: (transcript: string) => void) => {
-      // Use the exact recognizer proven in production as the primary path.
-      // Groq is reserved for browsers without native speech recognition.
-      setLastRawTranscript(null);
-      setLastTimingMs(null);
-      if (productionVoice.isSupported) {
-        return productionVoice.startListening((rawTranscript) => {
-          setLastRawTranscript(rawTranscript);
-          onTranscript(normalizeVoiceSearchBetaTranscript(rawTranscript));
-        });
-      }
+      // Beta keeps Groq as its primary experimental recognizer.
       if (navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined") {
-        void startGroqCapture(onTranscript);
+        void startGroqCapture(onTranscript).then((started) => {
+          if (!started) startNativeRecognition(onTranscript);
+        });
         return true;
       }
       return startNativeRecognition(onTranscript);
     },
-    [productionVoice.isSupported, productionVoice.startListening, startGroqCapture, startNativeRecognition],
+    [startGroqCapture, startNativeRecognition],
   );
 
   useEffect(() => {
@@ -797,12 +788,12 @@ export function useVoiceSearchBeta() {
 
   return {
     isSupported,
-    isListening: productionVoice.isListening || isListening,
-    error: productionVoice.error || error,
+    isListening,
+    error,
     lastTimingMs,
     lastRawTranscript,
-    clearError: () => { productionVoice.clearError(); clearError(); },
+    clearError,
     startListening,
-    stopListening: () => { productionVoice.stopListening(); stopListening(); },
+    stopListening,
   };
 }
