@@ -55,11 +55,11 @@ type SpeechWindow = Window & {
   SpeechRecognitionPhrase?: SpeechRecognitionPhraseConstructor;
 };
 
-const SILENCE_COMMIT_MS = 500;
-const SHORT_TERM_COMMIT_MS = 650;
-const SPEECH_END_STOP_MS = 180;
+const SILENCE_COMMIT_MS = 900;
+const SHORT_TERM_COMMIT_MS = 900;
+const SPEECH_END_STOP_MS = 250;
 const EMPTY_SPEECH_END_GRACE_MS = 900;
-const MAX_LISTENING_MS = 4500;
+const MAX_LISTENING_MS = 6000;
 const GROQ_CAPTURE_MS = 5000;
 const MIN_GROQ_AUDIO_BYTES = 4_000;
 const GROQ_VAD_MIN_CAPTURE_MS = 1_100;
@@ -763,11 +763,14 @@ export function useVoiceSearchBeta() {
 
   const startListening = useCallback(
     (onTranscript: (transcript: string) => void) => {
-      // Beta keeps Groq as its primary experimental recognizer.
+      // Beta experiment: prefer the same Android Web Speech engine used in
+      // production. Keep beta-only normalization and native telemetry.
+      // Groq is only a compatibility fallback when native speech is absent.
+      if (getSpeechRecognitionConstructor()) {
+        return startNativeRecognition(onTranscript);
+      }
       if (navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined") {
-        void startGroqCapture(onTranscript).then((started) => {
-          if (!started) startNativeRecognition(onTranscript);
-        });
+        void startGroqCapture(onTranscript);
         return true;
       }
       return startNativeRecognition(onTranscript);
