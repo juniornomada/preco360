@@ -169,12 +169,15 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     return "Ovomaltine" + normalized.slice(ovomaltineMatch[0].length);
   }
 
-  const mortadelaMatch = key.match(/^(?:mortadela|mortandela|mortandella|mortadella|bortandela|martandela|morta\s+dela|mortando)(?=$|\s)/);
+  const mortadelaMatch = key.match(/^(?:mortadela|mortandela|mortandella|mortadella|bortandela|hortandela|martandela|morta\s+dela|mortando)(?=$|\s)/);
   if (mortadelaMatch) {
     return "mortadela" + normalized.slice(mortadelaMatch[0].length);
   }
 
   if (/^ovo[\s-]+(?:mocinho|molchini|malchine|maltinho)(?=$|\s)/.test(key)) return "Ovomaltine" + normalized.slice(key.match(/^ovo[\s-]+(?:mocinho|molchini|malchine|maltinho)/)![0].length);
+
+  // Exact, voice-only ASR corrections observed in the beta telemetry.
+  if (/^(?:green[\s-]+cheese|gritiz)(?=$|\s)/.test(key)) return "cream cheese" + normalized.slice(key.match(/^(?:green[\s-]+cheese|gritiz)/)![0].length);
 
   const knownCorrection = knownAsrCorrections.get(key);
   if (knownCorrection) return knownCorrection;
