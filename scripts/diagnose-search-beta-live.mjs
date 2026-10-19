@@ -36,4 +36,58 @@ for(const pathname of routes){
  }catch(e){console.log(JSON.stringify({route:pathname,fatal:String(e).slice(0,500),exceptions,requests}))}
  await context.close();
 }
+
+function base64url(value) {
+ return Buffer.from(JSON.stringify(value)).toString('base64url');
+}
+const userId='11111111-1111-4111-8111-111111111111';
+const fakeJwt=[
+ base64url({typ:'JWT',alg:'HS256'}),
+ base64url({sub:userId,role:'authenticated',aud:'authenticated',exp:4102444800,iat:1700000000}),
+ 'non-valid-signature-for-isolated-browser-UI-test'
+].join('.');
+const session={
+ access_token:fakeJwt,
+ token_type:'bearer',
+ expires_at:4102444800,
+ expires_in:100000000,
+ refresh_token:'fake-refresh-token-no-real-account',
+ user:{
+  id:userId,
+  aud:'authenticated',
+  role:'authenticated',
+  email:'synthetic-preview@example.invalid',
+  app_metadata:{provider:'email',providers:['email']},
+  user_metadata:{},
+  created_at:'2024-01-01T00:00:00Z'
+ }
+};
+const key='sb-hwpsnipdkwxvvjowomlo-auth-token';
+for(const pathname of ['/search-beta','/search']){
+ const context=await browser.newContext({
+   viewport:{width:393,height:852},
+   userAgent:'Mozilla/5.0 (Linux; Android 13; SM-G780G) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+   isMobile:true,hasTouch:true
+ });
+ await context.addInitScript(({storageKey,stored})=>{
+   localStorage.setItem(storageKey,stored);
+ },{storageKey:key,stored:JSON.stringify(session)});
+ await context.route('**/rest/v1/**',async route=>{
+   const headers={'content-type':'application/json','access-control-allow-origin':'*'};
+   await route.fulfill({status:200,headers,body:'[]'});
+ });
+ await context.route('**/auth/v1/**',async route=>{
+    await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({user:session.user})});
+ });
+ const page=await context.newPage(),errors=[];
+ page.on('pageerror',e=>errors.push('pageerror '+e.message));
+ page.on('console',m=>{if(m.type()==='error' && errors.length<15)errors.push(('console '+m.text()).slice(0,240))});
+ try{
+   const response=await page.goto(origin+pathname,{waitUntil:'domcontentloaded',timeout:30000});
+   await page.waitForTimeout(5500);
+   const text=await page.locator('body').innerText();
+   console.log(JSON.stringify({authenticatedSynthetic:true,path:pathname,status:response?.status(),url:page.url(),textLength:text.length,snippet:text.slice(0,500),rootLength:(await page.locator('#root').innerHTML()).length,errors}));
+ }catch(e){console.log(JSON.stringify({authenticatedSynthetic:true,path:pathname,error:String(e).slice(0,700),errors}))}
+ await context.close();
+}
 await browser.close();
