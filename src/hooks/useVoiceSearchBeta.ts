@@ -60,10 +60,10 @@ const SHORT_TERM_COMMIT_MS = 650;
 const SPEECH_END_STOP_MS = 180;
 const EMPTY_SPEECH_END_GRACE_MS = 900;
 const MAX_LISTENING_MS = 4500;
-const GROQ_CAPTURE_MS = 3200;
+const GROQ_CAPTURE_MS = 5000;
 const MIN_GROQ_AUDIO_BYTES = 4_000;
 const GROQ_VAD_MIN_CAPTURE_MS = 1_100;
-const GROQ_VAD_SILENCE_MS = 650;
+const GROQ_VAD_SILENCE_MS = 1600;
 const GROQ_VAD_SAMPLE_MS = 50;
 const GROQ_VAD_MIN_RMS = 0.008;
 const GROQ_VAD_SPEECH_FRAMES = 3;
@@ -407,7 +407,7 @@ export function useVoiceSearchBeta() {
         recorder.start();
         setIsListening(true);
 
-        // Latency optimization: Web Audio only decides *when* speech has ended.
+        // Beta experiment: 1600 ms of silence after speech; hard cap 5000 ms.\n        // Latency optimization: Web Audio only decides *when* speech has ended.
         // It never flushes or manipulates MediaRecorder chunks. MediaRecorder
         // is stopped exactly once and finalizes the WebM normally.
         let audioContext: AudioContext | null = null;
