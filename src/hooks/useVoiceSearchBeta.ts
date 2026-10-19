@@ -1,3 +1,4 @@
+import { useVoiceSearchProduction } from "@/hooks/useVoiceSearchProduction";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -271,6 +272,7 @@ function voiceErrorMessage(error?: string) {
 }
 
 export function useVoiceSearchBeta() {
+  const productionVoice = useVoiceSearchProduction();
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -755,17 +757,23 @@ export function useVoiceSearchBeta() {
 
   const startListening = useCallback(
     (onTranscript: (transcript: string) => void) => {
-      // Beta uses Groq first. The native browser recognizer generated multiple
-      // end_no_text/aborted events on Android and must remain a fallback only.
-      if (navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined") {
-        void startGroqCapture(onTranscript).then((started) => {
-          if (!started) startNativeRecognition(onTranscript);
+      // Use the exact recognizer proven in production as the primary path.
+      // Groq is reserved for browsers without native speech recognition.
+      setLastRawTranscript(null);
+      setLastTimingMs(null);
+      if (productionVoice.isSupported) {
+        return productionVoice.startListening((rawTranscript) => {
+          setLastRawTranscript(rawTranscript);
+          onTranscript(normalizeVoiceSearchBetaTranscript(rawTranscript));
         });
+      }
+      if (navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined") {
+        void startGroqCapture(onTranscript);
         return true;
       }
       return startNativeRecognition(onTranscript);
     },
-    [startGroqCapture, startNativeRecognition],
+    [productionVoice.isSupported, productionVoice.startListening, startGroqCapture, startNativeRecognition],
   );
 
   useEffect(() => {
@@ -789,12 +797,12 @@ export function useVoiceSearchBeta() {
 
   return {
     isSupported,
-    isListening,
-    error,
+    isListening: productionVoice.isListening || isListening,
+    error: productionVoice.error || error,
     lastTimingMs,
     lastRawTranscript,
-    clearError,
+    clearError: () => { productionVoice.clearError(); clearError(); },
     startListening,
-    stopListening,
+    stopListening: () => { productionVoice.stopListening(); stopListening(); },
   };
 }
