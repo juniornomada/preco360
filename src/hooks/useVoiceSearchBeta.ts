@@ -136,6 +136,8 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     ["cream cheesy", "cream cheese"],
     ["ovo mouchini", "Ovomaltine"],
     ["ovo mocini", "Ovomaltine"],
+    ["ovo malcini", "Ovomaltine"],
+    ["ovo mocchini", "Ovomaltine"],
     ["murtandela", "mortadela"],
     ["salve", "sal"],
     ["mirio verde bandeja", "milho verde bandeja"],
