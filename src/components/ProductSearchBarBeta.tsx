@@ -101,7 +101,7 @@ const ProductSearchBarBeta = forwardRef<HTMLInputElement, ProductSearchBarBetaPr
 
         {lastRawTranscript && (
           <p className="mt-1 px-1 text-[10px] text-muted-foreground">
-            Groq: “{lastRawTranscript}” → busca: “{value}”
+            Reconhecido: “{lastRawTranscript}” → busca: “{value}”
           </p>
         )}
 
