@@ -1,5 +1,6 @@
-import { CalendarDays, ChevronRight, History } from "lucide-react";
+import { CalendarDays, ChevronRight, History, Package } from "lucide-react";
 import ProductVisual from "@/components/ProductVisual";
+import { isPastryRollWithoutPhoto } from "@/lib/quoteProductDisplay";
 
 export type PriceQuoteSearchResultProps = {
   name: string;
@@ -38,7 +39,18 @@ export default function PriceQuoteSearchResult({
       className="w-full rounded-xl border bg-card p-3 text-left transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
       <div className="grid grid-cols-[3.25rem_minmax(0,1fr)] items-center gap-2.5 sm:grid-cols-[3.75rem_minmax(0,1fr)]">
-        <ProductVisual name={name} category={category} imageUrl={imageUrl} compact />
+        {isPastryRollWithoutPhoto(name, imageUrl) ? (
+          <div
+            role="img"
+            aria-label="Massa para pastel em rolo; foto da embalagem indisponível"
+            className="flex h-[52px] w-[52px] shrink-0 flex-col items-center justify-center rounded-xl border border-white/10 bg-muted/50 text-muted-foreground sm:h-14 sm:w-14"
+          >
+            <Package aria-hidden="true" className="h-6 w-6" />
+            <span aria-hidden="true" className="mt-0.5 text-[8px] font-semibold uppercase tracking-wide">Rolo</span>
+          </div>
+        ) : (
+          <ProductVisual name={name} category={category} imageUrl={imageUrl} compact />
+        )}
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-1">
             <div
