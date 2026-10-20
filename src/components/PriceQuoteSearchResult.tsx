@@ -1,11 +1,7 @@
-import { CalendarDays, ChevronRight, History, Package } from "lucide-react";
-import ProductVisual from "@/components/ProductVisual";
-import { isPastryRollWithoutPhoto } from "@/lib/quoteProductDisplay";
+import { CalendarDays, ChevronRight, History } from "lucide-react";
 
 export type PriceQuoteSearchResultProps = {
   name: string;
-  category?: string | null;
-  imageUrl?: string | null;
   price: string;
   normalizedPrice: string | null;
   historyCount: number;
@@ -14,17 +10,13 @@ export type PriceQuoteSearchResultProps = {
 };
 
 /**
- * Layout approved for "Cotar no mercado":
- * - full name, including package, in one horizontally scrollable line
- * - per-kg/litre/unit price left; package price right
- * - history count left; date right
- *
- * The title scrolls instead of being truncated so no product identity is lost.
- * No inferred package image is used; ProductVisual falls back to a safe icon
- * whenever there is no verified image URL.
+ * Price-first quotation card for both /search and /search-beta.
+ * Product identity gets a full-width title that may wrap naturally.
+ * No product pictures or decorative icons take up title space.
+ * Prices and comparable kg/L/unit references remain below the title.
  */
 export default function PriceQuoteSearchResult({
-  name, category, imageUrl, price, normalizedPrice, historyCount, date, onSelect,
+  name, price, normalizedPrice, historyCount, date, onSelect,
 }: PriceQuoteSearchResultProps) {
   const count = Number.isFinite(historyCount) ? Math.max(0, historyCount) : 0;
   const historyText = count
@@ -35,53 +27,38 @@ export default function PriceQuoteSearchResult({
     <button
       type="button"
       onClick={onSelect}
-      aria-label={`${name}. Preço ${price}. ${normalizedPrice ? `Equivalente ${normalizedPrice}. ` : ""}${historyText}. ${date ?? "Data indisponível"}`}
-      className="w-full rounded-xl border bg-card p-3 text-left transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      aria-label={`${name}. Último preço ${price}. ${normalizedPrice ? `Referência ${normalizedPrice}. ` : ""}${historyText}. ${date ?? "Data indisponível"}`}
+      className="w-full rounded-xl border bg-card p-3.5 text-left transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
-      <div className="grid grid-cols-[3.25rem_minmax(0,1fr)] items-center gap-2.5 sm:grid-cols-[3.75rem_minmax(0,1fr)]">
-        {isPastryRollWithoutPhoto(name, imageUrl) ? (
-          <div
-            role="img"
-            aria-label="Massa para pastel em rolo; foto da embalagem indisponível"
-            className="flex h-[52px] w-[52px] shrink-0 flex-col items-center justify-center rounded-xl border border-white/10 bg-muted/50 text-muted-foreground sm:h-14 sm:w-14"
-          >
-            <Package aria-hidden="true" className="h-6 w-6" />
-            <span aria-hidden="true" className="mt-0.5 text-[8px] font-semibold uppercase tracking-wide">Rolo</span>
-          </div>
-        ) : (
-          <ProductVisual name={name} category={category} imageUrl={imageUrl} compact />
-        )}
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="min-w-0 flex-1 break-words text-sm font-bold leading-snug text-foreground sm:text-base">
+          {name}
+        </h3>
+        <ChevronRight aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+      </div>
+
+      <div className="mt-2.5 grid grid-cols-2 items-end gap-2 border-t border-border/60 pt-2.5">
         <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-1">
-            <div
-              className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              title={name}
-            >
-              <span className="whitespace-nowrap text-[clamp(10px,2.6vw,14px)] font-bold leading-5 tracking-tight text-foreground">
-                {name}
-              </span>
-            </div>
-            <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-muted-foreground" />
-          </div>
-          <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/60 py-2">
-            <span className="min-w-0 text-[11px] font-bold text-primary sm:text-sm">
-              {normalizedPrice ?? "Preço unitário indisponível"}
-            </span>
-            <span className="shrink-0 text-base font-extrabold tabular-nums text-foreground sm:text-lg">
-              {price}
-            </span>
-          </div>
-          <div className="flex items-center justify-between gap-1.5 border-t border-border/60 pt-2 text-[10px] text-muted-foreground sm:text-xs">
-            <span className="inline-flex min-w-0 items-center gap-1 whitespace-nowrap">
-              <History aria-hidden="true" className="h-3 w-3 shrink-0" />
-              <span>{historyText}</span>
-            </span>
-            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
-              <CalendarDays aria-hidden="true" className="h-3 w-3" />
-              <span>{date ?? "Sem data"}</span>
-            </span>
-          </div>
+          <p className="text-[11px] text-muted-foreground">Referência por kg/L/un.</p>
+          <p className="break-words text-sm font-semibold tabular-nums text-primary sm:text-base">
+            {normalizedPrice ?? "Sem referência"}
+          </p>
         </div>
+        <div className="min-w-0 text-right">
+          <p className="text-[11px] text-muted-foreground">Último preço</p>
+          <p className="text-base font-extrabold tabular-nums text-foreground sm:text-lg">{price}</p>
+        </div>
+      </div>
+
+      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border/60 pt-2.5 text-[11px] text-muted-foreground sm:text-xs">
+        <span className="inline-flex items-center gap-1">
+          <History aria-hidden="true" className="h-3 w-3 shrink-0" />
+          {historyText}
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <CalendarDays aria-hidden="true" className="h-3 w-3 shrink-0" />
+          {date ?? "Sem data"}
+        </span>
       </div>
     </button>
   );
