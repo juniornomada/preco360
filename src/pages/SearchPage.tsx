@@ -36,6 +36,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import ProductSearchBar from "@/components/ProductSearchBar";
+import PriceQuoteSearchResult from "@/components/PriceQuoteSearchResult";
+import { readableQuoteProductName } from "@/lib/quoteNamePresentation";
+import { withVerifiedQuotePackage } from "@/lib/quoteProductDisplay";
 import { productMatchesSearch } from "@/lib/productSearch";
 import { unitPriceForProduct, unitPackageFromProduct } from "@/lib/productUnitPricing";
 import {
@@ -46,7 +49,6 @@ import {
   Minus,
   Sparkles,
   Save,
-  ChevronRight,
 } from "lucide-react";
 
 const verdictStyle = {
@@ -79,16 +81,23 @@ function packageLabel(
 }
 
 function displayProductName(product: ProductSummary) {
-  const clean = product.name.trim();
+  const displayProduct = withVerifiedQuotePackage(product);
+  const clean = readableQuoteProductName(displayProduct.name);
   if (!clean) return clean;
   if (inferPackage(clean)) return clean;
 
-  const label = packageLabel(product.package_size, product.unit);
+  const label = packageLabel(displayProduct.package_size, displayProduct.unit);
   return label ? `${clean} ${label}` : clean;
 }
 
-function normalizedSummaryPrice(product: ProductSummary, price:number | string | null) {
-  return unitPriceForProduct(product.name,product.package_size,product.unit,price);
+function normalizedSummaryPrice(product: ProductSummary, price: number | string | null) {
+  const displayProduct = withVerifiedQuotePackage(product);
+  return unitPriceForProduct(
+    displayProduct.name,
+    displayProduct.package_size,
+    displayProduct.unit,
+    price,
+  );
 }
 
 function formatDateBr(value?: string | null) {
@@ -273,34 +282,20 @@ export default function SearchPage() {
               ? normalizedSummaryPrice(product, latest.price)
               : null;
             return (
-              <button
-                type="button"
+              <PriceQuoteSearchResult
                 key={product.id}
-                onClick={() => selectProduct(product.id)}
-                className="flex w-full items-center gap-3 rounded-xl border bg-card p-4 text-left transition hover:border-primary/40 hover:shadow-sm"
-              >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-                  <TrendingDown className="h-5 w-5 text-primary" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold">{displayName}</p>
-                  <p className="text-xs text-muted-foreground">{Number(product.price_count ?? 0)} preço(s) no histórico</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold">{latest ? formatBRL(latest.price) : "Sem preço"}</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {latest
-                      ? normalizedLatest
-                        ? `${formatNormalizedPrice(
-                            normalizedLatest.normalizedPrice,
-                            normalizedLatest.baseUnit,
-                          )} · ${formatDateBr(latest.date)}`
-                        : formatDateBr(latest.date)
-                      : "sem histórico"}
-                  </p>
-                </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-              </button>
+                name={displayName}
+                price={latest ? formatBRL(latest.price) : "Sem preço"}
+                normalizedPrice={normalizedLatest
+                  ? formatNormalizedPrice(
+                      normalizedLatest.normalizedPrice,
+                      normalizedLatest.baseUnit,
+                    )
+                  : null}
+                historyCount={Number(product.price_count ?? 0)}
+                date={latest ? formatDateBr(latest.date) : null}
+                onSelect={() => selectProduct(product.id)}
+              />
             );
           })}
 
