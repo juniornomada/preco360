@@ -1,0 +1,40 @@
+name: NFC-e Official Portal Header Fix
+
+on:
+  push:
+    branches: [fix/restore-nfce-session-diagnostics-20261020]
+  pull_request:
+    paths:
+      - 'supabase/functions/fetch-receipt-url/**'
+      - 'supabase/functions/sefaz-sp-nfce-live/**'
+      - 'supabase/functions/sefaz-sp-nfce-session/**'
+      - 'scripts/verify-nfce-server-headers.mjs'
+      - 'src/test/portalResponse.test.ts'
+      - '.github/workflows/nfce-official-portal-header-fix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check server request headers
+        run: node scripts/verify-nfce-server-headers.mjs
+      - name: Install app dependencies
+        run: npm install --no-audit --no-fund
+      - name: Validate NFC-e regression tests
+        run: npx vitest run src/test/portalResponse.test.ts src/test/receiptRepeatGuard.test.ts src/test/printedReceiptDiscounts.test.ts
+      - name: Validate frontend build
+        run: npm run build
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Typecheck changed Edge Functions
+        run: deno check --node-modules-dir=auto supabase/functions/fetch-receipt-url/index.ts supabase/functions/sefaz-sp-nfce-live/index.ts supabase/functions/sefaz-sp-nfce-session/index.ts

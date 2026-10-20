@@ -5,6 +5,13 @@ const PAGE_URL =
 const CAPTCHA_URL =
   "https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Captcha/RandomImageHandler.ashx";
 
+const PORTAL_REJECTED_MESSAGE = "A SEFAZ recusou a conexão automática do servidor. Acesse a nota no navegador e utilize o arquivo ou PDF para importar os itens.";
+function isPortalRejected(html: string): boolean {
+  return html.length <= 8192 &&
+    /<title\s*>\s*Request Rejected\s*<\/title\s*>/i.test(html) &&
+    /The requested URL was rejected|Your support ID is/i.test(html);
+}
+
 type SessionState = {
   cookies: string;
   hidden: Record<string, string>;
@@ -128,8 +135,8 @@ function mergeCookies(current: string, headers: Headers) {
   return [...map.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
-const USER_AGENT =
-  "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36";
+// Do not set a synthetic mobile Chrome User-Agent in server requests.
+// Reproducible HTTP 200 "Request Rejected" on the official portal for that header.
 
 async function captchaFor(state: SessionState) {
   const response = await fetch(
@@ -138,8 +145,7 @@ async function captchaFor(state: SessionState) {
       headers: {
         Cookie: state.cookies,
         Referer: PAGE_URL,
-        "User-Agent": USER_AGENT,
-        Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+          Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
       },
       redirect: "manual",
     },
@@ -157,7 +163,6 @@ async function captchaFor(state: SessionState) {
 async function startSession() {
   const response = await fetch(PAGE_URL, {
     headers: {
-      "User-Agent": USER_AGENT,
       Accept: "text/html,application/xhtml+xml",
       "Accept-Language": "pt-BR,pt;q=0.9",
     },
@@ -174,7 +179,8 @@ async function startSession() {
     createdAt: Date.now(),
   };
   if (!state.hidden.__VIEWSTATE) {
-    throw new Error("A SEFAZ mudou o formulário da consulta.");
+    if (isPortalRejected(html)) throw new Error(PORTAL_REJECTED_MESSAGE);
+    throw new Error("A SEFAZ não retornou os campos necessários para iniciar a consulta por chave. Isso não confirma alteração do formulário.");
   }
 
   const captchaImage = await captchaFor(state);
@@ -197,7 +203,6 @@ async function fetchFollowingRedirects(
 
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const headers: Record<string, string> = {
-      "User-Agent": USER_AGENT,
       Accept: "text/html,application/xhtml+xml",
       "Accept-Language": "pt-BR,pt;q=0.9",
       Cookie: state.cookies,
@@ -314,6 +319,7 @@ async function submitQuery(
   if (!response.ok) {
     throw new Error(`SEFAZ respondeu HTTP ${response.status}.`);
   }
+  if (isPortalRejected(html)) throw new Error(PORTAL_REJECTED_MESSAGE);
   return html;
 }
 
