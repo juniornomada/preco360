@@ -1,0 +1,17 @@
+name: Diagnose SP NFC-e QR Endpoint
+on:
+  push:
+    branches: [fix/nfce-qr-portal-20261020]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect-public-endpoints:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node scripts/diagnose-nfce-qr-portal.mjs
