@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { QrScanner } from "@/components/QrScanner";
 import { buildOfficialConsultationUrl, extractAccessKey, fiscalDocumentKind, fiscalDocumentLabel, validateAccessKey, validateNfceUrl } from "@/lib/nfceKey";
 import { inferPackage } from "@/lib/flyerAnalysis";
+import { canonicalReceiptRetailerName } from "@/lib/receiptRetailer";
 import { currentLocalReceiptDate, possibleRecentReceiptDuplicate } from "@/lib/receiptRepeatGuard";
 import {
   applyPrintedReceiptDiscounts,
@@ -541,7 +542,7 @@ export default function ReceiptImportPage() {
     setFileProgress("");
   };
 
-  const applyResult = (data: any, importSource: ImportSource) => {
+  const applyResult = (data: any, importSource: ImportSource, resultAccessKey?: string) => {
     if (data?.error) {
       const state: BlockedState = {
         message: data.error,
@@ -585,7 +586,7 @@ export default function ReceiptImportPage() {
     }
 
     setItems(parsed);
-    setSupermarket(data?.supermarket ?? "");
+    setSupermarket(canonicalReceiptRetailerName(data?.supermarket, data?.cnpj, resultAccessKey));
     setReceiptDate(data?.date || currentLocalReceiptDate());
     setReceiptDateAssumed(!data?.date);
     setSource(importSource);
@@ -620,6 +621,7 @@ export default function ReceiptImportPage() {
 
     let merged: ParsedItem[] = [];
     let detectedSupermarket = "";
+    let detectedCnpj = "";
     let detectedDate = "";
     const failures: string[] = [];
 
@@ -740,6 +742,9 @@ export default function ReceiptImportPage() {
           if (!detectedSupermarket && data?.supermarket) {
             detectedSupermarket = String(data.supermarket).trim();
           }
+          if (!detectedCnpj && data?.cnpj) {
+            detectedCnpj = String(data.cnpj).trim();
+          }
           if (!detectedDate && data?.date) {
             detectedDate = String(data.date).trim();
           }
@@ -767,7 +772,7 @@ export default function ReceiptImportPage() {
       }
 
       setItems(merged);
-      setSupermarket(detectedSupermarket);
+      setSupermarket(canonicalReceiptRetailerName(detectedSupermarket, detectedCnpj));
       setReceiptDate(detectedDate || currentLocalReceiptDate());
       setReceiptDateAssumed(!detectedDate);
       setBlocked(null);
@@ -811,7 +816,7 @@ export default function ReceiptImportPage() {
     try {
       const { data, error } = await supabase.functions.invoke("fetch-receipt-url", { body: { url } });
       if (error) throw error;
-      applyResult(data, importSource);
+      applyResult(data, importSource, extractAccessKey(url) ?? undefined);
     } catch (error: any) {
       toast({ title: "Erro ao consultar cupom", description: error?.message ?? "Falha na consulta.", variant: "destructive" });
     } finally {
