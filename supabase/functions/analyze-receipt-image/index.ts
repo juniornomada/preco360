@@ -20,7 +20,7 @@ Transcreva os dados da compra presentes no arquivo, principalmente estabelecimen
 
 REGRAS IMPORTANTES
 1. O arquivo pode conter a nota inteira ou apenas uma parte de uma nota longa. Em PDF, examine TODAS as páginas. Extraia somente o que estiver realmente presente; não invente itens ausentes.
-2. supermarket deve ser o nome/razão social ou nome fantasia do estabelecimento emissor quando legível. Não use "SEFAZ", "Receita", "NFC-e", "NF-e" ou o portal como supermercado.
+2. supermarket deve ser o nome/razão social ou nome fantasia do estabelecimento emissor quando legível. Não use "SEFAZ", "Receita", "NFC-e", "NF-e" ou o portal como supermercado.\n2a. cnpj deve ser o CNPJ do estabelecimento EMISSOR da nota (14 dígitos) quando legível, e null caso contrário. Não use CNPJ do consumidor nem invente o documento. Não determine bandeira apenas pela razão social.
 3. date deve ser a data de emissão/compra no formato YYYY-MM-DD. Se houver data e hora, use somente a data.
 4. Cada item deve conter o nome comercial/descrição legível em name.
 5. quantity é a quantidade comprada. Preserve decimais, por exemplo 0.742 para produto vendido por kg.
@@ -46,6 +46,7 @@ REGRAS IMPORTANTES
 Estrutura exata:
 {
   "supermarket": "nome do estabelecimento ou null",
+  "cnpj": "CNPJ do estabelecimento emissor ou null",
   "date": "YYYY-MM-DD ou null",
   "items": [
     {
@@ -62,7 +63,7 @@ Estrutura exata:
   "discounts": []
 }
 
-Se não houver nenhum item legível, retorne {"supermarket":null,"date":null,"items":[]}.
+Se não houver nenhum item legível, retorne {"supermarket":null,"cnpj":null,"date":null,"items":[]}.
 `;
 
 function json(status: number, body: unknown) {
@@ -317,6 +318,10 @@ Deno.serve(async (req: Request) => {
           supermarket: parsed?.supermarket
             ? String(parsed.supermarket).replace(/\s+/g, " ").trim()
             : "",
+          cnpj: (() => {
+            const value = String(parsed?.cnpj ?? "").replace(/\\D/g, "");
+            return value.length === 14 ? value : null;
+          })(),
           date: normalizeDate(parsed?.date),
           items,
           discounts,
