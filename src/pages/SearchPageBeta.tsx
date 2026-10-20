@@ -39,6 +39,7 @@ import { Input } from "@/components/ui/input";
 import ProductSearchBar from "@/components/ProductSearchBar";
 import PriceQuoteSearchResult from "@/components/PriceQuoteSearchResult";
 import { readableQuoteProductName } from "@/lib/quoteNamePresentation";
+import { withVerifiedQuotePackage } from "@/lib/quoteProductDisplay";
 import { productMatchesSearch } from "@/lib/productSearch";
 import { unitPriceForProduct, unitPackageFromProduct } from "@/lib/productUnitPricing";
 import {
@@ -81,16 +82,23 @@ function packageLabel(
 }
 
 function displayProductName(product: ProductSummary) {
-  const clean = readableQuoteProductName(product.name);
+  const displayProduct = withVerifiedQuotePackage(product);
+  const clean = readableQuoteProductName(displayProduct.name);
   if (!clean) return clean;
   if (inferPackage(clean)) return clean;
 
-  const label = packageLabel(product.package_size, product.unit);
+  const label = packageLabel(displayProduct.package_size, displayProduct.unit);
   return label ? `${clean} ${label}` : clean;
 }
 
 function normalizedSummaryPrice(product: ProductSummary, price:number | string | null) {
-  return unitPriceForProduct(product.name,product.package_size,product.unit,price);
+  const displayProduct = withVerifiedQuotePackage(product);
+  return unitPriceForProduct(
+    displayProduct.name,
+    displayProduct.package_size,
+    displayProduct.unit,
+    price,
+  );
 }
 
 function formatDateBr(value?: string | null) {
