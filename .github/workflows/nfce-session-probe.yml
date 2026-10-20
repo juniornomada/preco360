@@ -1,7 +1,5 @@
 name: NFC-e SP Public Form Probe
 on:
-  push:
-    branches: [fix/restore-nfce-session-diagnostics-20261020]
   workflow_dispatch:
 permissions:
   contents: read
