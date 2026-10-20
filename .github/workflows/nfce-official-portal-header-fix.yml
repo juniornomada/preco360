@@ -37,4 +37,4 @@ jobs:
         with:
           deno-version: v2.x
       - name: Typecheck changed Edge Functions
-        run: deno check supabase/functions/fetch-receipt-url/index.ts supabase/functions/sefaz-sp-nfce-live/index.ts supabase/functions/sefaz-sp-nfce-session/index.ts
+        run: deno check --node-modules-dir=auto supabase/functions/fetch-receipt-url/index.ts supabase/functions/sefaz-sp-nfce-live/index.ts supabase/functions/sefaz-sp-nfce-session/index.ts
