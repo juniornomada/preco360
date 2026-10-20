@@ -462,6 +462,7 @@ export default function ReceiptImportPage() {
   const [pageText, setPageText] = useState("");
   const [lastUrl, setLastUrl] = useState("");
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
+  const blockedFileInputRef = useRef<HTMLInputElement>(null);
   const [fileProgress, setFileProgress] = useState("");
   const [assistedKeyUrl, setAssistedKeyUrl] = useState("");
   const [assistedKeyPending, setAssistedKeyPending] = useState(false);
@@ -550,11 +551,15 @@ export default function ReceiptImportPage() {
         diagnostics: data.diagnostics,
       };
       setBlocked(state);
-      toast({
-        title: blockedTitle(state.code),
-        description: state.message,
-        variant: state.code === "NO_ITEMS" ? "default" : "destructive",
-      });
+      // The inline recovery card already explains this expected official-portal
+      // denial. A second red toast only duplicates the message and covers the UI.
+      if (state.code !== "PORTAL_REJECTED") {
+        toast({
+          title: blockedTitle(state.code),
+          description: state.message,
+          variant: state.code === "NO_ITEMS" ? "default" : "destructive",
+        });
+      }
       return;
     }
 
@@ -606,9 +611,9 @@ export default function ReceiptImportPage() {
           item.name && Number(String(item.price).replace(",", ".")) > 0,
       );
 
-  const importReceiptFiles = async () => {
-    if (!receiptFiles.length) return;
-    const originals = [...receiptFiles];
+  const importReceiptFiles = async (selectedFiles: File[] = receiptFiles) => {
+    if (!selectedFiles.length || loading) return;
+    const originals = [...selectedFiles];
     setLoading(true);
     clearResult();
     setSource("image");
@@ -1526,19 +1531,34 @@ export default function ReceiptImportPage() {
               <div className="space-y-2 rounded-lg border border-amber-500/20 bg-background/70 p-3">
                 <p className="text-sm font-semibold text-foreground">O QR Code foi lido. O bloqueio ocorreu no portal oficial.</p>
                 <p className="text-sm text-muted-foreground">
-                  A resposta não contém produtos. Para importar, abra a nota na SEFAZ pelo seu navegador, faça prints legíveis da lista de itens ou salve em PDF e envie pela aba Arquivo. Não é necessário reler o QR Code.
+                  O portal abre no Chrome, mas recusa a leitura feita pelo servidor. Abra a nota no navegador, salve um print ou PDF de todos os itens e selecione o arquivo abaixo. O Preço 360 tentará ler os produtos automaticamente; você revisará tudo antes de salvar.
                 </p>
+                <input
+                  ref={blockedFileInputRef}
+                  type="file"
+                  accept="image/*,.pdf,.html,.htm,application/pdf,text/html"
+                  multiple
+                  className="sr-only"
+                  aria-label="Selecionar prints ou PDF do cupom"
+                  disabled={loading}
+                  onChange={(event) => {
+                    const selected = Array.from(event.currentTarget.files ?? []).slice(0, 10);
+                    event.currentTarget.value = "";
+                    if (!selected.length) return;
+                    setScannerOpen(false);
+                    setTab("image");
+                    setReceiptFiles(selected);
+                    void importReceiptFiles(selected);
+                  }}
+                />
                 <Button
                   type="button"
                   className="w-full"
-                  onClick={() => {
-                    setScannerOpen(false);
-                    setBlocked(null);
-                    setTab("image");
-                  }}
+                  disabled={loading}
+                  onClick={() => blockedFileInputRef.current?.click()}
                 >
                   <Upload className="mr-2 h-4 w-4" />
-                  Enviar prints ou PDF do cupom
+                  Selecionar print ou PDF e importar
                 </Button>
               </div>
             )}
