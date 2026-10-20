@@ -411,7 +411,8 @@ async function fetchFiscal(raw: string) {
   const response = await fetch(url.toString(), {
     redirect: "follow",
     headers: {
-      "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36",
+      // Do not impersonate Chrome from an Edge Function: the SEFAZ-SP gateway
+      // returns HTTP 200 with Request Rejected for that artificial identity.
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "Accept-Language": "pt-BR,pt;q=0.9",
     },
