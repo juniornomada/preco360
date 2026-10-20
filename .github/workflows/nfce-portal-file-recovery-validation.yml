@@ -1,0 +1,27 @@
+name: NFC-e Rejected Portal File Recovery
+on:
+  push:
+    branches: [fix/nfce-rejected-direct-file-20261020]
+  pull_request:
+    paths:
+      - 'src/pages/ReceiptImportPage.tsx'
+      - '.github/workflows/nfce-portal-file-recovery-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-receipt-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Test receipt safety, repeated products and discounts
+        run: npx vitest run src/test/receiptRepeatGuard.test.ts src/test/printedReceiptDiscounts.test.ts src/test/portalResponse.test.ts
+      - name: Validate full app build
+        run: npm run build
