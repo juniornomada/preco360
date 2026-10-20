@@ -319,7 +319,7 @@ Deno.serve(async (req: Request) => {
             ? String(parsed.supermarket).replace(/\s+/g, " ").trim()
             : "",
           cnpj: (() => {
-            const value = String(parsed?.cnpj ?? "").replace(/\\D/g, "");
+            const value = String(parsed?.cnpj ?? "").replace(/\D/g, "");
             return value.length === 14 ? value : null;
           })(),
           date: normalizeDate(parsed?.date),
