@@ -1,0 +1,34 @@
+name: NFC-e Retailer CNPJ Validation
+on:
+  push:
+    branches: [fix/nfce-max-atacadista-by-cnpj-20261020]
+  pull_request:
+    paths:
+      - 'src/lib/receiptRetailer.ts'
+      - 'src/test/receiptRetailer.test.ts'
+      - 'src/pages/ReceiptImportPage.tsx'
+      - 'supabase/functions/fetch-receipt-url/index.ts'
+      - 'supabase/functions/analyze-receipt-image/index.ts'
+      - '.github/workflows/nfce-retailer-cnpj-validation.yml'
+permissions:
+  contents: read
+jobs:
+  retailer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Verify retailer and receipt regressions
+        run: npx vitest run src/test/receiptRetailer.test.ts src/test/retailerNames.test.ts src/test/receiptRepeatGuard.test.ts src/test/printedReceiptDiscounts.test.ts
+      - name: Build the app
+        run: npm run build
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Check Edge Function types
+        run: deno check --node-modules-dir=auto supabase/functions/fetch-receipt-url/index.ts supabase/functions/analyze-receipt-image/index.ts

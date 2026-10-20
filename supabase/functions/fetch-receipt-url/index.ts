@@ -386,6 +386,16 @@ function supermarket(lines: string[]) {
   return lines.find((line) => /supermerc|mercado|atacad|comercial|hiper|varej|confian/i.test(line)) ?? "";
 }
 
+// Extract only a CNPJ explicitly printed in the consulted receipt, never
+// confuse the issuer with tax authority IDs or unrelated QR parameters.
+function receiptIssuerCnpj(lines: string[]): string | null {
+  const plain = lines.join(" ");
+  const match = plain.match(/\bCNPJ\b[^0-9]{0,24}(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})(?!\d)/i);
+  if (!match) return null;
+  const digits = match[1].replace(/\D/g, "");
+  return digits.length === 14 ? digits : null;
+}
+
 function receiptDate(text: string) {
   const br = text.match(/\b(\d{2})\/(\d{2})\/(20\d{2})\b/);
   if (br) return `${br[3]}-${br[2]}-${br[1]}`;
@@ -501,6 +511,7 @@ Deno.serve(async (req) => {
 
     return reply({
       supermarket: supermarket(lines),
+      cnpj: receiptIssuerCnpj(lines),
       date: receiptDate(lines.join(" ")),
       items,
       traceId,
