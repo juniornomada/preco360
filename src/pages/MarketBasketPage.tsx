@@ -20,7 +20,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { basketNeedsCatalog, genericBasketFamilies } from "@/lib/flyerAnalysis";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
-import { canonicalRetailerName } from "@/lib/retailerNames";
+import { canonicalRetailerName, displayRetailerName } from "@/lib/retailerNames";
 import RetailerLogo from "@/components/RetailerLogo";
 
 const db = supabase as any;
@@ -1311,7 +1311,7 @@ export default function MarketBasketPage() {
                                 : "text-foreground")
                             }
                           >
-                            {canonicalRetailerName(market.retailer)}
+                            {displayRetailerName(market.retailer)}
                           </p>
                           <p className="text-[10px] text-muted-foreground">
                             {market.covered}/{selectedGroups.length} itens com preço vigente
@@ -1647,7 +1647,7 @@ export default function MarketBasketPage() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-lg font-extrabold leading-tight text-primary">
-                          {canonicalRetailerName(market.retailer)}
+                          {displayRetailerName(market.retailer)}
                         </p>
                         {isBestMarket && (
                           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary">

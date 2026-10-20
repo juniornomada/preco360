@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import {
-  canonicalRetailerName,
+  displayRetailerName,
   retailerLogoPath,
 } from "@/lib/retailerNames";
 
@@ -53,7 +53,7 @@ export default function RetailerLogo({
   nameClassName,
   showName = false,
 }: RetailerLogoProps) {
-  const name = canonicalRetailerName(retailer);
+  const name = displayRetailerName(retailer);
   const logo = retailerLogoPath(retailer);
 
   if (!name) return null;

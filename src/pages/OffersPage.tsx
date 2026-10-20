@@ -50,7 +50,7 @@ import {
 import AdaptiveProductName from "@/components/AdaptiveProductName";
 import { requiresAppActivation } from "@/lib/clubOfferRules";
 import { isCardOnlyPriceCondition } from "@/lib/priceConditions";
-import { canonicalRetailerName } from "@/lib/retailerNames";
+import { canonicalRetailerName, displayRetailerName } from "@/lib/retailerNames";
 import {
   isGenericPoncaSearch,
   displayPonkanQuery,
@@ -3104,7 +3104,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                     : brl(Number(entry.row.price))}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {canonicalRetailerName(entry.row.supermarket)||entry.row.supermarket||"Supermercado"}
+                  {displayRetailerName(entry.row.supermarket)||"Supermercado"}
                   {entry.row.date ? ` · ${dateBr(entry.row.date)}` : ""}
                 </p>
               </div>
@@ -3138,7 +3138,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                       : brl(Number(entry.row.price))}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {canonicalRetailerName(entry.row.supermarket)||entry.row.supermarket||"Supermercado"}
+                    {displayRetailerName(entry.row.supermarket)||"Supermercado"}
                     {entry.row.date ? ` · ${dateBr(entry.row.date)}` : ""}
                   </p>
                 </div>
@@ -3880,7 +3880,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                       />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-bold">
-                          {reference.retailer}
+                          {displayRetailerName(reference.retailer)}
                         </p>
                         <p className="text-[10px] text-muted-foreground">
                           {reference.source} · {dateBr(reference.date)}

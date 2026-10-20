@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import PriceChart from "@/components/PriceChart";
+import { displayRetailerName } from "@/lib/retailerNames";
 import { formatNormalizedPrice } from "@/lib/flyerAnalysis";
 import { unitPriceForProduct,unitPackageFromProduct } from "@/lib/productUnitPricing";
 import { Button } from "@/components/ui/button";
@@ -214,7 +215,7 @@ export default function ProductDetail() {
                     {formatNormalizedPrice(unitValue(best.price)!.normalizedPrice,unitValue(best.price)!.baseUnit)}
                   </p>
                 )}
-                <p className="text-xs text-muted-foreground">{best.supermarket}</p>
+                <p className="text-xs text-muted-foreground">{displayRetailerName(best.supermarket)}</p>
                 {inferredVolume && <p className="text-[10px] text-amber-500">Volume inferido da descrição: 900 ml</p>}
             </div>
           </CardContent>
@@ -225,7 +226,7 @@ export default function ProductDetail() {
       <div className="mb-4 rounded-lg border bg-card p-4">
         <h2 className="mb-2 text-sm font-semibold">Evolução de Preço</h2>
         <PriceChart
-          data={prices.map((p) => ({ date: p.date, price: p.price, supermarket: p.supermarket }))}
+          data={prices.map((p) => ({ date: p.date, price: p.price, supermarket: displayRetailerName(p.supermarket) }))}
         />
       </div>
 
@@ -238,7 +239,7 @@ export default function ProductDetail() {
               <div className="flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-muted-foreground" />
                 <div>
-                  <p className="text-sm font-medium">{p.supermarket}</p>
+                  <p className="text-sm font-medium">{displayRetailerName(p.supermarket)}</p>
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Calendar className="h-3 w-3" />
                     {new Date(p.date).toLocaleDateString("pt-BR")}

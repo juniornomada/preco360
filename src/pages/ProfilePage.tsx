@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { displayRetailerName } from "@/lib/retailerNames";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -667,7 +668,7 @@ export default function ProfilePage() {
                 ) : retailerMap
                     .map((entry: any) => (
                       <div key={entry.retailer} className="flex items-center justify-between gap-2 text-xs">
-                        <span>{entry.retailer}</span>
+                        <span>{displayRetailerName(entry.retailer)}</span>
                         <span className={entry.status === "available" ? "font-semibold text-emerald-600" : entry.status === "discovered" ? "font-semibold text-primary" : "text-muted-foreground"}>
                           {entry.status === "available" ? "fonte conectada" : entry.status === "discovered" ? "encontrada" : "em validação"}
                         </span>
@@ -718,7 +719,7 @@ export default function ProfilePage() {
                     const status = manualRetailerStatusLabel(entry.retailer);
                     return (
                       <div key={entry.retailer} className="flex items-center justify-between gap-2 text-xs">
-                        <span className="min-w-0 truncate">{entry.retailer}</span>
+                        <span className="min-w-0 truncate">{displayRetailerName(entry.retailer)}</span>
                         <div className="flex shrink-0 items-center gap-2">
                           <span className={status.className}>
                             {status.label}
@@ -755,7 +756,7 @@ export default function ProfilePage() {
                 return (
                   <div key={retailer} className="rounded border px-2.5 py-2 text-xs">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">{retailer}</span>
+                      <span className="font-medium">{displayRetailerName(retailer)}</span>
                       <span className={status.className}>{status.label}</span>
                     </div>
                     {source?.source_type && (
@@ -823,7 +824,7 @@ export default function ProfilePage() {
           {collecting ? "Executando coleta..." : retailerToCollect.trim() ? `Importar ofertas de ${retailerToCollect.trim()}` : `Importar ofertas disponíveis (${capturableRetailers.length})`}
         </Button>
         <Button type="button" variant="outline" className="mt-2 w-full gap-2" onClick={() => navigate("/radar?view=import")}><Upload className="h-4 w-4" />Importar ofertas, gôndola ou prints do app</Button>
-        {collectionReport && <div className="mt-3 space-y-2">{collectionReport.map((row: any, i: number) => <div key={`${row.retailer}-${i}`} className="rounded-md border p-2 text-xs"><div className="flex items-center justify-between gap-2"><span className="font-medium">{row.retailer}</span><span className="text-muted-foreground">{row.result}</span></div>{formatValidity(row.validity?.to) && <p className="mt-1 text-muted-foreground">Validade até {formatValidity(row.validity?.to)}</p>}{row.result === "resumo" && <p className="mt-1 text-muted-foreground">{row.found ?? 0} encontrado(s) · {row.imported ?? 0} novo(s) · {row.unchanged ?? 0} já conhecido(s) · {row.failed ?? 0} falha(s)</p>}{row.error && row.error !== "HTTP 200" && <p className="mt-1 text-destructive">{row.error}</p>}</div>)}</div>}
+        {collectionReport && <div className="mt-3 space-y-2">{collectionReport.map((row: any, i: number) => <div key={`${row.retailer}-${i}`} className="rounded-md border p-2 text-xs"><div className="flex items-center justify-between gap-2"><span className="font-medium">{displayRetailerName(row.retailer)}</span><span className="text-muted-foreground">{row.result}</span></div>{formatValidity(row.validity?.to) && <p className="mt-1 text-muted-foreground">Validade até {formatValidity(row.validity?.to)}</p>}{row.result === "resumo" && <p className="mt-1 text-muted-foreground">{row.found ?? 0} encontrado(s) · {row.imported ?? 0} novo(s) · {row.unchanged ?? 0} já conhecido(s) · {row.failed ?? 0} falha(s)</p>}{row.error && row.error !== "HTTP 200" && <p className="mt-1 text-destructive">{row.error}</p>}</div>)}</div>}
         {recentImportJobs.length > 0 && (
           <div className="mt-3 rounded-md border p-3">
             <div className="flex items-start justify-between gap-3">

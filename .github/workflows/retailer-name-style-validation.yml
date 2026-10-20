@@ -1,0 +1,34 @@
+name: Retailer Name Style Validation
+on:
+  push:
+    branches: [fix/retailer-name-title-case-consistency-20261020]
+  pull_request:
+    paths:
+      - 'src/lib/retailerNames.ts'
+      - 'src/test/retailerNames.test.ts'
+      - 'src/pages/ProductDetail.tsx'
+      - 'src/pages/ReceiptImportPage.tsx'
+      - 'src/pages/SearchPage.tsx'
+      - 'src/pages/SearchPageBeta.tsx'
+      - 'src/pages/OffersPage.tsx'
+      - 'src/pages/MarketBasketPage.tsx'
+      - 'src/pages/ProfilePage.tsx'
+      - 'src/components/RetailerLogo.tsx'
+      - '.github/workflows/retailer-name-style-validation.yml'
+permissions:
+  contents: read
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Test retailer formatting and receipt safety
+        run: npx vitest run src/test/retailerNames.test.ts src/test/retailerLogos.test.ts src/test/receiptRetailer.test.ts src/test/receiptRepeatGuard.test.ts
+      - name: Build frontend
+        run: npm run build

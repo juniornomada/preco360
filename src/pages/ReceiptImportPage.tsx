@@ -7,6 +7,7 @@ import { QrScanner } from "@/components/QrScanner";
 import { buildOfficialConsultationUrl, extractAccessKey, fiscalDocumentKind, fiscalDocumentLabel, validateAccessKey, validateNfceUrl } from "@/lib/nfceKey";
 import { inferPackage } from "@/lib/flyerAnalysis";
 import { canonicalReceiptRetailerName } from "@/lib/receiptRetailer";
+import { displayRetailerName } from "@/lib/retailerNames";
 import { currentLocalReceiptDate, possibleRecentReceiptDuplicate } from "@/lib/receiptRepeatGuard";
 import {
   applyPrintedReceiptDiscounts,
@@ -1198,7 +1199,7 @@ export default function ReceiptImportPage() {
           .limit(50);
         if (previousError) throw previousError;
         const match = possibleRecentReceiptDuplicate(previousReceipts ?? [], {
-          supermarket: supermarket.trim(),
+          supermarket: displayRetailerName(supermarket),
           receiptDate: date,
           originalLineCount: items.length,
           savedProductCount: batchItems.length,
@@ -1221,7 +1222,7 @@ export default function ReceiptImportPage() {
       const { data: saved, error: saveError } = await db.rpc(
         "save_receipt_price_batch_v2",
         {
-          p_supermarket: supermarket.trim() || "Não informado",
+          p_supermarket: displayRetailerName(supermarket) || "Não informado",
           p_date: date,
           p_items: batchItems,
           p_access_key: receiptAccessKey,
@@ -1407,7 +1408,7 @@ export default function ReceiptImportPage() {
                     Este cupom já foi importado
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {existingReceiptImport.supermarket || "Estabelecimento não informado"}
+                    {displayRetailerName(existingReceiptImport.supermarket) || "Estabelecimento não informado"}
                     {existingReceiptImport.receipt_date
                       ? ` · nota de ${new Date(
                           `${existingReceiptImport.receipt_date}T12:00:00`,
