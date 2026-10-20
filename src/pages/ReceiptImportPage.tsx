@@ -56,6 +56,7 @@ type ExistingReceiptImport = {
 function blockedTitle(code: string) {
   if (code === "CAPTCHA_REQUIRED") return "A SEFAZ exige validação humana";
   if (code === "BLOCKED") return "A SEFAZ bloqueou a consulta automática";
+  if (code === "PORTAL_REJECTED") return "A SEFAZ recusou a consulta automática";
   if (code === "NO_ITEMS") return "A página abriu, mas o layout ainda não foi reconhecido";
   if (code === "NOT_FOUND") return "Cupom não encontrado";
   if (code === "QR_FORMAT") return "Formato do QR Code rejeitado pela SEFAZ";
@@ -1521,6 +1522,26 @@ export default function ReceiptImportPage() {
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">{blocked.message}</p>
 
+            {blocked.code === "PORTAL_REJECTED" && (
+              <div className="space-y-2 rounded-lg border border-amber-500/20 bg-background/70 p-3">
+                <p className="text-sm font-semibold text-foreground">O QR Code foi lido. O bloqueio ocorreu no portal oficial.</p>
+                <p className="text-sm text-muted-foreground">
+                  A resposta não contém produtos. Para importar, abra a nota na SEFAZ pelo seu navegador, faça prints legíveis da lista de itens ou salve em PDF e envie pela aba Arquivo. Não é necessário reler o QR Code.
+                </p>
+                <Button
+                  type="button"
+                  className="w-full"
+                  onClick={() => {
+                    setScannerOpen(false);
+                    setBlocked(null);
+                    setTab("image");
+                  }}
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  Enviar prints ou PDF do cupom
+                </Button>
+              </div>
+            )}
             {blocked.code === "NO_ITEMS" && (
               <p className="text-sm text-muted-foreground">Não foi detectado CAPTCHA. A SEFAZ respondeu, mas o formato dessa página ainda não bateu com os padrões que o importador conhece.</p>
             )}
@@ -1532,7 +1553,7 @@ export default function ReceiptImportPage() {
               {blocked.url && (
                 <Button variant="outline" onClick={() => window.open(blocked.url, "_blank", "noopener,noreferrer")}> <ExternalLink className="mr-2 h-4 w-4" />Abrir consulta oficial</Button>
               )}
-              {lastUrl && (
+              {lastUrl && blocked.code !== "PORTAL_REJECTED" && (
                 <Button variant="outline" disabled={loading} onClick={() => void importUrl(lastUrl, source)}>
                   <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Tentar novamente
                 </Button>
