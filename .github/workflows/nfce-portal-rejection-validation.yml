@@ -1,0 +1,31 @@
+name: NFC-e Portal Rejection Validation
+
+on:
+  push:
+    branches:
+      - fix/nfce-sp-waf-rejected-20261020
+  pull_request:
+    paths:
+      - 'supabase/functions/fetch-receipt-url/**'
+      - 'src/pages/ReceiptImportPage.tsx'
+      - 'src/test/portalResponse.test.ts'
+      - '.github/workflows/nfce-portal-rejection-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  regression-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Verify fiscal WAF response classification and receipt import safety
+        run: npx vitest run src/test/portalResponse.test.ts src/test/receiptRepeatGuard.test.ts src/test/printedReceiptDiscounts.test.ts
+      - name: Build current frontend
+        run: npm run build
