@@ -11,6 +11,13 @@ const PAGE_URL =
 const CAPTCHA_URL =
   "https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Captcha/RandomImageHandler.ashx";
 
+const PORTAL_REJECTED_MESSAGE = "A SEFAZ recusou a conexão automática do servidor. Acesse a nota no navegador e utilize o arquivo ou PDF para importar os itens.";
+function isPortalRejected(html: string): boolean {
+  return html.length <= 8192 &&
+    /<title\s*>\s*Request Rejected\s*<\/title\s*>/i.test(html) &&
+    /The requested URL was rejected|Your support ID is/i.test(html);
+}
+
 
 function bytesToBase64Url(bytes: Uint8Array) {
   return bytesToBase64(bytes)
@@ -152,8 +159,6 @@ async function captchaFor(state: SessionState) {
       headers: {
         Cookie: state.cookies,
         Referer: PAGE_URL,
-        "User-Agent":
-          "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36",
       },
       redirect: "manual",
     },
@@ -169,8 +174,6 @@ async function captchaFor(state: SessionState) {
 async function startSession() {
   const response = await fetch(PAGE_URL, {
     headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36",
       Accept: "text/html,application/xhtml+xml",
     },
     redirect: "follow",
@@ -184,7 +187,8 @@ async function startSession() {
     createdAt: Date.now(),
   };
   if (!state.hidden.__VIEWSTATE) {
-    throw new Error("A SEFAZ mudou o formulário da consulta.");
+    if (isPortalRejected(html)) throw new Error(PORTAL_REJECTED_MESSAGE);
+    throw new Error("A SEFAZ não retornou os campos necessários para iniciar a consulta por chave. Isso não confirma alteração do formulário.");
   }
   const captchaImage = await captchaFor(state);
   return { state, captchaImage };
@@ -274,8 +278,6 @@ Deno.serve(async (req: Request) => {
         Referer: PAGE_URL,
         Origin: "https://www.nfce.fazenda.sp.gov.br",
         "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent":
-          "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36",
         Accept: "text/html,application/xhtml+xml",
       },
       body: form.toString(),
@@ -284,6 +286,7 @@ Deno.serve(async (req: Request) => {
 
     state.cookies = mergeCookies(state.cookies, response.headers);
     const html = await response.text();
+    if (isPortalRejected(html)) throw new Error(PORTAL_REJECTED_MESSAGE);
 
     if (!response.ok) {
       return reply(502, {
