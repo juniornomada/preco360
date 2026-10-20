@@ -25,6 +25,7 @@ type PriceHistoryRow = {
   supermarket: string;
 };
 import { useAuth } from "@/hooks/useAuth";
+import { displayRetailerName } from "@/lib/retailerNames";
 import { useToast } from "@/hooks/use-toast";
 import { analyzePrice, formatBRL } from "@/lib/priceAnalysis";
 import {
@@ -204,7 +205,7 @@ export default function SearchPage() {
       const { error } = await supabase.from("prices").insert({
         user_id: user.id,
         product_id: selected.id,
-        supermarket: supermarket.trim(),
+        supermarket: displayRetailerName(supermarket),
         price: numericPrice,
         date: new Date().toISOString().slice(0, 10),
       });
@@ -212,7 +213,7 @@ export default function SearchPage() {
 
       toast({
         title: "Preço registrado",
-        description: `${displayProductName(selected)} por ${formatBRL(numericPrice)} em ${supermarket.trim()}.`,
+        description: `${displayProductName(selected)} por ${formatBRL(numericPrice)} em ${displayRetailerName(supermarket)}.`,
       });
       setCurrentPrice("");
       queryClient.invalidateQueries({ queryKey: ["product-summaries", user.id] });
@@ -348,7 +349,7 @@ export default function SearchPage() {
                     )}
                   </div>
                   <div className="min-w-0 text-right text-xs text-muted-foreground">
-                    <p className="truncate font-medium text-foreground/80">{selectedLatest.supermarket}</p>
+                    <p className="truncate font-medium text-foreground/80">{displayRetailerName(selectedLatest.supermarket)}</p>
                     <p>{formatDateBr(selectedLatest.date)}</p>
                   </div>
                 </div>
