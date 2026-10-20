@@ -55,6 +55,7 @@ export function displayRetailerName(value?: string | null): string {
     if (index > 0 && connectors.has(lowercase)) return lowercase;
     if (normalized === "s.a." || normalized === "sa" && word === "SA") return "S.A.";
     if (normalized === "ltda") return "Ltda";
+    if (normalized === "cia") return "Cia";
     if (legalAcronyms.has(normalized) && normalized !== "ltda") return normalized.toUpperCase();
     // Retain established short capitalized acronyms, not a whole caps name.
     if (/^[A-Z]{2,3}$/.test(word) && !connectors.has(lowercase)) return word;
