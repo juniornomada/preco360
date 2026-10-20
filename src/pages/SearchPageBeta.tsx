@@ -9,8 +9,6 @@ type ProductSummary = {
   id: string;
   name: string;
   category: string | null;
-  image_url?: string | null;
-  image_source?: string | null;
   package_size: number | string | null;
   unit: string | null;
   price_count: number | string;
@@ -287,13 +285,6 @@ export default function SearchPageBeta() {
               <PriceQuoteSearchResult
                 key={product.id}
                 name={displayName}
-                category={product.category}
-                imageUrl={
-                  product.image_url &&
-                  /^(?:external_verified_(?:name_package|ean)|product_library_verified|manual_user_asset|duplicate_master_verified)$/.test(product.image_source ?? "")
-                    ? product.image_url
-                    : null
-                }
                 price={latest ? formatBRL(latest.price) : "Sem preço"}
                 normalizedPrice={normalizedLatest
                   ? formatNormalizedPrice(
