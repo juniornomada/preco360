@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { isPortalAccessRejection, PORTAL_REJECTION_CODE } from "./portalResponse.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -393,6 +394,7 @@ function receiptDate(text: string) {
 }
 
 function markerCode(html: string) {
+  if (isPortalAccessRejection(html)) return PORTAL_REJECTION_CODE;
   const lower = html.toLowerCase();
   if (/g-recaptcha|recaptcha\/api\.js|hcaptcha|captcha|digite os caracteres da imagem/.test(lower)) return "CAPTCHA_REQUIRED";
   if (/nfc-e não encontrada|nfe não encontrada|documento não localizado/.test(lower)) return "NOT_FOUND";
@@ -489,6 +491,7 @@ Deno.serve(async (req) => {
     };
 
     if (!items.length) {
+      if (marker === PORTAL_REJECTION_CODE) throw new ImportError("O portal da SEFAZ recusou a consulta automática. Abra a nota oficial e envie prints ou PDF dos produtos pela aba Arquivo. Nenhum item foi importado.", PORTAL_REJECTION_CODE, finalUrl);
       if (marker === "CAPTCHA_REQUIRED") throw new ImportError("A SEFAZ exige CAPTCHA nessa consulta.", marker, finalUrl);
       if (marker === "NOT_FOUND") throw new ImportError("Cupom não encontrado pela SEFAZ.", marker, finalUrl);
       if (marker === "QR_FORMAT") throw new ImportError("A SEFAZ rejeitou o formato do QR Code.", marker, finalUrl);
@@ -505,7 +508,7 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     const err = e instanceof ImportError ? e : new ImportError(e instanceof Error ? e.message : "Falha inesperada.", "UNKNOWN");
-    const expected = ["CAPTCHA_REQUIRED", "BLOCKED", "NO_ITEMS", "QR_FORMAT", "NOT_FOUND"].includes(err.code);
+    const expected = [PORTAL_REJECTION_CODE, "CAPTCHA_REQUIRED", "BLOCKED", "NO_ITEMS", "QR_FORMAT", "NOT_FOUND"].includes(err.code);
     return reply(
       {
         error: err.message,
