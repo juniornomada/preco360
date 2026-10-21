@@ -1,8 +1,3 @@
-/**
- * UI-only package metadata for exact, owner-confirmed catalog items whose
- * original NFC-e descriptions omitted the quantity. Does not write to DB.
- * Remove the exception after the guarded catalog migration is deployed.
- */
 type QuotePackageProduct = {
   id: string;
   name: string;
@@ -10,17 +5,11 @@ type QuotePackageProduct = {
   unit: string | null;
 };
 
-const VERIFIED_DA_FEIRA_ROLL_ID = "f05ca0d7-06b1-488e-bc36-0c6fdc45b283";
-
+/**
+ * Package metadata is persisted in the database. Keep this adapter so callers
+ * do not need a broad refactor, but never invent display-only package data.
+ */
 export function withVerifiedQuotePackage<T extends QuotePackageProduct>(product: T): T {
-  if (
-    product.id === VERIFIED_DA_FEIRA_ROLL_ID &&
-    product.name.trim().toUpperCase() === "MASSA PASTEL DA FEIRA" &&
-    product.package_size == null &&
-    product.unit == null
-  ) {
-    return { ...product, package_size: 1, unit: "kg" };
-  }
   return product;
 }
 
