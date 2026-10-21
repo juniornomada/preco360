@@ -28,10 +28,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { displayRetailerName } from "@/lib/retailerNames";
 import { useToast } from "@/hooks/use-toast";
 import { analyzePrice, formatBRL } from "@/lib/priceAnalysis";
-import {
-  formatNormalizedPrice,
-  inferPackage,
-} from "@/lib/flyerAnalysis";
+import { formatNormalizedPrice } from "@/lib/flyerAnalysis";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -43,6 +40,7 @@ import { readableQuoteProductName } from "@/lib/quoteNamePresentation";
 import { withVerifiedQuotePackage } from "@/lib/quoteProductDisplay";
 import { productMatchesSearch } from "@/lib/productSearch";
 import { unitPriceForProduct, unitPackageFromProduct } from "@/lib/productUnitPricing";
+import { nameWithPhysicalPackage } from "@/lib/receiptPackageResolver";
 import {
   Store,
   CheckCircle2,
@@ -61,35 +59,15 @@ const verdictStyle = {
   insufficient: { className: "border-border bg-muted/50", iconClass: "text-muted-foreground", Icon: CheckCircle2 },
 } as const;
 
-function packageLabel(
-  quantity: number | string | null,
-  unit: string | null,
-) {
-  const numericQuantity = Number(quantity);
-  if (
-    !Number.isFinite(numericQuantity) ||
-    numericQuantity <= 0 ||
-    !unit
-  ) {
-    return "";
-  }
-
-  const normalizedUnit = unit.trim().toLowerCase();
-  const shownUnit =
-    normalizedUnit === "l" || normalizedUnit === "lt" ? "L" : normalizedUnit;
-  return `${numericQuantity.toLocaleString("pt-BR", {
-    maximumFractionDigits: 3,
-  })} ${shownUnit}`;
-}
-
 function displayProductName(product: ProductSummary) {
   const displayProduct = withVerifiedQuotePackage(product);
   const clean = readableQuoteProductName(displayProduct.name);
   if (!clean) return clean;
-  if (inferPackage(clean)) return clean;
-
-  const label = packageLabel(displayProduct.package_size, displayProduct.unit);
-  return label ? `${clean} ${label}` : clean;
+  return nameWithPhysicalPackage(
+    clean,
+    displayProduct.package_size,
+    displayProduct.unit,
+  );
 }
 
 function normalizedSummaryPrice(product: ProductSummary, price:number | string | null) {
