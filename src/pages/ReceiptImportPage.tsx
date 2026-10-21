@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { QrScanner } from "@/components/QrScanner";
 import { buildOfficialConsultationUrl, extractAccessKey, fiscalDocumentKind, fiscalDocumentLabel, validateAccessKey, validateNfceUrl } from "@/lib/nfceKey";
 import { inferPackage } from "@/lib/flyerAnalysis";
+import { verifiedPackageFromInput, hasVerifiedFiscalSaleWeight } from "@/lib/verifiedProductPackage";
 import { canonicalReceiptRetailerName } from "@/lib/receiptRetailer";
 import { displayRetailerName } from "@/lib/retailerNames";
 import { currentLocalReceiptDate, possibleRecentReceiptDuplicate } from "@/lib/receiptRepeatGuard";
@@ -25,7 +26,11 @@ import { AlertCircle, Camera, CheckCircle2, ExternalLink, Key, Loader2, Mic, QrC
 
 const db = supabase as any;
 
-type ParsedItem = PrintedReceiptItem & { manuallyEdited?: boolean };
+type ParsedItem = PrintedReceiptItem & {
+  manuallyEdited?: boolean;
+  userPackageSize?: string;
+  userPackageUnit?: string;
+};
 type ImportSource = "qr" | "key" | "image";
 const RECEIPT_CHANNEL = "preco360-receipt-import";
 type Diagnostics = {
@@ -112,7 +117,10 @@ function normalizedReceiptPrice(item: ParsedItem) {
 
   if (isReceiptCapacitySpecification(item)) return null;
 
-  const pkg = inferPackage(item.name);
+  const confirmed = verifiedPackageFromInput(item.userPackageSize, item.userPackageUnit);
+  const pkg = confirmed
+    ? inferPackage(`${confirmed.package_size}${confirmed.unit}`)
+    : inferPackage(item.name);
   if (!pkg || pkg.baseQuantity <= 0) return null;
   return {
     value: price / pkg.baseQuantity,
@@ -121,6 +129,8 @@ function normalizedReceiptPrice(item: ParsedItem) {
 }
 
 function packageMetadata(item: ParsedItem) {
+  const confirmed = verifiedPackageFromInput(item.userPackageSize, item.userPackageUnit);
+  if (confirmed) return confirmed;
   const saleUnit = String(item.unit ?? "").toUpperCase();
   if (saleUnit === "KG") return { package_size: 1, unit: "kg" };
   if (saleUnit === "L") return { package_size: 1, unit: "l" };
@@ -1637,6 +1647,46 @@ export default function ReceiptImportPage() {
                       />
                       <Button variant="ghost" size="icon" onClick={() => setItems((current) => current.filter((_, i) => i !== index))}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                     </div>
+                    {(!packageMetadata(item) || item.userPackageSize || item.userPackageUnit) && !hasVerifiedFiscalSaleWeight(item.unit) && !isReceiptCapacitySpecification(item) && (
+                      <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2">
+                        <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                          {verifiedPackageFromInput(item.userPackageSize, item.userPackageUnit)
+                            ? "Embalagem informada por você (pode corrigir)"
+                            : "Peso/volume não identificado na nota (opcional)"}
+                        </p>
+                        <p className="mb-2 text-[11px] text-muted-foreground">
+                          Se a embalagem indicar o tamanho, informe-o. A quantidade comprada no cupom é diferente do peso de cada embalagem.
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={item.userPackageSize ?? ""}
+                            onChange={(e) => updateItem(index, "userPackageSize", e.target.value)}
+                            inputMode="decimal"
+                            placeholder="Ex.: 500"
+                            aria-label={`Peso ou volume da embalagem de ${item.name}`}
+                            className="min-w-0 flex-1"
+                          />
+                          <select
+                            value={item.userPackageUnit ?? ""}
+                            onChange={(e) => updateItem(index, "userPackageUnit", e.target.value)}
+                            aria-label={`Unidade da embalagem de ${item.name}`}
+                            className="h-10 w-24 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                          >
+                            <option value="">Unidade</option>
+                            <option value="g">g</option>
+                            <option value="kg">kg</option>
+                            <option value="ml">ml</option>
+                            <option value="l">L</option>
+                          </select>
+                        </div>
+                        {(item.userPackageSize || item.userPackageUnit) &&
+                          !verifiedPackageFromInput(item.userPackageSize, item.userPackageUnit) && (
+                          <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                            Informe um valor positivo e a unidade correspondente.
+                          </p>
+                        )}
+                      </div>
+                    )}
                     {summary && (
                       <p className="mt-1.5 px-1 text-[11px] font-medium text-muted-foreground">
                         {summary}
