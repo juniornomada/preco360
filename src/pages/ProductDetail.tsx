@@ -54,18 +54,30 @@ export default function ProductDetail() {
   };
 
   const saveName = async () => {
-    if (!editName.trim() || !id) return;
+    const name = editName.trim();
+    if (!name || !id || !user || saving) return;
     setSaving(true);
     try {
       const { error } = await supabase
         .from("products")
-        .update({ name: editName.trim() })
-        .eq("id", id);
+        .update({ name })
+        .eq("id", id)
+        .eq("user_id", user.id);
       if (error) throw error;
+
+      // Cotar reads the product name from this separate summary query.
+      // Refresh it before returning so the edited title is immediately visible.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["product", id] }),
+        queryClient.invalidateQueries({ queryKey: ["products"] }),
+        queryClient.invalidateQueries({ queryKey: ["product-summaries", user.id] }),
+      ]);
+
       toast({ title: "Nome atualizado" });
       setEditing(false);
-      queryClient.invalidateQueries({ queryKey: ["product", id] });
-      queryClient.invalidateQueries({ queryKey: ["products"] });
+      // A browser-history back (-1) could lead to Ofertas instead of Cotar.
+      // Return explicitly to the quote view for this edited product.
+      navigate(`/search?product=${encodeURIComponent(id)}`, { replace: true });
     } catch (err: any) {
       toast({ title: "Erro ao salvar", description: err.message, variant: "destructive" });
     } finally {
