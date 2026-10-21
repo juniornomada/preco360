@@ -13,7 +13,14 @@ export function unitPackageFromProduct(
     if(explicit) return {pkg:explicit,inferred:false};
   }
   const named=inferPackage(name);
-  if(named) return {pkg:named,inferred:false};
+  // Some NFC-e descriptions show capacity instead of the product's
+  // saleable liquid volume (e.g. "SC LIXO 100L", "BALDE 12L").
+  // Never report R$/L for the capacity of a non-liquid product.
+  const normalizedName=name.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+  const isNonLiquidCapacity=/^(?:(?:sc|saco)\s+lixo\b|(?:caixa\s+(?:organizadora|termica)|garrafa\s+termica|lixeira|balde|panela|frigideira|jarra|mop)\b)/.test(normalizedName);
+  if(named && !(named.baseUnit==="l" && isNonLiquidCapacity)) {
+    return {pkg:named,inferred:false};
+  }
   // Certain fiscal receipts shorten ordinary 900-ml soybean oil bottles as
   // "OLEO SOJA ... .900". Other unit-less figures remain unclassified.
   const normalized=name.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
