@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -18,6 +18,7 @@ export default function ProductDetail() {
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
@@ -28,12 +29,17 @@ export default function ProductDetail() {
   const [priceCorrectionReason,setPriceCorrectionReason]=useState("Desconto aplicado no subtotal do cupom fiscal");
   const [savingReceiptPrice,setSavingReceiptPrice]=useState(false);
 
-  // Always return to the quote flow after a successful edit, rather than
-  // relying on browser history that might point to Ofertas.
-  const returnToCotar = () => navigate(
-    id ? `/search?product=${encodeURIComponent(id)}` : "/search",
-    { replace: true },
-  );
+  // A successful edit returns to its verified origin. The Offers route
+  // explicitly passes returnTo; other edits default to Cotar with this
+  // product selected. Never rely on navigate(-1), which may revisit Offers.
+  const returnAfterEditing = () => {
+    const state = location.state as { returnTo?: unknown } | null;
+    const offersOrigin = state?.returnTo === "/offers" || state?.returnTo === "/offers-beta";
+    const destination = offersOrigin
+      ? state.returnTo as string
+      : id ? `/search?product=${encodeURIComponent(id)}` : "/search";
+    navigate(destination, { replace: true });
+  };
 
   const { data: product } = useQuery({
     queryKey: ["product", id],
@@ -84,7 +90,7 @@ export default function ProductDetail() {
       setEditing(false);
       // A browser-history back (-1) could lead to Ofertas instead of Cotar.
       // Return explicitly to the quote view for this edited product.
-      returnToCotar();
+      returnAfterEditing();
     } catch (err: any) {
       toast({ title: "Erro ao salvar", description: err.message, variant: "destructive" });
     } finally {
@@ -154,7 +160,7 @@ export default function ProductDetail() {
         queryClient.invalidateQueries({queryKey:["prices"]})
       ]);
       toast({title:"Valor efetivamente pago atualizado",description:"O preço original do cupom permanece registrado no histórico de correções."});
-      returnToCotar();
+      returnAfterEditing();
     }catch(error:any){
       toast({title:"Não foi possível corrigir o valor",description:error.message,variant:"destructive"});
     }finally{setSavingReceiptPrice(false);}
