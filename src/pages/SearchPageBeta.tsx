@@ -37,6 +37,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import ProductSearchBar from "@/components/ProductSearchBar";
 import PriceQuoteSearchResult from "@/components/PriceQuoteSearchResult";
+import QuotePriceHistoryDialog from "@/components/QuotePriceHistoryDialog";
 import { readableQuoteProductName } from "@/lib/quoteNamePresentation";
 import { withVerifiedQuotePackage } from "@/lib/quoteProductDisplay";
 import { productMatchesSearch } from "@/lib/productSearch";
@@ -114,6 +115,7 @@ export default function SearchPageBeta() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [historyProductId, setHistoryProductId] = useState<string | null>(null);
   const [currentPrice, setCurrentPrice] = useState("");
   const [supermarket, setSupermarket] = useState("");
   const [saving, setSaving] = useState(false);
@@ -155,6 +157,7 @@ export default function SearchPageBeta() {
     () => products.find((product) => product.id === selectedId) ?? null,
     [products, selectedId],
   );
+  const historyProduct = products.find((product) => product.id === historyProductId) ?? null;
 
   const { data: selectedHistory = [] } = useQuery<PriceHistoryRow[]>({
     queryKey: ["selected-price-history", user?.id, selectedId],
@@ -295,6 +298,7 @@ export default function SearchPageBeta() {
                 historyCount={Number(product.price_count ?? 0)}
                 date={latest ? formatDateBr(latest.date) : null}
                 onSelect={() => selectProduct(product.id)}
+                onHistory={() => setHistoryProductId(product.id)}
               />
             );
           })}
@@ -323,7 +327,7 @@ export default function SearchPageBeta() {
                       <p className="text-[11px] text-amber-500">Volume de 900 ml inferido da descrição do cupom</p>
                     )}
                   </div>
-                  <Button variant="outline" size="sm" className="shrink-0" onClick={() => navigate(`/product/${selected.id}`)}>Ver histórico</Button>
+                  <Button variant="outline" size="sm" className="shrink-0" onClick={() => setHistoryProductId(selected.id)}>Ver histórico</Button>
                 </div>
               </div>
 
@@ -408,6 +412,12 @@ export default function SearchPageBeta() {
           </Button>
         </div>
       )}
+      <QuotePriceHistoryDialog
+        open={Boolean(historyProduct)}
+        onOpenChange={(nextOpen) => { if (!nextOpen) setHistoryProductId(null); }}
+        product={historyProduct}
+        displayName={historyProduct ? displayProductName(historyProduct) : ""}
+      />
     </div>
   );
 }
