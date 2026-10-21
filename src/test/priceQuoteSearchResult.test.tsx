@@ -11,6 +11,7 @@ const renderRow = (props: Partial<Parameters<typeof PriceQuoteSearchResult>[0]> 
     historyCount: 1,
     date: "18/10/2026",
     onSelect: () => {},
+    onHistory: () => {},
     ...props,
   }));
 
@@ -41,6 +42,21 @@ describe("Cotar data-first search result layout", () => {
     expect(html).toContain("LEITE INTEGRAL LONGA VIDA 1L");
     expect(html).toContain("R$ 5,99/L");
     expect(html).toContain("12 preços no histórico");
+  });
+
+  it("exposes two separate accessible controls for quote and inline history", () => {
+    const html = renderRow();
+    expect((html.match(/<button\b/g) ?? []).length).toBe(2);
+    expect(html).toContain("Selecionar produto para cotar");
+    expect(html).toContain("Ver histórico de preços de MASSA PARA PASTEL SÃO JUDAS 500G");
+    expect(html).not.toContain("href=");
+    expect(html).not.toContain("/product/");
+  });
+
+  it("does not offer a clickable history action if the product has no history", () => {
+    const html = renderRow({ historyCount: 0 });
+    expect((html.match(/<button\b/g) ?? []).length).toBe(1);
+    expect(html).toContain("Sem preços no histórico");
   });
 
   it("never invents a normalized price or date when data is unavailable", () => {
