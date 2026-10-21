@@ -118,9 +118,20 @@ export function resolveReceiptPackage(
     }
   }
 
-  // Owner-verified recurring fiscal descriptions.
+  // Verified recurring fiscal descriptions.
   if (/^massa (?:p |para |de )?pastel da feira$/.test(text)) {
     const pkg = packageFrom(1, "kg");
+    if (pkg) return { pkg, source: "verified-rule", confidence: "high" };
+  }
+
+  // Current Tauste catalog identifies these exact abbreviated receipt items
+  // as a 150 g broccoli piece and a 500 g Arra 15 grape tray.
+  if (/^brocolis japon ninja$/.test(text)) {
+    const pkg = packageFrom(150, "g");
+    if (pkg) return { pkg, source: "verified-rule", confidence: "high" };
+  }
+  if (/^uva arra 15 s sement$/.test(text)) {
+    const pkg = packageFrom(500, "g");
     if (pkg) return { pkg, source: "verified-rule", confidence: "high" };
   }
 
@@ -240,6 +251,22 @@ export function nameWithPhysicalPackage(
   }
 
   const physicalUnit = normalizedUnit === "lt" ? "l" : normalizedUnit;
+
+  // Improve fiscal abbreviations where the unit was glued to the previous
+  // word, e.g. "BOV.RESFkg" -> "BOV.RESF kg".
+  if (
+    physicalUnit === "kg" &&
+    /([a-zá-ú]{3,})kg\s*$/i.test(name)
+  ) {
+    return name.replace(/([a-zá-ú]{3,})kg\s*$/i, "$1 kg");
+  }
+  if (
+    physicalUnit === "ml" &&
+    /([a-zá-ú]{3,})ml\s*$/i.test(name)
+  ) {
+    return name.replace(/([a-zá-ú]{3,})ml\s*$/i, "$1 ml");
+  }
+
   const existing = !isReceiptCapacityName(name) ? inferPackage(name) : null;
   if (
     existing &&
