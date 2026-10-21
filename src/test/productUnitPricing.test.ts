@@ -14,6 +14,18 @@ describe("normalized historical grocery prices",()=>{
     expect(unitPriceForProduct("Arroz 1kg",1,"kg",5.49)?.baseUnit).toBe("kg");
     expect(unitPriceForProduct("Refrigerante 2L",null,null,9.98)?.normalizedPrice).toBeCloseTo(4.99,2);
   });
+  it("infers grams for truncated corn-starch receipt names with a trailing package size",()=>{
+    const pack=unitPackageFromProduct("AMIDO MILHO KIMIMO 500",null,null);
+    expect(pack?.pkg.baseUnit).toBe("kg");
+    expect(pack?.pkg.baseQuantity).toBeCloseTo(0.5,4);
+    expect(pack?.inferred).toBe(true);
+    expect(unitPriceForProduct("AMIDO MILHO KIMIMO 500",null,null,8.90)?.normalizedPrice)
+      .toBeCloseTo(17.80,2);
+  });
+  it("does not treat explicit fiscal codes as package sizes",()=>{
+    expect(unitPackageFromProduct("AMIDO MILHO KIMIMO COD 500",null,null)).toBeNull();
+    expect(unitPackageFromProduct("AMIDO MILHO KIMIMO SKU 500",null,null)).toBeNull();
+  });
   it("does not invent a unit for product descriptions without trustworthy quantity",()=>{
     expect(unitPackageFromProduct("OLEO DE SOJA MARCA A",null,null)).toBeNull();
     expect(unitPriceForProduct("MANTEIGA MARCA B",null,null,8.79)).toBeNull();

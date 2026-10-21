@@ -21,13 +21,25 @@ export function unitPackageFromProduct(
   if(named && !(named.baseUnit==="l" && isNonLiquidCapacity)) {
     return {pkg:named,inferred:false};
   }
-  // Certain fiscal receipts shorten ordinary 900-ml soybean oil bottles as
-  // "OLEO SOJA ... .900". Other unit-less figures remain unclassified.
-  const normalized=name.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+  // Certain fiscal receipts shorten package sizes by dropping the unit.
+  // Infer only for product families whose physical measure is unambiguous,
+  // and only when the number is the final token (not a code/SKU/reference).
+  const normalized=name.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
   if(/^oleo(?: de)? soja\b/.test(normalized) &&
       /(?:\s|[.])900\s*$/.test(normalized)){
     const pkg=inferPackage("900ml");
     if(pkg) return {pkg,inferred:true};
+  }
+
+  const ambiguousCodeSuffix=/\b(?:cod|codigo|ref|sku|lote)\s*[.:#-]?\s*\d+\s*$/.test(normalized);
+  const trailingInteger=normalized.match(/(?:^|[\s.])(\d{2,4})\s*$/);
+  if(!ambiguousCodeSuffix && trailingInteger){
+    const quantity=Number(trailingInteger[1]);
+    const isDryMassFamily=/\bamido(?: de)? milho\b/.test(normalized);
+    if(isDryMassFamily && quantity>=50 && quantity<=5000){
+      const pkg=inferPackage(String(quantity)+"g");
+      if(pkg) return {pkg,inferred:true};
+    }
   }
   return null;
 }
