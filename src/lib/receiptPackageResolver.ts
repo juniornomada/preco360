@@ -50,7 +50,11 @@ function hasFiscalCodeSuffix(text: string) {
 }
 
 function trailingNumber(text: string) {
-  const match = text.match(/(?:^|[\s.])(\d{1,5}(?:[.,]\d{1,3})?)\s*$/);
+  const direct = text.match(/(?:^|[\s.])(\d{1,5}(?:[.,]\d{1,3})?)\s*$/);
+  const beforeContainer = text.match(
+    /(?:^|[\s.])(\d{1,5}(?:[.,]\d{1,3})?)\s+(?:pt|pote|pct|pacote|pc|bd|band|cx|caixa)\s*$/,
+  );
+  const match = direct ?? beforeContainer;
   if (!match) return null;
   const value = Number(match[1].replace(",", "."));
   return Number.isFinite(value) ? value : null;
@@ -283,6 +287,19 @@ export function nameWithPhysicalPackage(
       return name.replace(
         /(\d{1,5}(?:[.,]\d{1,3})?)\s*$/,
         `$1${unitLabel(physicalUnit as PackageInfo["unit"])}`,
+      );
+    }
+  }
+
+  const beforeContainer = name.match(
+    /(\d{1,5}(?:[.,]\d{1,3})?)\s+(PT|POTE|PCT|PACOTE|PC|BD|BAND|CX|CAIXA)\s*$/i,
+  );
+  if (beforeContainer) {
+    const packageValue = Number(beforeContainer[1].replace(",", "."));
+    if (Math.abs(packageValue - size) < 0.0001) {
+      return name.replace(
+        /(\d{1,5}(?:[.,]\d{1,3})?)\s+(PT|POTE|PCT|PACOTE|PC|BD|BAND|CX|CAIXA)\s*$/i,
+        `$1${unitLabel(physicalUnit as PackageInfo["unit"])} $2`,
       );
     }
   }
