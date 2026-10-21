@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -1865,6 +1865,7 @@ type OffersPageProps = {
 export default function OffersPage({ betaVoice = false }: OffersPageProps) {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -3706,7 +3707,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      navigate(`/product/${productId}`)
+                                      navigate(`/product/${productId}`, { state: { returnTo: location.pathname === "/offers-beta" ? "/offers-beta" : "/offers" } })
                                     }
                                     className="inline-flex items-center gap-0.5 font-semibold text-muted-foreground transition-colors hover:text-primary"
                                     aria-label="Ver histórico do produto"
@@ -3727,7 +3728,7 @@ export default function OffersPage({ betaVoice = false }: OffersPageProps) {
                               {!verdict.referencePrice && productId && (
                                 <button
                                   type="button"
-                                  onClick={() => navigate(`/product/${productId}`)}
+                                  onClick={() => navigate(`/product/${productId}`, { state: { returnTo: location.pathname === "/offers-beta" ? "/offers-beta" : "/offers" } })}
                                   className="inline-flex items-center gap-0.5 font-semibold text-muted-foreground transition-colors hover:text-primary"
                                 >
                                   Histórico

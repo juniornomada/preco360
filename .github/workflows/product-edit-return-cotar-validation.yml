@@ -1,0 +1,29 @@
+name: Product Edit Return Cotar Validation
+
+on:
+  push:
+    branches: [fix/product-edit-return-cotar-20261021]
+  pull_request:
+    paths:
+      - 'src/pages/ProductDetail.tsx'
+      - 'src/pages/OffersPage.tsx'
+      - 'src/test/productEditReturnCotar.test.tsx'
+      - '.github/workflows/product-edit-return-cotar-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  product-edit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - name: Verify edit return to Cotar or Offers based on origin
+        run: npx vitest run src/test/productEditReturnCotar.test.tsx src/test/quotePriceHistoryDialog.test.tsx src/test/priceQuoteSearchResult.test.tsx
+      - name: Frontend production build
+        run: npm run build
