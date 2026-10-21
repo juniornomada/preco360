@@ -38,6 +38,7 @@ import { Input } from "@/components/ui/input";
 import ProductSearchBar from "@/components/ProductSearchBar";
 import PriceQuoteSearchResult from "@/components/PriceQuoteSearchResult";
 import QuotePriceHistoryDialog from "@/components/QuotePriceHistoryDialog";
+import QuotePackageCorrection from "@/components/QuotePackageCorrection";
 import { readableQuoteProductName } from "@/lib/quoteNamePresentation";
 import { withVerifiedQuotePackage } from "@/lib/quoteProductDisplay";
 import { productMatchesSearch } from "@/lib/productSearch";
@@ -377,6 +378,14 @@ export default function SearchPageBeta() {
               </div>
             </CardContent>
           </Card>
+
+          {!unitPackageFromProduct(
+            withVerifiedQuotePackage(selected).name,
+            withVerifiedQuotePackage(selected).package_size,
+            withVerifiedQuotePackage(selected).unit,
+          ) && (
+            <QuotePackageCorrection key={selected.id} product={selected} />
+          )}
 
           {analysis && style && VerdictIcon && (
             <Card className={style.className}>
