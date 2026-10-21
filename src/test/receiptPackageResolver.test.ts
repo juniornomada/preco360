@@ -18,6 +18,8 @@ describe("receipt package resolver", () => {
       ["IOG.DANONE POLPA 1,25k", null, 1.25, "kg"],
       ["MASSA PASTEL DA FEIRA", null, 1, "kg"],
       ["MANT AVIACAO 500 PT", null, 500, "g"],
+      ["BROCOLIS JAPON/NINJA", null, 150, "g"],
+      ["UVA ARRA 15 S/SEMENT", null, 500, "g"],
       ["MILHO VD.FERN.BD.00G", null, 600, "g"],
     ] as const;
 
@@ -68,6 +70,8 @@ describe("receipt package resolver", () => {
       .toBe("MASSA PASTEL DA FEIRA 1kg");
     expect(nameWithPhysicalPackage("MANT AVIACAO 500 PT", 500, "g"))
       .toBe("MANT AVIACAO 500g PT");
+    expect(nameWithPhysicalPackage("CARNE MOIDA BOV.RESFkg", 1, "kg"))
+      .toBe("CARNE MOIDA BOV.RESF kg");
     expect(nameWithPhysicalPackage("ABACAXI UN", 1, "un"))
       .toBe("ABACAXI UN");
   });
