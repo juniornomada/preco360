@@ -54,7 +54,11 @@ function trailingNumber(text: string) {
   const beforeContainer = text.match(
     /(?:^|[\s.])(\d{1,5}(?:[.,]\d{1,3})?)\s+(?:pt|pote|pct|pacote|pc|bd|band|cx|caixa)\s*$/,
   );
-  const match = direct ?? beforeContainer;
+  // Retail fiscal abbreviations also concatenate the container and quantity,
+  // e.g. "BAND300". Family guards below decide whether that terminal number
+  // can actually represent mass/volume.
+  const attached = text.match(/(\d{2,5})\s*$/);
+  const match = direct ?? beforeContainer ?? attached;
   if (!match) return null;
   const value = Number(match[1].replace(",", "."));
   return Number.isFinite(value) ? value : null;
