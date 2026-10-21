@@ -120,6 +120,12 @@ export function resolveReceiptPackage(
         confidence: "high",
       };
     }
+
+    // Fiscal descriptions often end only in "UN", without a leading "1".
+    if (/(?:^|\s)un\s*$/.test(text)) {
+      const pkg = packageFrom(1, "un");
+      if (pkg) return { pkg, source: "explicit-name", confidence: "high" };
+    }
   }
 
   // Verified recurring fiscal descriptions.
