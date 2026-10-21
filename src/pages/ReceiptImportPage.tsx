@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { QrScanner } from "@/components/QrScanner";
 import { buildOfficialConsultationUrl, extractAccessKey, fiscalDocumentKind, fiscalDocumentLabel, validateAccessKey, validateNfceUrl } from "@/lib/nfceKey";
-import { inferPackage } from "@/lib/flyerAnalysis";
+import { isReceiptCapacityName, resolveReceiptPackage } from "@/lib/receiptPackageResolver";
 import { verifiedPackageFromInput, hasVerifiedFiscalSaleWeight } from "@/lib/verifiedProductPackage";
 import { canonicalReceiptRetailerName } from "@/lib/receiptRetailer";
 import { displayRetailerName } from "@/lib/retailerNames";
@@ -93,54 +93,33 @@ function receiptPriceDisplay(value: string) {
 }
 
 function isReceiptCapacitySpecification(item: ParsedItem) {
-  const text = item.name
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-
-  return /^(sc|saco) lixo\b|^(caixa organizadora|caixa termica|garrafa termica|mop\b|panela|frigideira|jarra|lixeira|balde|pote organizador)\b/.test(
-    text,
-  );
-}
-
-function normalizedReceiptPrice(item: ParsedItem) {
-  const price = decimalValue(item.unitPrice ?? item.price);
-  if (!price) return null;
-
-  const saleUnit = String(item.unit ?? "").toUpperCase();
-  if (saleUnit === "KG") return { value: price, unit: "kg" };
-  if (saleUnit === "L") return { value: price, unit: "L" };
-  if (saleUnit === "G") return { value: price * 1000, unit: "kg" };
-  if (saleUnit === "ML") return { value: price * 1000, unit: "L" };
-
-  if (isReceiptCapacitySpecification(item)) return null;
-
-  const confirmed = verifiedPackageFromInput(item.userPackageSize, item.userPackageUnit);
-  const pkg = confirmed
-    ? inferPackage(`${confirmed.package_size}${confirmed.unit}`)
-    : inferPackage(item.name);
-  if (!pkg || pkg.baseQuantity <= 0) return null;
-  return {
-    value: price / pkg.baseQuantity,
-    unit: pkg.baseUnit === "kg" ? "kg" : pkg.baseUnit === "l" ? "L" : "un",
-  };
+  return isReceiptCapacityName(item.name);
 }
 
 function packageMetadata(item: ParsedItem) {
   const confirmed = verifiedPackageFromInput(item.userPackageSize, item.userPackageUnit);
   if (confirmed) return confirmed;
-  const saleUnit = String(item.unit ?? "").toUpperCase();
-  if (saleUnit === "KG") return { package_size: 1, unit: "kg" };
-  if (saleUnit === "L") return { package_size: 1, unit: "l" };
-  if (saleUnit === "G") return { package_size: 1, unit: "g" };
-  if (saleUnit === "ML") return { package_size: 1, unit: "ml" };
 
-  if (isReceiptCapacitySpecification(item)) return null;
+  const resolved = resolveReceiptPackage(item.name, item.unit);
+  if (!resolved) return null;
 
-  const pkg = inferPackage(item.name);
-  return pkg ? { package_size: pkg.quantity, unit: pkg.unit } : null;
+  // A fiscal sale unit such as UN/PC/PCT is useful as a database fallback,
+  // but it is not the product's physical package dimension. Keep the review
+  // field visible so the user can still confirm 500 g / 900 ml when needed.
+  if (resolved.source === "sale-unit" && resolved.pkg.baseUnit === "un") {
+    return null;
+  }
+
+  return {
+    package_size: resolved.pkg.quantity,
+    unit: resolved.pkg.unit,
+  };
+}
+
+function normalizedReceiptPrice(item: ParsedItem) {
+  const price = decimalValue(item.unitPrice ?? item.price);
+  if (!price) return null;
+  return normalizedPriceFromPackage(price, packageMetadata(item));
 }
 
 function normalizedPriceFromPackage(
@@ -1652,10 +1631,10 @@ export default function ReceiptImportPage() {
                         <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
                           {verifiedPackageFromInput(item.userPackageSize, item.userPackageUnit)
                             ? "Embalagem informada por você (pode corrigir)"
-                            : "Peso/volume não identificado na nota (opcional)"}
+                            : "Peso/volume físico não identificado automaticamente"}
                         </p>
                         <p className="mb-2 text-[11px] text-muted-foreground">
-                          Se a embalagem indicar o tamanho, informe-o. A quantidade comprada no cupom é diferente do peso de cada embalagem.
+                          Se a embalagem indicar o tamanho, informe-o. Sem essa confirmação, o banco usará a unidade de venda (ex.: R$/un) como fallback até existir uma medida física confiável.
                         </p>
                         <div className="flex items-center gap-2">
                           <Input
