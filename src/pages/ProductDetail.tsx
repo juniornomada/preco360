@@ -36,7 +36,7 @@ export default function ProductDetail() {
     const state = location.state as { returnTo?: unknown } | null;
     const offersOrigin = state?.returnTo === "/offers" || state?.returnTo === "/offers-beta";
     const destination = offersOrigin
-      ? state.returnTo as string
+      ? String(state?.returnTo)
       : id ? `/search?product=${encodeURIComponent(id)}` : "/search";
     navigate(destination, { replace: true });
   };
