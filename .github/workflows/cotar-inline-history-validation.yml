@@ -1,0 +1,36 @@
+name: Cotar Inline History Validation
+
+on:
+  push:
+    branches: [fix/cotar-modal-history-return-navigation-20261021]
+  pull_request:
+    paths:
+      - 'src/components/QuotePriceHistoryDialog.tsx'
+      - 'src/components/PriceQuoteSearchResult.tsx'
+      - 'src/pages/SearchPage.tsx'
+      - 'src/pages/SearchPageBeta.tsx'
+      - 'src/test/quotePriceHistoryDialog.test.tsx'
+      - 'src/test/priceQuoteSearchResult.test.tsx'
+      - '.github/workflows/cotar-inline-history-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cotar-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - name: Test history modal, quote cards and package safety
+        run: npx vitest run src/test/quotePriceHistoryDialog.test.tsx src/test/priceQuoteSearchResult.test.tsx src/test/quoteProductDisplay.test.ts src/test/quoteNamePresentation.test.ts
+      - name: Verify Cotar never leaves for full product history
+        run: |
+          ! grep -F 'navigate(`/product/${selected.id}`)' src/pages/SearchPage.tsx
+          ! grep -F 'navigate(`/product/${selected.id}`)' src/pages/SearchPageBeta.tsx
+      - name: Frontend build
+        run: npm run build
