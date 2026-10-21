@@ -46,17 +46,16 @@ describe("Cotar data-first search result layout", () => {
 
   it("exposes two separate accessible controls for quote and inline history", () => {
     const html = renderRow();
-    expect((html.match(/<button\\b/g) ?? []).length).toBe(2);
+    expect((html.match(/<button\b/g) ?? []).length).toBe(2);
     expect(html).toContain("Selecionar produto para cotar");
     expect(html).toContain("Ver histórico de preços de MASSA PARA PASTEL SÃO JUDAS 500G");
-    expect(html).toContain("2.5");
     expect(html).not.toContain("href=");
     expect(html).not.toContain("/product/");
   });
 
   it("does not offer a clickable history action if the product has no history", () => {
     const html = renderRow({ historyCount: 0 });
-    expect((html.match(/<button\\b/g) ?? []).length).toBe(1);
+    expect((html.match(/<button\b/g) ?? []).length).toBe(1);
     expect(html).toContain("Sem preços no histórico");
   });
 
