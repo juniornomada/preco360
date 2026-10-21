@@ -9,6 +9,7 @@ const mocked = vi.hoisted(() => ({
   invalidate: vi.fn(async () => undefined),
   update: vi.fn(),
   rpc: vi.fn(),
+  originState: { returnTo: undefined as string | undefined },
 }));
 
 const product = {
@@ -31,6 +32,7 @@ const product = {
 vi.mock("react-router-dom", () => ({
   useParams: () => ({ id: product.id }),
   useNavigate: () => mocked.navigate,
+  useLocation: () => ({ state: mocked.originState }),
 }));
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ user: { id: "test-user" } }),
@@ -62,6 +64,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mocked.rpc.mockResolvedValue({ error: null });
+  mocked.originState.returnTo = undefined;
   mocked.invalidate.mockResolvedValue(undefined);
 });
 
@@ -104,6 +107,54 @@ describe("Product edits return to Cotar, not Ofertas", () => {
       p_effective_price: 2.05,
       p_reason: "Desconto aplicado no subtotal do cupom fiscal",
     });
+  });
+
+  it("returns to Offers when editing product data opened from an offer", async () => {
+    mocked.originState.returnTo = "/offers";
+    render(<ProductDetail />);
+    fireEvent.click(screen.getByRole("button", { name: "Editar nome do produto" }));
+    fireEvent.change(screen.getByDisplayValue("SALG TORCIDA 60G"), {
+      target: { value: "SALG TORCIDA 60G NOVO" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar nome do produto" }));
+
+    await waitFor(() => expect(mocked.navigate).toHaveBeenCalledWith(
+      "/offers", { replace: true },
+    ));
+    expect(mocked.navigate).not.toHaveBeenCalledWith(
+      "/search?product=test-product-id", expect.anything(),
+    );
+  });
+
+  it("returns to Offers after correcting a purchased reference accessed from Offers", async () => {
+    mocked.originState.returnTo = "/offers";
+    render(<ProductDetail />);
+    fireEvent.click(screen.getByRole("button", { name: "Editar valor pago" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(mocked.navigate).toHaveBeenCalledWith(
+      "/offers", { replace: true },
+    ));
+  });
+
+  it("preserves Ofertas Beta as the originating route", async () => {
+    mocked.originState.returnTo = "/offers-beta";
+    render(<ProductDetail />);
+    fireEvent.click(screen.getByRole("button", { name: "Editar nome do produto" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar nome do produto" }));
+    await waitFor(() => expect(mocked.navigate).toHaveBeenCalledWith(
+      "/offers-beta", { replace: true },
+    ));
+  });
+
+  it("ignores unexpected untrusted return paths and falls back safely to Cotar", async () => {
+    mocked.originState.returnTo = "https://example.org";
+    render(<ProductDetail />);
+    fireEvent.click(screen.getByRole("button", { name: "Editar nome do produto" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar nome do produto" }));
+    await waitFor(() => expect(mocked.navigate).toHaveBeenCalledWith(
+      "/search?product=test-product-id", { replace: true },
+    ));
   });
 
   it("does not leave the edit screen if price correction fails", async () => {
