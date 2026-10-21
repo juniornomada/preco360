@@ -1647,10 +1647,12 @@ export default function ReceiptImportPage() {
                       />
                       <Button variant="ghost" size="icon" onClick={() => setItems((current) => current.filter((_, i) => i !== index))}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                     </div>
-                    {!packageMetadata(item) && !hasVerifiedFiscalSaleWeight(item.unit) && !isReceiptCapacitySpecification(item) && (
+                    {(!packageMetadata(item) || item.userPackageSize || item.userPackageUnit) && !hasVerifiedFiscalSaleWeight(item.unit) && !isReceiptCapacitySpecification(item) && (
                       <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2">
                         <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
-                          Peso/volume não identificado na nota (opcional)
+                          {verifiedPackageFromInput(item.userPackageSize, item.userPackageUnit)
+                            ? "Embalagem informada por você (pode corrigir)"
+                            : "Peso/volume não identificado na nota (opcional)"}
                         </p>
                         <p className="mb-2 text-[11px] text-muted-foreground">
                           Se a embalagem indicar o tamanho, informe-o. A quantidade comprada no cupom é diferente do peso de cada embalagem.
