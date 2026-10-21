@@ -184,7 +184,7 @@ export function resolveReceiptPackage(
       // Dry/solid grocery families commonly lose only the final unit in
       // NFC-e descriptions: "... 500" means 500 g, not an arbitrary code.
       const dryMassFamily =
-        /\b(?:amido(?: de)? milho|bisc(?:uito)?|bolacha|cafe sol|leite cond|manteiga|mant |margarina|farinha|far |fermento|ferm |milho pip|pipoca|pao forma|pao de forma|bombom|cereal|farofa|goiabada|quiabo .*band|quiabo .*bd)\b/.test(
+        /\b(?:amido(?: de)? milho|bisc(?:uito)?|bolacha|cafe sol|leite cond|manteiga|mant |margarina|farinha|far |fermento|ferm |milho pip|pipoca|pao forma|pao de forma|bombom|cereal|farofa|goiabada|quiabo)\b/.test(
           text,
         );
       if (dryMassFamily && quantity >= 10 && quantity <= 5000) {
