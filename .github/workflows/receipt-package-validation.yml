@@ -2,16 +2,21 @@ name: Receipt Package Metadata Validation
 
 on:
   push:
-    branches: [fix/receipt-package-metadata-review-20261021]
+    branches:
+      - fix/receipt-package-metadata-review-20261021
+      - fix/receipt-package-resolution-20261021
   pull_request:
     paths:
       - 'src/lib/verifiedProductPackage.ts'
       - 'src/lib/productUnitPricing.ts'
+      - 'src/lib/receiptPackageResolver.ts'
       - 'src/pages/ReceiptImportPage.tsx'
       - 'src/pages/SearchPage.tsx'
       - 'src/pages/SearchPageBeta.tsx'
       - 'src/components/QuotePackageCorrection.tsx'
       - 'src/test/verifiedProductPackage.test.ts'
+      - 'src/test/receiptPackageResolver.test.ts'
+      - 'supabase/migrations/*receipt_package*.sql'
       - '.github/workflows/receipt-package-validation.yml'
 
 permissions:
@@ -28,6 +33,6 @@ jobs:
           node-version: '20'
       - run: npm install --no-audit --no-fund
       - name: Test fiscal package parsing, history and receipt safety
-        run: npx vitest run src/test/verifiedProductPackage.test.ts src/test/productUnitPricing.test.ts src/test/quoteProductDisplay.test.ts src/test/printedReceiptDiscounts.test.ts src/test/receiptRepeatGuard.test.ts src/test/receiptProduceAliases.test.ts
+        run: npx vitest run src/test/verifiedProductPackage.test.ts src/test/receiptPackageResolver.test.ts src/test/productUnitPricing.test.ts src/test/quoteProductDisplay.test.ts src/test/printedReceiptDiscounts.test.ts src/test/receiptRepeatGuard.test.ts src/test/receiptProduceAliases.test.ts
       - name: Frontend build and type verification
         run: npm run build

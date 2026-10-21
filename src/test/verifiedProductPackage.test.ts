@@ -25,10 +25,16 @@ describe("receipt package sizes confirmed by owner", () => {
     expect(amount?.normalizedPrice).toBeCloseTo(2.15 / 0.06, 2);
   });
 
-  it("does not fabricate size from ambiguous truncated names", () => {
+  it("keeps ambiguous names unresolved but accepts verified fiscal package patterns", () => {
     expect(unitPackageFromProduct("LEITE F YAKULT", null, null)).toBeNull();
-    expect(unitPackageFromProduct("LEITE FERM YAKULT 6X80", null, null)).toBeNull();
-    expect(unitPackageFromProduct("MASSA PASTEL DA FEIRA", null, null)).toBeNull();
+
+    const yakult = unitPackageFromProduct("LEITE FERM YAKULT 6X80", null, null);
+    expect(yakult?.pkg.quantity).toBe(480);
+    expect(yakult?.pkg.unit).toBe("ml");
+
+    const pastry = unitPackageFromProduct("MASSA PASTEL DA FEIRA", null, null);
+    expect(pastry?.pkg.quantity).toBe(1);
+    expect(pastry?.pkg.unit).toBe("kg");
   });
 
   it("keeps explicit text units and weighed goods reliable", () => {
