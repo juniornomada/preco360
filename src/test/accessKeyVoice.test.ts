@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   accessKeyDigitsFromTranscript,
   sanitizeAccessKeyDigits,
+  removeInterimEcho,
+  speechReplayOverlap,
 } from "@/lib/accessKeyVoice";
 
 describe("accessKeyDigitsFromTranscript", () => {
@@ -43,5 +45,29 @@ describe("sanitizeAccessKeyDigits", () => {
 
     expect(sanitized).toMatch(/^\d{44}$/);
     expect(sanitized).toHaveLength(44);
+  });
+});
+
+describe("speech-replay protection", () => {
+  it("removes an echo when final and interim repeat the same phrase", () => {
+    expect(removeInterimEcho("3526", "3526")).toBe("");
+    expect(removeInterimEcho("3526", "352618")).toBe("18");
+  });
+
+  it("removes a suffix/prefix replay of 3+ digits after recognition restarts", () => {
+    expect(speechReplayOverlap("13526", "352678")).toBe(4);
+    expect(speechReplayOverlap("3526", "3526")).toBe(4);
+  });
+
+  it("does not remove repeated individual digits or short groups", () => {
+    expect(speechReplayOverlap("00", "00")).toBe(0);
+    expect(speechReplayOverlap("3", "3")).toBe(0);
+    expect(removeInterimEcho("11", "11")).toBe("11");
+  });
+
+  it("does not globally deduplicate real consecutive repetitions", () => {
+    expect(speechReplayOverlap("3526", "1111")).toBe(0);
+    expect(accessKeyDigitsFromTranscript("zero zero tres tres tres")).toBe("00333");
+    expect(accessKeyDigitsFromTranscript("3 5 2 6 3 5 2 6")).toBe("35263526");
   });
 });
