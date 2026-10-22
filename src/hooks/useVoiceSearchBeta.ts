@@ -55,15 +55,15 @@ type SpeechWindow = Window & {
   SpeechRecognitionPhrase?: SpeechRecognitionPhraseConstructor;
 };
 
-const SILENCE_COMMIT_MS = 500;
-const SHORT_TERM_COMMIT_MS = 650;
-const SPEECH_END_STOP_MS = 180;
+const SILENCE_COMMIT_MS = 900;
+const SHORT_TERM_COMMIT_MS = 900;
+const SPEECH_END_STOP_MS = 250;
 const EMPTY_SPEECH_END_GRACE_MS = 900;
-const MAX_LISTENING_MS = 4500;
-const GROQ_CAPTURE_MS = 3200;
+const MAX_LISTENING_MS = 6000;
+const GROQ_CAPTURE_MS = 5000;
 const MIN_GROQ_AUDIO_BYTES = 4_000;
 const GROQ_VAD_MIN_CAPTURE_MS = 1_100;
-const GROQ_VAD_SILENCE_MS = 650;
+const GROQ_VAD_SILENCE_MS = 1600;
 const GROQ_VAD_SAMPLE_MS = 50;
 const GROQ_VAD_MIN_RMS = 0.008;
 const GROQ_VAD_SPEECH_FRAMES = 3;
@@ -122,6 +122,32 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     ["noax", "Noix"],
     ["kaqui", "caqui"],
     ["capuchino", "cappuccino"],
+    ["capuchinho", "cappuccino"],
+    ["capucino", "cappuccino"],
+    ["capuccino", "cappuccino"],
+    ["porta dela", "mortadela"],
+    ["mortandela", "mortadela"],
+    ["ovo maltini", "Ovomaltine"],
+    ["ovo malchini", "Ovomaltine"],
+    ["ovo malchinni", "Ovomaltine"],
+    ["iorgute", "iogurte"],
+    ["green tease", "cream cheese"],
+    ["green teasy", "cream cheese"],
+    ["cream cheesy", "cream cheese"],
+    ["ovo mouchini", "Ovomaltine"],
+    ["ovo mocini", "Ovomaltine"],
+    ["ovo malcini", "Ovomaltine"],
+    ["ovo mocchini", "Ovomaltine"],
+    ["murtandela", "mortadela"],
+    ["salve", "sal"],
+    ["mirio verde bandeja", "milho verde bandeja"],
+    ["tarrou 5 quilos", "arroz 5 quilos"],
+    ["mozzarella", "muçarela"],
+    ["mozarela", "muçarela"],
+    ["muzzarela", "muçarela"],
+    ["muzarela", "muçarela"],
+    ["mussarela", "muçarela"],
+    ["moçarela", "muçarela"],
     ["caputino", "cappuccino"],
     ["capuccino", "cappuccino"],
     ["cappucino", "cappuccino"],
@@ -144,6 +170,23 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
     ["beijo", "peixe"],
   ]);
 
+  // Voice-only equivalences: ASR may split a brand into multiple words.
+  // Preserve trailing product qualifiers such as package size.
+  const ovomaltineMatch = key.match(/^(?:ovo[\s-]*)?mal(?:t|ch)(?:ine|ini|ino|inni)(?=$|\s)/);
+  if (ovomaltineMatch && (key.startsWith("ovo") || key.startsWith("malt"))) {
+    return "Ovomaltine" + normalized.slice(ovomaltineMatch[0].length);
+  }
+
+  const mortadelaMatch = key.match(/^(?:mortadela|mortandela|mortandella|mortadella|bortandela|hortandela|martandela|morta\s+dela|mortando)(?=$|\s)/);
+  if (mortadelaMatch) {
+    return "mortadela" + normalized.slice(mortadelaMatch[0].length);
+  }
+
+  if (/^ovo[\s-]+(?:mocinho|molchini|malchine|maltinho)(?=$|\s)/.test(key)) return "Ovomaltine" + normalized.slice(key.match(/^ovo[\s-]+(?:mocinho|molchini|malchine|maltinho)/)![0].length);
+
+  // Exact, voice-only ASR corrections observed in the beta telemetry.
+  if (/^(?:green[\s-]+cheese|gritiz)(?=$|\s)/.test(key)) return "cream cheese" + normalized.slice(key.match(/^(?:green[\s-]+cheese|gritiz)/)![0].length);
+
   const knownCorrection = knownAsrCorrections.get(key);
   if (knownCorrection) return knownCorrection;
 
@@ -156,8 +199,8 @@ export function normalizeVoiceSearchBetaTranscript(value: string) {
   // Whisper can confuse the supermarket cut "coxão duro" with acoustically
   // similar phrases. Keep this correction intentionally narrow so a genuine
   // search for "colchão" by itself is not rewritten.
-  if (key === "colchao duro" || key === "cochao duro" || key === "poxao duro") return "coxão duro";
-  if (key === "colchao mole" || key === "cochao mole" || key === "poxao mole") return "coxão mole";
+  if (key === "cochao duro" || key === "poxao duro") return "coxão duro";
+  if (key === "cochao mole" || key === "poxao mole") return "coxão mole";
 
   // Android/Chrome often recognizes the difficult short term when the user
   // supplies a harmless second word ("poncan fruta") or repeats it
@@ -249,6 +292,7 @@ export function useVoiceSearchBeta() {
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastTimingMs, setLastTimingMs] = useState<number | null>(null);
+  const [lastRawTranscript, setLastRawTranscript] = useState<string | null>(null);
 
   const isSupported =
     getSpeechRecognitionConstructor() !== null ||
@@ -342,7 +386,9 @@ export function useVoiceSearchBeta() {
             const payload = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(payload?.error ?? "TRANSCRIPTION_FAILED");
 
-            const transcript = normalizeVoiceSearchBetaTranscript(String(payload?.transcript ?? ""));
+            const rawTranscript = String(payload?.transcript ?? "");
+            const transcript = normalizeVoiceSearchBetaTranscript(rawTranscript);
+            setLastRawTranscript(rawTranscript);
             if (!transcript) {
               setError("Não consegui reconhecer o produto. Toque novamente e tente outra vez.");
               return;
@@ -361,7 +407,7 @@ export function useVoiceSearchBeta() {
         recorder.start();
         setIsListening(true);
 
-        // Latency optimization: Web Audio only decides *when* speech has ended.
+        // Beta experiment: 1600 ms of silence after speech; hard cap 5000 ms.\n        // Latency optimization: Web Audio only decides *when* speech has ended.
         // It never flushes or manipulates MediaRecorder chunks. MediaRecorder
         // is stopped exactly once and finalizes the WebM normally.
         let audioContext: AudioContext | null = null;
@@ -535,6 +581,7 @@ export function useVoiceSearchBeta() {
       };
 
       const deliverPending = () => {
+        setLastRawTranscript(pendingTranscriptRef.current);
         const transcript = normalizeVoiceSearchBetaTranscript(
           pendingTranscriptRef.current,
         );
@@ -716,12 +763,14 @@ export function useVoiceSearchBeta() {
 
   const startListening = useCallback(
     (onTranscript: (transcript: string) => void) => {
-      // Beta uses Groq first. The native browser recognizer generated multiple
-      // end_no_text/aborted events on Android and must remain a fallback only.
+      // Beta experiment: prefer the same Android Web Speech engine used in
+      // production. Keep beta-only normalization and native telemetry.
+      // Groq is only a compatibility fallback when native speech is absent.
+      if (getSpeechRecognitionConstructor()) {
+        return startNativeRecognition(onTranscript);
+      }
       if (navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined") {
-        void startGroqCapture(onTranscript).then((started) => {
-          if (!started) startNativeRecognition(onTranscript);
-        });
+        void startGroqCapture(onTranscript);
         return true;
       }
       return startNativeRecognition(onTranscript);
@@ -753,6 +802,7 @@ export function useVoiceSearchBeta() {
     isListening,
     error,
     lastTimingMs,
+    lastRawTranscript,
     clearError,
     startListening,
     stopListening,

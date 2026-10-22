@@ -33,6 +33,7 @@ const ProductSearchBarBeta = forwardRef<HTMLInputElement, ProductSearchBarBetaPr
       isListening,
       error,
       lastTimingMs,
+      lastRawTranscript,
       clearError,
       startListening,
       stopListening,
@@ -95,6 +96,12 @@ const ProductSearchBarBeta = forwardRef<HTMLInputElement, ProductSearchBarBetaPr
             className="mt-1 px-1 text-[10px] text-destructive"
           >
             {error}
+          </p>
+        )}
+
+        {lastRawTranscript && (
+          <p className="mt-1 px-1 text-[10px] text-muted-foreground">
+            Reconhecido: “{lastRawTranscript}” → busca: “{value}”
           </p>
         )}
 
