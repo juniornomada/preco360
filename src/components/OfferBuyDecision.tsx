@@ -47,7 +47,7 @@ export default function OfferBuyDecision({
 
   return (
     <div className="mt-3 border-t border-border/50 pt-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-start gap-2 whitespace-nowrap">
         <p className="text-xs font-bold text-foreground">Vale a pena comprar?</p>
         <p className={"text-sm font-black " + (
           decision === "yes" ? "text-primary" :
