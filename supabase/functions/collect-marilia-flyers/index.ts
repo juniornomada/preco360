@@ -1473,8 +1473,8 @@ Deno.serve(async(req)=>{
   if(!handled) report.push({retailer:src.retailer,endpoint:used,validity:val,result:links.length?"erro":"sem asset oficial obtível com segurança",files:0,offers:0,error:err||null});
   else report.push({retailer:src.retailer,endpoint:used,result:"resumo",found:links.length,imported,unchanged,failed});
  }
- // Follow-ups can also resume valid background jobs that outlived the
- // previous scheduled collection. Keep manual and 9am runs unchanged.
+ // Discovery rechecks can also resume valid background jobs that outlived the
+ // previous collection. Recovery-only preflight calls use the fast path above.
  if(body?.recheck===true && !requestedRetailers.length){
    try{
      await recoverIncompleteScheduledFlyers(db,report);
