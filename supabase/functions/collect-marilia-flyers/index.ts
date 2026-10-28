@@ -1198,12 +1198,14 @@ async function collectSwift(report:any[]){
 /**
  * A cron HTTP 200 only confirms that discovery ran. Flyer pages run in
  * background and can remain failed/stuck after a transient Gemini 503.
- * Follow-ups recover at most two still-valid jobs at a time, reusing their
+ * Recovery checks resume several still-valid jobs at a time, reusing their
  * stored source and already processed pages rather than importing duplicates.
+ * Preflight recovery runs use this path without rescanning retailer sources.
  */
 async function recoverIncompleteScheduledFlyers(db:any, report:any[]) {
   const now=new Date();
-  const cutoff=new Date(now.getTime()-45*60*1000).toISOString();
+  // A stalled page should be retried quickly enough for the 09:00 readiness target.
+  const cutoff=new Date(now.getTime()-8*60*1000).toISOString();
   const recent=new Date(now.getTime()-7*24*60*60*1000).toISOString();
   const parts=new Intl.DateTimeFormat("en-US",{
     timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit",
@@ -1216,7 +1218,7 @@ async function recoverIncompleteScheduledFlyers(db:any, report:any[]) {
     .in("status",["failed","queued","processing","refining"])
     .gte("created_at",recent)
     .lt("updated_at",cutoff)
-    .order("updated_at",{ascending:false})
+    .order("updated_at",{ascending:true})
     .limit(30);
   if(error){
     report.push({retailer:"Sistema",result:"erro na verificação de jobs incompletos",error:error.message});
@@ -1225,7 +1227,7 @@ async function recoverIncompleteScheduledFlyers(db:any, report:any[]) {
 
   let resumed=0;
   for(const job of jobs??[]){
-    if(resumed>=2) break;
+    if(resumed>=8) break;
     const oldResult=job.result??{};
     if(oldResult.auto_import!==true) continue;
     const validTo=String(oldResult.valid_to??job.valid_to??"");
@@ -1363,6 +1365,23 @@ Deno.serve(async(req)=>{
  ).values()).filter(Boolean) as string[];
  const requestedTitle=String(body?.title||"").trim();
  const requestedKeys=new Set(requestedRetailers.map(retailerKey));
+ const recoverOnly=body?.recover_only===true;
+
+ if(recoverOnly){
+   try{
+     await recoverIncompleteScheduledFlyers(db,report);
+   }catch(error){
+     report.push({retailer:"Sistema",result:"erro ao recuperar jobs",error:error instanceof Error?error.message:String(error)});
+   }
+   return new Response(JSON.stringify({
+     city:"Marília",
+     ran_at:new Date().toISOString(),
+     mode:"recovery-only",
+     requested_retailers:[],
+     connected_retailers:runtimeSources.map((source:any)=>source.retailer),
+     report,
+   }),{headers:{...corsHeaders,"content-type":"application/json"}});
+ }
 
  for(const retailer of requestedRetailers){
    const supported=runtimeSources.some(src=>retailerKey(src.retailer)===retailerKey(retailer));
@@ -1454,8 +1473,8 @@ Deno.serve(async(req)=>{
   if(!handled) report.push({retailer:src.retailer,endpoint:used,validity:val,result:links.length?"erro":"sem asset oficial obtível com segurança",files:0,offers:0,error:err||null});
   else report.push({retailer:src.retailer,endpoint:used,result:"resumo",found:links.length,imported,unchanged,failed});
  }
- // Follow-ups can also resume valid background jobs that outlived the
- // previous scheduled collection. Keep manual and 9am runs unchanged.
+ // Discovery rechecks can also resume valid background jobs that outlived the
+ // previous collection. Recovery-only preflight calls use the fast path above.
  if(body?.recheck===true && !requestedRetailers.length){
    try{
      await recoverIncompleteScheduledFlyers(db,report);
