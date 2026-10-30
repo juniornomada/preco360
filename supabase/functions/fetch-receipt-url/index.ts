@@ -42,9 +42,20 @@ const reply = (body: unknown, status = 200) =>
 
 function decodeEntities(value: string) {
   return value
-    .replace(/&#(x?[0-9a-f]+);/gi, (_m, raw) =>
-      String.fromCodePoint(raw.toLowerCase().startsWith("x") ? parseInt(raw.slice(1), 16) : parseInt(raw, 10)),
-    )
+    .replace(/&#(x?[0-9a-f]+);/gi, (entity, raw) => {
+      const codePoint = raw.toLowerCase().startsWith("x")
+        ? parseInt(raw.slice(1), 16)
+        : parseInt(raw, 10);
+      // NFC-e HTML may contain malformed numeric entities. Preserve them
+      // instead of letting String.fromCodePoint throw and abort the receipt.
+      if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff ||
+          (codePoint >= 0xd800 && codePoint <= 0xdfff)) return entity;
+      try {
+        return String.fromCodePoint(codePoint);
+      } catch {
+        return entity;
+      }
+    })
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&quot;/gi, '"')
@@ -521,17 +532,24 @@ Deno.serve(async (req) => {
   } catch (e) {
     const err = e instanceof ImportError ? e : new ImportError(e instanceof Error ? e.message : "Falha inesperada.", "UNKNOWN");
     const expected = [PORTAL_REJECTION_CODE, "CAPTCHA_REQUIRED", "BLOCKED", "NO_ITEMS", "QR_FORMAT", "NOT_FOUND"].includes(err.code);
-    return reply(
-      {
-        error: err.message,
-        code: err.code,
-        blocked: expected,
-        suggestPhoto: expected,
-        finalUrl: err.finalUrl,
-        traceId,
-        diagnostics,
-      },
-      expected ? 200 : 500,
-    );
+    // Keep parser/network failures as structured application responses. A 500
+    // makes supabase-js discard the useful JSON body and show only a generic
+    // "Edge Function returned a non-2xx status code" message.
+    console.error("[fetch-receipt-url]", {
+      traceId,
+      code: err.code,
+      message: err.message,
+      stack: err.stack,
+      diagnostics,
+    });
+    return reply({
+      error: err.message,
+      code: err.code,
+      blocked: expected,
+      suggestPhoto: expected,
+      finalUrl: err.finalUrl,
+      traceId,
+      diagnostics,
+    }, 200);
   }
 });
