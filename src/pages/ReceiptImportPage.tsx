@@ -806,6 +806,11 @@ export default function ReceiptImportPage() {
     try {
       const { data, error } = await supabase.functions.invoke("fetch-receipt-url", { body: { url } });
       if (error) throw error;
+      if (data?.error) {
+        const detail = String(data.error);
+        const trace = data.traceId ? ` (código: ${data.traceId})` : "";
+        throw new Error(detail + trace);
+      }
       applyResult(data, importSource, extractAccessKey(url) ?? undefined);
     } catch (error: any) {
       toast({ title: "Erro ao consultar cupom", description: error?.message ?? "Falha na consulta.", variant: "destructive" });
