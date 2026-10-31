@@ -429,23 +429,48 @@ async function fetchFiscal(raw: string) {
     throw new ImportError("Endereço fiscal inválido.", "INVALID_URL");
   }
 
-  const response = await fetch(url.toString(), {
-    redirect: "follow",
-    headers: {
-      // Do not impersonate Chrome from an Edge Function: the SEFAZ-SP gateway
-      // returns HTTP 200 with Request Rejected for that artificial identity.
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "pt-BR,pt;q=0.9",
-    },
-  });
+  // Edge Runtime -> SEFAZ connections can fail transiently before an HTTP
+  // response exists (Deno SendRequest / connection errors). Retry those
+  // transport failures, but do not retry real HTTP responses such as 403/429.
+  let lastNetworkError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(url.toString(), {
+        redirect: "follow",
+        signal: AbortSignal.timeout(15000),
+        headers: {
+          // Do not impersonate Chrome from an Edge Function: the SEFAZ-SP gateway
+          // returns HTTP 200 with Request Rejected for that artificial identity.
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "pt-BR,pt;q=0.9",
+        },
+      });
 
-  const finalUrl = response.url || url.toString();
-  if (response.status === 403 || response.status === 429) {
-    throw new ImportError("A SEFAZ bloqueou a consulta automática.", "BLOCKED", finalUrl);
+      const finalUrl = response.url || url.toString();
+      if (response.status === 403 || response.status === 429) {
+        throw new ImportError("A SEFAZ bloqueou a consulta automática.", "BLOCKED", finalUrl);
+      }
+      if (!response.ok) throw new ImportError(`SEFAZ respondeu HTTP ${response.status}.`, "HTTP_ERROR", finalUrl);
+
+      return { html: await response.text(), finalUrl, attempts: attempt };
+    } catch (error) {
+      if (error instanceof ImportError) throw error;
+      lastNetworkError = error;
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 700));
+      }
+    }
   }
-  if (!response.ok) throw new ImportError(`SEFAZ respondeu HTTP ${response.status}.`, "HTTP_ERROR", finalUrl);
 
-  return { html: await response.text(), finalUrl };
+  console.error("[fetch-receipt-url] SEFAZ transport failure after retries", {
+    host: url.host,
+    attempts: 3,
+    cause: lastNetworkError instanceof Error ? lastNetworkError.message : String(lastNetworkError),
+  });
+  throw new ImportError(
+    "Não foi possível conectar ao servidor da SEFAZ-SP após 3 tentativas. Isso costuma ser uma instabilidade temporária na comunicação. Aguarde alguns segundos e tente novamente; se persistir, use a aba Arquivo com o PDF ou imagens do cupom.",
+    "UPSTREAM_NETWORK",
+  );
 }
 
 Deno.serve(async (req) => {
@@ -465,6 +490,7 @@ Deno.serve(async (req) => {
       const loaded = await fetchFiscal(body.url.trim());
       raw = loaded.html;
       finalUrl = loaded.finalUrl;
+      diagnostics.upstreamAttempts = loaded.attempts;
     } else {
       throw new ImportError("Informe a URL do QR Code ou o conteúdo da consulta.", "MISSING_URL");
     }
