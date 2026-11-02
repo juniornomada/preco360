@@ -3,6 +3,10 @@ import {
   accessKeyDigitsFromTranscript,
   sanitizeAccessKeyDigits,
 } from "@/lib/accessKeyVoice";
+import {
+  assembleAccessKeySpeechChunks,
+  type AccessKeySpeechResultChunk,
+} from "@/lib/accessKeySpeechResults";
 
 type SpeechAlternative = { transcript: string };
 
@@ -206,37 +210,22 @@ export function useAccessKeyVoice() {
       // Rebuild the complete current recognition session every time.
       // This avoids duplicating final hypotheses and preserves the latest
       // interim hypothesis if Android/Chrome closes the native session.
-      const recognizedChunks: Array<{ digits: string; isFinal: boolean }> = [];
+      const recognizedChunks: AccessKeySpeechResultChunk[] = [];
+
+      // Each slot in event.results represents a distinct recognized segment.
+      // Rebuild the current snapshot on every event rather than appending
+      // snapshots or removing adjacent equal strings: "zero zero" may be two
+      // legitimate slots with identical content.
       for (let index = 0; index < event.results.length; index += 1) {
         const result = event.results[index];
         const digits = digitsForResult(result);
         if (!digits) continue;
-
-        const previous = recognizedChunks[recognizedChunks.length - 1];
-        // Some Android/Chrome speech engines expose the same recognized
-        // number group in adjacent result slots (or a cumulative hypothesis
-        // after the shorter one). Collapse only exact/cumulative chunks.
-        if (previous && digits === previous.digits) continue;
-        if (previous && digits.startsWith(previous.digits) && previous.digits.length >= 2) {
-          recognizedChunks[recognizedChunks.length - 1] = {
-            digits,
-            isFinal: Boolean(result?.isFinal),
-          };
-          continue;
-        }
-        if (previous && previous.digits.startsWith(digits) && digits.length >= 2) continue;
-
         recognizedChunks.push({ digits, isFinal: Boolean(result?.isFinal) });
       }
 
-      finalDigits = recognizedChunks
-        .filter((chunk) => chunk.isFinal)
-        .map((chunk) => chunk.digits)
-        .join("");
-      interimDigits = recognizedChunks
-        .filter((chunk) => !chunk.isFinal)
-        .map((chunk) => chunk.digits)
-        .join("");
+      const assembled = assembleAccessKeySpeechChunks(recognizedChunks);
+      finalDigits = assembled.finalDigits;
+      interimDigits = assembled.interimDigits;
 
       const remaining = Math.max(
         0,
