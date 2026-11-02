@@ -70,6 +70,75 @@ describe("NFC-e speech result snapshot assembly", () => {
   });
 });
 
+describe("Android/Chrome cumulative final-result slots (real trace)", () => {
+  const androidTrace = [
+    "", "7", "", "70", "", "", "7 0",
+    "7 0 0", "7 0 0", "7 0 0 0", "7 0 0 0",
+    "7 0 0 0 9", "7 0 0 0 9", "7 0 0 0 9 6",
+    "7 0 0 0 9 6", "7 0 0 0 9 6 2", "7 0 0 0 9 6 2",
+  ];
+
+  it("reconstructs the captured final hypothesis instead of concatenating prefixes", () => {
+    const chunks = androidTrace.map((text) => slot(text));
+    expect(assemble(chunks)).toEqual({
+      finalDigits: "7000962",
+      interimDigits: "",
+    });
+  });
+
+  it("never reaches a fake 44 digits as the real trace grows", () => {
+    for (let index = 0; index < androidTrace.length; index += 1) {
+      const result = assemble(androidTrace.slice(0, index + 1).map((text) => slot(text)));
+      expect(result.finalDigits.length).toBeLessThan(44);
+    }
+  });
+
+  it("preserves four actual zeros if Android emits them cumulatively", () => {
+    const chunks = ["7", "7 0", "7 0 0", "7 0 0 0", "7 0 0 0 0",
+      "7 0 0 0 0 9", "7 0 0 0 0 9 6", "7 0 0 0 0 9 6 2"].map((text) => slot(text));
+    expect(assemble(chunks).finalDigits).toBe("70000962");
+  });
+
+  it("preserves spoken consecutive zeros in cumulative prefix chains", () => {
+    expect(assemble(["0", "00", "000", "0000"].map((text) => slot(text))).finalDigits)
+      .toBe("0000");
+    expect(assemble(["0", "0", "0", "0"].map((text) => slot(text))).finalDigits)
+      .toBe("0000");
+  });
+
+  it("preserves ordinary unrelated consecutive and identical segments", () => {
+    expect(assemble(["12", "12", "13"].map((text) => slot(text))).finalDigits)
+      .toBe("121213");
+    expect(assemble(["7", "70", "71"].map((text) => slot(text))).finalDigits)
+      .toBe("77071");
+  });
+
+  it("handles multiple cumulative prefix runs when the hypothesis resets", () => {
+    expect(assemble(["7", "70", "700", "9", "96", "962"].map((text) => slot(text))).finalDigits)
+      .toBe("700962");
+  });
+
+  it("does not duplicate an already long full-key hypothesis", () => {
+    expect(assemble([slot(originalKey.slice(0, 43)), slot(originalKey)]).finalDigits)
+      .toBe(originalKey);
+    expect(validateAccessKey(assemble([slot(originalKey.slice(0, 43)), slot(originalKey)]).finalDigits).valid)
+      .toBe(true);
+  });
+
+  it("keeps the most recent growing interim hypothesis", () => {
+    expect(assemble([slot("7"), slot("70"), slot("700", false)])).toEqual({
+      finalDigits: "",
+      interimDigits: "700",
+    });
+  });
+
+  it("does not invent the fourth zero absent from the Android native transcript", () => {
+    const captured = assemble(androidTrace.map((text) => slot(text))).finalDigits;
+    expect(captured).toBe("7000962");
+    expect(captured).not.toBe("70000962");
+  });
+});
+
 describe("NFC-e spoken-number parsing", () => {
   it("keeps consecutive zeros in the same transcript", () => {
     expect(accessKeyDigitsFromTranscript("zero zero zero zero")).toBe("0000");

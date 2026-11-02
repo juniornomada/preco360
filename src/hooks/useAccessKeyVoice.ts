@@ -228,10 +228,10 @@ export function useAccessKeyVoice() {
       // interim hypothesis if Android/Chrome closes the native session.
       const recognizedChunks: AccessKeySpeechResultChunk[] = [];
 
-      // Each slot in event.results represents a distinct recognized segment.
-      // Rebuild the current snapshot on every event rather than appending
-      // snapshots or removing adjacent equal strings: "zero zero" may be two
-      // legitimate slots with identical content.
+      // Android/Chrome may use separate isFinal slots for evolving *cumulative*
+      // transcriptions of the same utterance. Rebuild the current snapshot
+      // and let the assembler detect evidenced prefix growth. Do not simply
+      // concatenate all slots or drop identical short slots ("zero zero").
       for (let index = 0; index < event.results.length; index += 1) {
         const result = event.results[index];
         const digits = digitsForResult(result);
