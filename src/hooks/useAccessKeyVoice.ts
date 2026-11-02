@@ -206,36 +206,37 @@ export function useAccessKeyVoice() {
       // Rebuild the complete current recognition session every time.
       // This avoids duplicating final hypotheses and preserves the latest
       // interim hypothesis if Android/Chrome closes the native session.
-      let previousChunk = "";
+      const recognizedChunks: Array<{ digits: string; isFinal: boolean }> = [];
       for (let index = 0; index < event.results.length; index += 1) {
         const result = event.results[index];
         const digits = digitsForResult(result);
         if (!digits) continue;
 
+        const previous = recognizedChunks[recognizedChunks.length - 1];
         // Some Android/Chrome speech engines expose the same recognized
-        // number group in adjacent result slots (or expose a cumulative
-        // hypothesis after the shorter one). Do not append that repeated
-        // hypothesis twice. Only collapse exact/cumulative adjacent chunks;
-        // distinct groups and legitimate repeated digits remain untouched.
-        if (digits === previousChunk) continue;
-        if (digits.startsWith(previousChunk) && previousChunk.length >= 2) {
-          if (result?.isFinal) {
-            finalDigits = finalDigits.slice(0, -previousChunk.length) + digits;
-          } else {
-            interimDigits = interimDigits.slice(0, -previousChunk.length) + digits;
-          }
-          previousChunk = digits;
+        // number group in adjacent result slots (or a cumulative hypothesis
+        // after the shorter one). Collapse only exact/cumulative chunks.
+        if (previous && digits === previous.digits) continue;
+        if (previous && digits.startsWith(previous.digits) && previous.digits.length >= 2) {
+          recognizedChunks[recognizedChunks.length - 1] = {
+            digits,
+            isFinal: Boolean(result?.isFinal),
+          };
           continue;
         }
-        if (previousChunk.startsWith(digits) && digits.length >= 2) continue;
+        if (previous && previous.digits.startsWith(digits) && digits.length >= 2) continue;
 
-        if (result?.isFinal) {
-          finalDigits += digits;
-        } else {
-          interimDigits += digits;
-        }
-        previousChunk = digits;
+        recognizedChunks.push({ digits, isFinal: Boolean(result?.isFinal) });
       }
+
+      finalDigits = recognizedChunks
+        .filter((chunk) => chunk.isFinal)
+        .map((chunk) => chunk.digits)
+        .join("");
+      interimDigits = recognizedChunks
+        .filter((chunk) => !chunk.isFinal)
+        .map((chunk) => chunk.digits)
+        .join("");
 
       const remaining = Math.max(
         0,
