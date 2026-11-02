@@ -206,16 +206,35 @@ export function useAccessKeyVoice() {
       // Rebuild the complete current recognition session every time.
       // This avoids duplicating final hypotheses and preserves the latest
       // interim hypothesis if Android/Chrome closes the native session.
+      let previousChunk = "";
       for (let index = 0; index < event.results.length; index += 1) {
         const result = event.results[index];
         const digits = digitsForResult(result);
         if (!digits) continue;
+
+        // Some Android/Chrome speech engines expose the same recognized
+        // number group in adjacent result slots (or expose a cumulative
+        // hypothesis after the shorter one). Do not append that repeated
+        // hypothesis twice. Only collapse exact/cumulative adjacent chunks;
+        // distinct groups and legitimate repeated digits remain untouched.
+        if (digits === previousChunk) continue;
+        if (digits.startsWith(previousChunk) && previousChunk.length >= 2) {
+          if (result?.isFinal) {
+            finalDigits = finalDigits.slice(0, -previousChunk.length) + digits;
+          } else {
+            interimDigits = interimDigits.slice(0, -previousChunk.length) + digits;
+          }
+          previousChunk = digits;
+          continue;
+        }
+        if (previousChunk.startsWith(digits) && digits.length >= 2) continue;
 
         if (result?.isFinal) {
           finalDigits += digits;
         } else {
           interimDigits += digits;
         }
+        previousChunk = digits;
       }
 
       const remaining = Math.max(
