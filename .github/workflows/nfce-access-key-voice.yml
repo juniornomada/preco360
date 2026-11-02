@@ -1,0 +1,30 @@
+name: NFC-e Access Key Voice Regression
+
+on:
+  pull_request:
+    paths:
+      - "src/hooks/useAccessKeyVoice.ts"
+      - "src/lib/accessKeyVoice.ts"
+      - "src/lib/accessKeySpeechResults.ts"
+      - "src/lib/accessKeySpeechResults.test.ts"
+      - ".github/workflows/nfce-access-key-voice.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-voice-key:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run access-key voice regression tests
+        run: npx vitest run src/lib/accessKeySpeechResults.test.ts
+      - name: Build frontend
+        run: npm run build
