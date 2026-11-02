@@ -23,6 +23,7 @@ type SpeechResultList = {
 
 type SpeechRecognitionEventLike = Event & {
   results: SpeechResultList;
+  resultIndex?: number;
 };
 
 type SpeechRecognitionErrorEventLike = Event & {
@@ -108,6 +109,7 @@ export function useAccessKeyVoice() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const restartTimerRef = useRef<number | null>(null);
   const committedDigitsRef = useRef("");
+  const speechSessionRef = useRef(0);
   const listeningRequestedRef = useRef(false);
   const onDigitsRef = useRef<
     ((digits: string, complete: boolean) => void) | null
@@ -115,6 +117,16 @@ export function useAccessKeyVoice() {
 
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Debugging is opt-in, local to this tab and never uploaded.
+  const speechTraceEnabled =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("voiceDebug") === "1";
+  const [speechTrace, setSpeechTrace] = useState<string[]>([]);
+  const appendSpeechTrace = useCallback((entry: Record<string, unknown>) => {
+    if (!speechTraceEnabled) return;
+    setSpeechTrace((current) => [...current.slice(-79), JSON.stringify(entry)]);
+  }, [speechTraceEnabled]);
+  const clearSpeechTrace = useCallback(() => setSpeechTrace([]), []);
   const isSupported = getRecognitionConstructor() !== null;
 
   const clearRestartTimer = useCallback(() => {
@@ -125,12 +137,13 @@ export function useAccessKeyVoice() {
   }, []);
 
   const stopListening = useCallback(() => {
+    appendSpeechTrace({ event: "manual-stop", session: speechSessionRef.current });
     listeningRequestedRef.current = false;
     clearRestartTimer();
     recognitionRef.current?.stop();
     recognitionRef.current = null;
     setIsListening(false);
-  }, [clearRestartTimer]);
+  }, [appendSpeechTrace, clearRestartTimer]);
 
   const startRecognition = useCallback(() => {
     const Recognition = getRecognitionConstructor();
@@ -146,7 +159,9 @@ export function useAccessKeyVoice() {
     clearRestartTimer();
 
     const sessionBaseDigits = committedDigitsRef.current;
+    const session = ++speechSessionRef.current;
     let lastSessionDigits = "";
+    appendSpeechTrace({ event: "session-created", session, baseLength: sessionBaseDigits.length });
 
     const recognition = new Recognition();
     recognition.lang = "pt-BR";
@@ -198,6 +213,7 @@ export function useAccessKeyVoice() {
     };
 
     recognition.onstart = () => {
+      appendSpeechTrace({ event: "onstart", session });
       recognitionRef.current = recognition;
       setError(null);
       setIsListening(true);
@@ -226,6 +242,29 @@ export function useAccessKeyVoice() {
       const assembled = assembleAccessKeySpeechChunks(recognizedChunks);
       finalDigits = assembled.finalDigits;
       interimDigits = assembled.interimDigits;
+      if (speechTraceEnabled) {
+        const slots = Array.from({ length: event.results.length }, (_, index) => {
+          const result = event.results[index];
+          return {
+            index,
+            isFinal: Boolean(result?.isFinal),
+            alternatives: Array.from(
+              { length: Math.min(3, result?.length ?? 0) },
+              (_, alternative) => result[alternative]?.transcript ?? "",
+            ),
+          };
+        });
+        appendSpeechTrace({
+          event: "onresult",
+          session,
+          resultIndex: event.resultIndex ?? null,
+          slots,
+          parsed: recognizedChunks,
+          finalDigits,
+          interimDigits,
+          output: sanitizeAccessKeyDigits(sessionBaseDigits + finalDigits + interimDigits),
+        });
+      }
 
       const remaining = Math.max(
         0,
@@ -248,6 +287,7 @@ export function useAccessKeyVoice() {
     };
 
     recognition.onerror = (event) => {
+      appendSpeechTrace({ event: "onerror", session, error: event.error ?? null });
       if (event.error === "aborted") return;
 
       if (isFatalRecognitionError(event.error)) {
@@ -265,6 +305,12 @@ export function useAccessKeyVoice() {
     };
 
     recognition.onend = () => {
+      appendSpeechTrace({
+        event: "onend",
+        session,
+        lastSessionDigits,
+        restartRequested: listeningRequestedRef.current,
+      });
       if (recognitionRef.current === recognition) {
         recognitionRef.current = null;
       }
@@ -318,7 +364,7 @@ export function useAccessKeyVoice() {
       setIsListening(false);
       return false;
     }
-  }, [clearRestartTimer]);
+  }, [appendSpeechTrace, clearRestartTimer, speechTraceEnabled]);
 
   const startListening = useCallback(
     (
@@ -330,6 +376,7 @@ export function useAccessKeyVoice() {
         return false;
       }
 
+      if (speechTraceEnabled) clearSpeechTrace();
       clearRestartTimer();
       recognitionRef.current?.abort();
       recognitionRef.current = null;
@@ -352,7 +399,7 @@ export function useAccessKeyVoice() {
 
       return startRecognition();
     },
-    [clearRestartTimer, isSupported, startRecognition],
+    [clearRestartTimer, clearSpeechTrace, isSupported, speechTraceEnabled, startRecognition],
   );
 
   useEffect(() => {
@@ -373,5 +420,8 @@ export function useAccessKeyVoice() {
     clearError,
     startListening,
     stopListening,
+    speechTraceEnabled,
+    speechTrace,
+    clearSpeechTrace,
   };
 }
