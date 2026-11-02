@@ -438,6 +438,9 @@ export default function ReceiptImportPage() {
     clearError: clearKeyVoiceError,
     startListening: startKeyVoiceListening,
     stopListening: stopKeyVoiceListening,
+    speechTraceEnabled,
+    speechTrace,
+    clearSpeechTrace,
   } = useAccessKeyVoice();
   const [tab, setTab] = useState<ImportSource>("qr");
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -1377,6 +1380,48 @@ export default function ReceiptImportPage() {
                 </div>
                 {keyVoiceError && (
                   <p className="text-xs text-destructive">{keyVoiceError}</p>
+                )}
+                {speechTraceEnabled && (
+                  <div className="space-y-2 rounded-lg border border-amber-500/40 p-2 text-xs">
+                    <p className="font-semibold">Diagnóstico de voz (ativado apenas nesta aba)</p>
+                    <p className="text-muted-foreground">
+                      Registra localmente as palavras que o navegador reconheceu, os
+                      blocos e os reinícios. Nada é enviado automaticamente.
+                      Use somente uma sequência de teste e não compartilhe
+                      chaves fiscais reais no diagnóstico.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={speechTrace.length === 0}
+                        onClick={() => {
+                          void navigator.clipboard.writeText(speechTrace.join("\n"))
+                            .then(() => toast({
+                              title: "Diagnóstico copiado",
+                              description: "Cole o texto na conversa para análise.",
+                            }))
+                            .catch(() => toast({
+                              title: "Não foi possível copiar",
+                              description: "Abra a lista abaixo e selecione o texto.",
+                              variant: "destructive",
+                            }));
+                        }}
+                      >
+                        Copiar diagnóstico ({speechTrace.length})
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost" onClick={clearSpeechTrace}>
+                        Limpar diagnóstico
+                      </Button>
+                    </div>
+                    <details>
+                      <summary className="cursor-pointer">Ver eventos brutos do Chrome</summary>
+                      <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 text-[10px]">
+                        {speechTrace.join("\n")}
+                      </pre>
+                    </details>
+                  </div>
                 )}
               </div>
               {accessKey && !keyCheck.valid && <p className="flex gap-2 text-sm text-destructive"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{keyCheck.error}</p>}
