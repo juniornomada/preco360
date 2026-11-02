@@ -139,6 +139,64 @@ describe("Android/Chrome cumulative final-result slots (real trace)", () => {
   });
 });
 
+describe("Android/Chrome revised cumulative hypotheses (second real trace)", () => {
+  const revisedTrace = [
+    "", "70", "", "70.000", "", "70009", "", "", "7000962",
+  ];
+
+  it("replays the exact second diagnostic without concatenating revised final slots", () => {
+    expect(assemble(revisedTrace.map((text) => slot(text)))).toEqual({
+      finalDigits: "7000962",
+      interimDigits: "",
+    });
+  });
+
+  it("keeps the latest hypothesis through the two observed corrections", () => {
+    expect(assemble(["70", "70.000"].map((text) => slot(text))).finalDigits)
+      .toBe("70000");
+    expect(assemble(["70", "70.000", "70009"].map((text) => slot(text))).finalDigits)
+      .toBe("70009");
+    expect(assemble(["70", "70.000", "70009", "7000962"].map((text) => slot(text))).finalDigits)
+      .toBe("7000962");
+  });
+
+  it("does not introduce duplicate digits at any stage of the second real trace", () => {
+    const snapshots = [
+      "", "70", "70", "70000", "70000", "70009", "70009", "70009", "7000962",
+    ];
+    for (let i = 0; i < revisedTrace.length; i += 1) {
+      const current = assemble(revisedTrace.slice(0, i + 1).map((text) => slot(text)));
+      expect(current.finalDigits).toBe(snapshots[i]);
+    }
+  });
+
+  it("preserves four zeros when the browser actually delivers them with revisions", () => {
+    const chunks = ["70", "70.000", "70000", "700009", "7000096", "70000962"];
+    expect(assemble(chunks.map((text) => slot(text))).finalDigits).toBe("70000962");
+  });
+
+  it("preserves independent repeated zeros without evidence of cumulative output", () => {
+    const chunks = ["0", "0", "0", "0", "9"];
+    expect(assemble(chunks.map((text) => slot(text))).finalDigits).toBe("00009");
+  });
+
+  it("preserves unrelated same-length groups and single revisions without growth", () => {
+    expect(assemble(["1234", "1235"].map((text) => slot(text))).finalDigits)
+      .toBe("12341235");
+    expect(assemble(["35", "356"].map((text) => slot(text))).finalDigits)
+      .toBe("35356");
+  });
+
+  it("never invents the absent fourth zero in the Chrome transcript", () => {
+    expect(assemble(revisedTrace.map((text) => slot(text))).finalDigits).toBe("7000962");
+  });
+
+  it("does not collapse a genuinely distinct unrelated segment after a revised run", () => {
+    const chunks = ["70", "70000", "70009", "7000962", "45"];
+    expect(assemble(chunks.map((text) => slot(text))).finalDigits).toBe("700096245");
+  });
+});
+
 describe("NFC-e spoken-number parsing", () => {
   it("keeps consecutive zeros in the same transcript", () => {
     expect(accessKeyDigitsFromTranscript("zero zero zero zero")).toBe("0000");
