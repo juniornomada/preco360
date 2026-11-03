@@ -17,6 +17,7 @@ import {
 } from "@/lib/printedReceiptDiscounts";
 import { appendAccessKeyZeroRun, sanitizeAccessKeyDigits } from "@/lib/accessKeyVoice";
 import { isReceiptServerTransportFailure, offersReceiptFileRecovery, receiptImportErrorDescription } from "@/lib/receiptImportNetworkRecovery";
+import { retryQrTransportFailure } from "@/lib/receiptQrNetworkRetry";
 import { useAccessKeyVoice } from "@/hooks/useAccessKeyVoice";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -447,6 +448,7 @@ export default function ReceiptImportPage() {
   } = useAccessKeyVoice();
   const [tab, setTab] = useState<ImportSource>("qr");
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [qrRetryStatus, setQrRetryStatus] = useState<string | null>(null);
   const [accessKey, setAccessKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -799,6 +801,7 @@ export default function ReceiptImportPage() {
 
   const importUrl = async (url: string, importSource: ImportSource) => {
     setLoading(true);
+    setQrRetryStatus(null);
     clearResult();
     setSource(importSource);
     setLastUrl(url);
@@ -811,14 +814,26 @@ export default function ReceiptImportPage() {
     }
 
     try {
-      const { data, error } = await supabase.functions.invoke("fetch-receipt-url", { body: { url } });
+      const invoke = () => supabase.functions.invoke("fetch-receipt-url", { body: { url } });
+      const { data, error } = importSource === "qr"
+        ? await retryQrTransportFailure(invoke, {
+            onRetry: (retryNumber, totalRetries) => {
+              setQrRetryStatus(
+                `Conexão instável. Reconsultando automaticamente (${retryNumber}/${totalRetries}), sem reler o QR Code…`,
+              );
+            },
+          })
+        : await invoke();
+
       if (error) throw error;
-      // Structured errors already contain code/trace ID and belong in the
-      // inline recovery panel. Throw only transport errors from the invocation.
+      // Only the last result is applied: an earlier network failure cannot
+      // mask a successful second invocation or cause duplicate price records.
+      // Refusals, CAPTCHA and invalid documents are never retried.
       applyResult(data, importSource, extractAccessKey(url) ?? undefined);
     } catch (error: any) {
       toast({ title: "Erro ao consultar cupom", description: error?.message ?? "Falha na consulta.", variant: "destructive" });
     } finally {
+      setQrRetryStatus(null);
       setLoading(false);
     }
   };
@@ -1314,6 +1329,12 @@ export default function ReceiptImportPage() {
             </CardContent>
           </Card>
           {scannerOpen && <QrScanner onResult={(value) => void handleQrResult(value)} onClose={() => setScannerOpen(false)} />}
+          {loading && qrRetryStatus && (
+            <div role="status" aria-live="polite" className="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-foreground">
+              <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+              <span>{qrRetryStatus}</span>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="key" className="mt-4 space-y-3">

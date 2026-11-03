@@ -17,6 +17,7 @@ type Item = {
   barcode?: string;
 };
 type Diagnostics = {
+  upstreamAttempts?: number;
   htmlLength?: number;
   lineCount?: number;
   renderedItems?: number;
