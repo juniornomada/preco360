@@ -23,3 +23,26 @@ export function isOfficialSpNfceQrUrl(value: string): boolean {
     return false;
   }
 }
+
+/**
+ * Client helper: only ask our same-origin Vercel route for a validated SP
+ * NFC-e QR URL. This does not access browser cookies or evade SEFAZ controls.
+ */
+export async function fetchSpNfceHtmlViaVercel(url: string): Promise<string | null> {
+  if (!isOfficialSpNfceQrUrl(url)) return null;
+  try {
+    const response = await fetch("/api/fetch-nfce-sp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url }),
+      signal: AbortSignal.timeout(17000),
+    });
+    if (!response.ok) return null;
+    const data = await response.json() as { html?: unknown };
+    if (typeof data?.html !== "string" || data.html.length < 50 ||
+        data.html.length > 1_500_000) return null;
+    return data.html;
+  } catch {
+    return null;
+  }
+}
