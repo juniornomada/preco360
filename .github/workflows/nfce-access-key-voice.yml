@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "src/hooks/useAccessKeyVoice.ts"
+      - "src/hooks/useAccessKeyVoice.test.tsx"
       - "src/lib/accessKeyVoice.ts"
       - "src/lib/accessKeySpeechResults.ts"
       - "src/lib/accessKeySpeechResults.test.ts"
@@ -25,6 +26,6 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Run access-key voice regression tests
-        run: npx vitest run src/lib/accessKeySpeechResults.test.ts
+        run: npx vitest run src/lib/accessKeySpeechResults.test.ts src/hooks/useAccessKeyVoice.test.tsx
       - name: Build frontend
         run: npm run build
