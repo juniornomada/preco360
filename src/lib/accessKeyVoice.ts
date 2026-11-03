@@ -39,6 +39,25 @@ const SMALL_NUMBERS: Record<string, number> = {
   noventa: 90,
 };
 
+// Explicit counted zeros prevent the browser from silently dropping
+// repeated identical words. "Quatro zero" without a plural still means 40.
+const ZERO_COUNT_WORDS: Record<string, number> = {
+  um: 1, uma: 1,
+  dois: 2, duas: 2,
+  tres: 3,
+  quatro: 4,
+  cinco: 5,
+  seis: 6, meia: 6,
+  sete: 7,
+  oito: 8,
+  nove: 9,
+};
+
+function zeroCountForToken(token: string): number | null {
+  if (/^[1-9]$/.test(token)) return Number(token);
+  return ZERO_COUNT_WORDS[token] ?? null;
+}
+
 function normalizeToken(value: string) {
   return value
     .normalize("NFD")
@@ -71,6 +90,32 @@ export function accessKeyDigitsFromTranscript(value: string) {
 
   for (let index = 0; index < rawTokens.length; index += 1) {
     const token = rawTokens[index];
+
+    // Explicit count + plural is distinct from ordinary digit dictation.
+    // Also accept "quatro vezes zero" and "zero quatro vezes".
+    const count = zeroCountForToken(token);
+    if (count !== null && rawTokens[index + 1] === "zeros") {
+      out += "0".repeat(count);
+      index += 1;
+      continue;
+    }
+    if (
+      count !== null &&
+      rawTokens[index + 1] === "vezes" &&
+      rawTokens[index + 2] === "zero"
+    ) {
+      out += "0".repeat(count);
+      index += 2;
+      continue;
+    }
+    if (token === "zero" && rawTokens[index + 2] === "vezes") {
+      const followingCount = zeroCountForToken(rawTokens[index + 1] ?? "");
+      if (followingCount !== null) {
+        out += "0".repeat(followingCount);
+        index += 2;
+        continue;
+      }
+    }
 
     if (/^\d+$/.test(token)) {
       out += token;
