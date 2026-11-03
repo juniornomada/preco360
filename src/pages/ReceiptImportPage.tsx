@@ -18,6 +18,7 @@ import {
 import { appendAccessKeyZeroRun, sanitizeAccessKeyDigits } from "@/lib/accessKeyVoice";
 import { isReceiptServerTransportFailure, offersReceiptFileRecovery, receiptImportErrorDescription } from "@/lib/receiptImportNetworkRecovery";
 import { useAccessKeyVoice } from "@/hooks/useAccessKeyVoice";
+import { fetchOfficialNfceOnAndroid } from "@/lib/androidNfceTransport";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -811,6 +812,35 @@ export default function ReceiptImportPage() {
     }
 
     try {
+      if (importSource === "qr") {
+        // Android pilot: use the handset's own HTTPS connection, the same
+        // network on which the browser opens the official receipt. This is
+        // unavailable to an ordinary Chrome/PWA tab by design.
+        const nativeHtml = await fetchOfficialNfceOnAndroid(url);
+        if (nativeHtml) {
+          const nativeParse = await supabase.functions.invoke(
+            "fetch-receipt-url",
+            { body: { pageText: nativeHtml } },
+          );
+          if (
+            !nativeParse.error &&
+            Array.isArray(nativeParse.data?.items) &&
+            nativeParse.data.items.length > 0
+          ) {
+            applyResult(
+              nativeParse.data,
+              importSource,
+              extractAccessKey(url) ?? undefined,
+            );
+            toast({
+              title: "Consulta realizada pelo celular",
+              description: "Os itens vieram da página oficial e serão revisados antes de salvar.",
+            });
+            return;
+          }
+        }
+      }
+
       const { data, error } = await supabase.functions.invoke("fetch-receipt-url", { body: { url } });
       if (error) throw error;
       // Structured errors already contain code/trace ID and belong in the
