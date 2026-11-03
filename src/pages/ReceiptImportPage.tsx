@@ -18,7 +18,7 @@ import {
 import { appendAccessKeyZeroRun, sanitizeAccessKeyDigits } from "@/lib/accessKeyVoice";
 import { isReceiptServerTransportFailure, offersReceiptFileRecovery, receiptImportErrorDescription } from "@/lib/receiptImportNetworkRecovery";
 import { useAccessKeyVoice } from "@/hooks/useAccessKeyVoice";
-import { fetchOfficialNfceOnAndroid } from "@/lib/androidNfceTransport";
+import { fetchOfficialNfceOnAndroid, hasAndroidNativeReceiptTransport } from "@/lib/androidNfceTransport";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -448,6 +448,7 @@ export default function ReceiptImportPage() {
   } = useAccessKeyVoice();
   const [tab, setTab] = useState<ImportSource>("qr");
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [nativeQrDiagnostic, setNativeQrDiagnostic] = useState<string | null>(null);
   const [accessKey, setAccessKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -801,6 +802,7 @@ export default function ReceiptImportPage() {
   const importUrl = async (url: string, importSource: ImportSource) => {
     setLoading(true);
     clearResult();
+    setNativeQrDiagnostic(null);
     setSource(importSource);
     setLastUrl(url);
 
@@ -816,7 +818,17 @@ export default function ReceiptImportPage() {
         // Android pilot: use the handset's own HTTPS connection, the same
         // network on which the browser opens the official receipt. This is
         // unavailable to an ordinary Chrome/PWA tab by design.
+        if (hasAndroidNativeReceiptTransport()) {
+          setNativeQrDiagnostic("Android: consultando a SEFAZ pela conexão deste aparelho...");
+        }
         const nativeHtml = await fetchOfficialNfceOnAndroid(url);
+        if (hasAndroidNativeReceiptTransport()) {
+          setNativeQrDiagnostic(
+            nativeHtml
+              ? "Android: HTML recebido da SEFAZ; interpretando os produtos..."
+              : "Android: conexão nativa não retornou HTML; tentando o servidor do Preço 360.",
+          );
+        }
         if (nativeHtml) {
           const nativeParse = await supabase.functions.invoke(
             "fetch-receipt-url",
@@ -832,12 +844,14 @@ export default function ReceiptImportPage() {
               importSource,
               extractAccessKey(url) ?? undefined,
             );
+            setNativeQrDiagnostic("Android: produtos recuperados pelo aparelho e prontos para revisão.");
             toast({
               title: "Consulta realizada pelo celular",
               description: "Os itens vieram da página oficial e serão revisados antes de salvar.",
             });
             return;
           }
+          setNativeQrDiagnostic("Android: HTML recebido, mas o interpretador não encontrou produtos; tentando o servidor.");
         }
       }
 
@@ -1344,6 +1358,12 @@ export default function ReceiptImportPage() {
             </CardContent>
           </Card>
           {scannerOpen && <QrScanner onResult={(value) => void handleQrResult(value)} onClose={() => setScannerOpen(false)} />}
+          {hasAndroidNativeReceiptTransport() && (
+            <div role="status" className="rounded-lg border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
+              <p className="font-semibold text-foreground">Teste Android — consulta NFC-e pelo aparelho</p>
+              <p className="mt-1">{nativeQrDiagnostic ?? "Leia um QR Code para testar a conexão nativa."}</p>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="key" className="mt-4 space-y-3">
