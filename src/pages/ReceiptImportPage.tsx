@@ -1369,9 +1369,9 @@ export default function ReceiptImportPage() {
                 <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
                   <span>
                     {isKeyVoiceListening
-                      ? "Ouvindo… fale um número por vez."
+                      ? "Ouvindo… diga os números; para zeros seguidos, fale: quatro zeros."
                       : isKeyVoiceSupported
-                        ? "Você também pode ditar a chave, um número por vez."
+                        ? "Dite os números. Para quatro zeros seguidos, diga: quatro zeros."
                         : "Ditado por voz indisponível neste navegador."}
                   </span>
                   <span className="shrink-0 font-mono font-semibold">
