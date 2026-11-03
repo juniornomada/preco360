@@ -70,47 +70,6 @@ async function limitedHtml(response: Response): Promise<string> {
  */
 export default {
   async fetch(request: Request): Promise<Response> {
-    // Temporary preview-only connectivity test. To be deleted before merge.
-    if (request.method === "GET" &&
-        process.env.VERCEL_ENV === "preview" &&
-        new URL(request.url).searchParams.get("probe") === "1") {
-      const probeParams = new URL(request.url).searchParams;
-      const target = probeParams.get("url") ?? "";
-      if (!isOfficialSpNfceQrUrl(target)) return reply({error: "INVALID_NFCE_SP_URL"}, 400);
-      const variant = probeParams.get("variant") || "canonical";
-      if (!["canonical", "short", "bare", "bare-short"].includes(variant)) {
-        return reply({ error: "INVALID_VARIANT" }, 400);
-      }
-      const probeUrl = new URL(target);
-      if (variant.includes("bare")) probeUrl.hostname = "nfce.fazenda.sp.gov.br";
-      if (variant.includes("short")) probeUrl.pathname = "/qrcode";
-      try {
-        const response = await fetch(probeUrl, {
-          redirect: "manual",
-          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-          headers: {accept: "text/html,application/xhtml+xml"},
-        });
-        const html = response.ok ? await limitedHtml(response) : "";
-        return reply({
-          probe: "preview-only",
-          reached: true,
-          httpStatus: response.status,
-          bytes: html.length,
-          portalRejected: /Request Rejected|Access Denied/i.test(html),
-          receiptOrValidationPage: /NFC-e|QR.Code|QRCode|documento|Nota Fiscal/i.test(html),
-        });
-      } catch (error) {
-        const cause = error instanceof Error ? (error as Error & {
-          cause?: { code?: unknown, name?: unknown },
-        }).cause : undefined;
-        return reply({
-          probe: "preview-only", reached: false, variant,
-          errorType: error instanceof Error ? error.name : "unknown",
-          causeCode: typeof cause?.code === "string" ? cause.code.slice(0, 48) : "none",
-          causeName: typeof cause?.name === "string" ? cause.name.slice(0, 48) : "none",
-        }, 502);
-      }
-    }
     if (request.method !== "POST") return reply({ error: "METHOD_NOT_ALLOWED" }, 405);
 
     const type = request.headers.get("content-type") || "";
