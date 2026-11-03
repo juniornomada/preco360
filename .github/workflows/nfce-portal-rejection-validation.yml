@@ -10,6 +10,7 @@ on:
       - 'src/pages/ReceiptImportPage.tsx'
       - 'src/lib/nfceSpVercelTransport.ts'
       - 'src/lib/nfceSpVercelTransport.test.ts'
+      - 'src/test/setup.ts'
       - 'api/fetch-nfce-sp.ts'
       - 'src/lib/receiptImportNetworkRecovery.ts'
       - 'src/lib/receiptImportNetworkRecovery.test.ts'
