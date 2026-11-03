@@ -8,6 +8,9 @@ on:
     paths:
       - 'supabase/functions/fetch-receipt-url/**'
       - 'src/pages/ReceiptImportPage.tsx'
+      - 'src/lib/nfceSpVercelTransport.ts'
+      - 'src/lib/nfceSpVercelTransport.test.ts'
+      - 'api/fetch-nfce-sp.ts'
       - 'src/lib/receiptImportNetworkRecovery.ts'
       - 'src/lib/receiptImportNetworkRecovery.test.ts'
       - 'src/test/portalResponse.test.ts'
@@ -28,6 +31,6 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Verify fiscal WAF response classification and receipt import safety
-        run: npx vitest run src/lib/receiptImportNetworkRecovery.test.ts src/test/portalResponse.test.ts src/test/receiptRepeatGuard.test.ts src/test/printedReceiptDiscounts.test.ts
+        run: npx vitest run src/lib/nfceSpVercelTransport.test.ts src/lib/receiptImportNetworkRecovery.test.ts src/test/portalResponse.test.ts src/test/receiptRepeatGuard.test.ts src/test/printedReceiptDiscounts.test.ts
       - name: Build current frontend
         run: npm run build
