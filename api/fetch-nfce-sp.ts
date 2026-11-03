@@ -13,7 +13,7 @@ function isOfficialSpNfceQrUrl(value: string): boolean {
     const params = [...url.searchParams.keys()];
     if (params.length !== 1 || params[0].toLowerCase() !== "p") return false;
     const p = url.searchParams.get(params[0]) ?? "";
-    return /^\\d{44}\\|[A-Za-z0-9|.\\-]{5,300}$/.test(p);
+    return /^\d{44}\|[A-Za-z0-9|.\-]{5,300}$/.test(p);
   } catch {
     return false;
   }
