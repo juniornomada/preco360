@@ -26,16 +26,21 @@ async function limitedHtml(response: Response): Promise<string> {
   let total = 0;
   const decoder = new TextDecoder();
   let content = "";
-  for await (const chunk of response.body) {
-    total += chunk.byteLength;
-    if (total > MAX_PAGE_BYTES) {
-      await response.body.cancel().catch(() => {});
-      throw new Error("HTML_TOO_LARGE");
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_PAGE_BYTES) throw new Error("HTML_TOO_LARGE");
+      content += decoder.decode(value, { stream: true });
     }
-    content += decoder.decode(chunk, { stream: true });
+    content += decoder.decode();
+    return content;
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
-  content += decoder.decode();
-  return content;
 }
 
 /**
