@@ -17,6 +17,7 @@ import {
 } from "@/lib/printedReceiptDiscounts";
 import { appendAccessKeyZeroRun, sanitizeAccessKeyDigits } from "@/lib/accessKeyVoice";
 import { isReceiptServerTransportFailure, offersReceiptFileRecovery, receiptImportErrorDescription } from "@/lib/receiptImportNetworkRecovery";
+import { fetchSpNfceHtmlViaVercel, isOfficialSpNfceQrUrl } from "@/lib/nfceSpVercelTransport";
 import { useAccessKeyVoice } from "@/hooks/useAccessKeyVoice";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -813,6 +814,29 @@ export default function ReceiptImportPage() {
     try {
       const { data, error } = await supabase.functions.invoke("fetch-receipt-url", { body: { url } });
       if (error) throw error;
+
+      // The Android browser can access the public NFC-e but Supabase's
+      // outgoing connection to SEFAZ-SP may be reset (UPSTREAM_NETWORK).
+      // Try a separate, narrowly restricted Vercel network path while keeping
+      // the existing Supabase fiscal parser, validations and review flow.
+      if (
+        importSource === "qr" &&
+        data?.code === "UPSTREAM_NETWORK" &&
+        isOfficialSpNfceQrUrl(url)
+      ) {
+        const officialHtml = await fetchSpNfceHtmlViaVercel(url);
+        if (officialHtml) {
+          const alternate = await supabase.functions.invoke(
+            "fetch-receipt-url",
+            { body: { pageText: officialHtml } },
+          );
+          if (!alternate.error && alternate.data) {
+            applyResult(alternate.data, importSource, extractAccessKey(url) ?? undefined);
+            return;
+          }
+        }
+      }
+
       // Structured errors already contain code/trace ID and belong in the
       // inline recovery panel. Throw only transport errors from the invocation.
       applyResult(data, importSource, extractAccessKey(url) ?? undefined);
