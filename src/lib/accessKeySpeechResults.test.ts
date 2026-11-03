@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accessKeyDigitsFromTranscript, sanitizeAccessKeyDigits } from "./accessKeyVoice";
+import { accessKeyDigitsFromTranscript, appendAccessKeyZeroRun, sanitizeAccessKeyDigits } from "./accessKeyVoice";
 import { assembleAccessKeySpeechChunks as assemble } from "./accessKeySpeechResults";
 import { validateAccessKey } from "./nfceKey";
 
@@ -259,5 +259,35 @@ describe("NFC-e spoken-number parsing", () => {
   it("does not collapse zero when it follows a spoken ten", () => {
     expect(accessKeyDigitsFromTranscript("trinta zero zero")).toBe("3000");
     expect(accessKeyDigitsFromTranscript("vinte e cinco zero zero")).toBe("2500");
+  });
+});
+
+describe("Safe manual zero-run shortcuts", () => {
+  it("appends four zeros after voice capture without changing existing digits", () => {
+    expect(appendAccessKeyZeroRun("7", 4)).toBe("70000");
+    expect(appendAccessKeyZeroRun("70000", 1)).toBe("700000");
+    expect(appendAccessKeyZeroRun("70000", 2)).toBe("7000000");
+  });
+
+  it("supports continuing by voice after the explicit zero run", () => {
+    const initial = appendAccessKeyZeroRun("7", 4);
+    expect(initial + accessKeyDigitsFromTranscript("nove seis dois")).toBe("70000962");
+  });
+
+  it("never silently turns the spoken digits 40 into 0000", () => {
+    expect(accessKeyDigitsFromTranscript("40")).toBe("40");
+    expect(accessKeyDigitsFromTranscript("quarenta")).toBe("40");
+    expect(appendAccessKeyZeroRun("40", 4)).toBe("400000");
+  });
+
+  it("preserves length limit, including when insertion would overflow", () => {
+    expect(appendAccessKeyZeroRun("1".repeat(40), 4)).toHaveLength(44);
+    expect(appendAccessKeyZeroRun("1".repeat(41), 4)).toBe("1".repeat(41));
+    expect(appendAccessKeyZeroRun(originalKey, 4)).toBe(originalKey);
+  });
+
+  it("does not alter the original 44-digit fiscal key", () => {
+    expect(validateAccessKey(appendAccessKeyZeroRun(originalKey, 1)).valid).toBe(true);
+    expect(appendAccessKeyZeroRun(originalKey, 1)).toBe(originalKey);
   });
 });
