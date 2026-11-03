@@ -1,4 +1,23 @@
-import { isOfficialSpNfceQrUrl } from "../src/lib/nfceSpVercelTransport";
+// Self-contained server validation avoids TS NodeNext extension resolution
+// failures in the Vercel function bundle. Keep in sync with client predicate.
+function isOfficialSpNfceQrUrl(value: string): boolean {
+  try {
+    if (!value || value.length > 1200) return false;
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.port) return false;
+    if (url.hostname !== "www.nfce.fazenda.sp.gov.br" &&
+        url.hostname !== "nfce.fazenda.sp.gov.br") return false;
+    if (url.pathname.toLowerCase() !== "/nfceconsultapublica/paginas/consultaqrcode.aspx") {
+      return false;
+    }
+    const params = [...url.searchParams.keys()];
+    if (params.length !== 1 || params[0].toLowerCase() !== "p") return false;
+    const p = url.searchParams.get(params[0]) ?? "";
+    return /^\\d{44}\\|[A-Za-z0-9|.\\-]{5,300}$/.test(p);
+  } catch {
+    return false;
+  }
+}
 
 const MAX_REQUEST_BYTES = 1600;
 const MAX_PAGE_BYTES = 1_500_000;
