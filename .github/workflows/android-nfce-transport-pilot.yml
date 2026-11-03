@@ -41,6 +41,20 @@ jobs:
         run: |
           npx cap add android
           npx cap sync android
+      - name: Grant camera permission to QR scanner in test package
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("android/app/src/main/AndroidManifest.xml")
+          xml = path.read_text()
+          assert "<application" in xml
+          xml = xml.replace(
+              "<application",
+              '<uses-permission android:name="android.permission.CAMERA" />\\n    <application',
+              1,
+          )
+          path.write_text(xml)
+          PY
       - name: Compile debug-only Android APK
         run: |
           cd android
