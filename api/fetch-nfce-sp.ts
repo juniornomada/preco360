@@ -70,6 +70,35 @@ async function limitedHtml(response: Response): Promise<string> {
  */
 export default {
   async fetch(request: Request): Promise<Response> {
+    // Temporary preview-only connectivity test. To be deleted before merge.
+    if (request.method === "GET" &&
+        process.env.VERCEL_ENV === "preview" &&
+        new URL(request.url).searchParams.get("probe") === "1") {
+      const target = new URL(request.url).searchParams.get("url") ?? "";
+      if (!isOfficialSpNfceQrUrl(target)) return reply({error: "INVALID_NFCE_SP_URL"}, 400);
+      try {
+        const response = await fetch(target, {
+          redirect: "manual",
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+          headers: {accept: "text/html,application/xhtml+xml"},
+        });
+        const html = response.ok ? await limitedHtml(response) : "";
+        return reply({
+          probe: "preview-only",
+          reached: true,
+          httpStatus: response.status,
+          bytes: html.length,
+          portalRejected: /Request Rejected|Access Denied/i.test(html),
+          receiptOrValidationPage: /NFC-e|QR.Code|QRCode|documento|Nota Fiscal/i.test(html),
+        });
+      } catch (error) {
+        return reply({
+          probe: "preview-only", reached: false,
+          errorType: error instanceof Error ? error.name : "unknown",
+          message: error instanceof Error ? error.message.slice(0, 140) : "fetch failed",
+        }, 502);
+      }
+    }
     if (request.method !== "POST") return reply({ error: "METHOD_NOT_ALLOWED" }, 405);
 
     const type = request.headers.get("content-type") || "";
