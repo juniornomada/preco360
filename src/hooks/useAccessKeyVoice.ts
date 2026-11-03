@@ -213,13 +213,21 @@ export function useAccessKeyVoice() {
     };
 
     recognition.onstart = () => {
+      // A cancelled native session may dispatch onstart after the user has
+      // pressed Parar or started a replacement session. Ignore stale events.
+      if (recognitionRef.current !== recognition || !listeningRequestedRef.current) {
+        recognition.abort();
+        return;
+      }
       appendSpeechTrace({ event: "onstart", session });
-      recognitionRef.current = recognition;
       setError(null);
       setIsListening(true);
     };
 
     recognition.onresult = (event) => {
+      // Never overwrite manually inserted zeros with a delayed speech event
+      // belonging to the session the user has already stopped.
+      if (recognitionRef.current !== recognition || !listeningRequestedRef.current) return;
       let finalDigits = "";
       let interimDigits = "";
 
@@ -287,6 +295,7 @@ export function useAccessKeyVoice() {
     };
 
     recognition.onerror = (event) => {
+      if (recognitionRef.current !== recognition) return;
       appendSpeechTrace({ event: "onerror", session, error: event.error ?? null });
       if (event.error === "aborted") return;
 
@@ -305,6 +314,10 @@ export function useAccessKeyVoice() {
     };
 
     recognition.onend = () => {
+      // stopListening() invalidates the old session synchronously. An onend
+      // arriving afterwards must not restore an older transcription, append
+      // extra digits, or schedule another restart.
+      if (recognitionRef.current !== recognition) return;
       appendSpeechTrace({
         event: "onend",
         session,
@@ -350,9 +363,11 @@ export function useAccessKeyVoice() {
     };
 
     try {
+      recognitionRef.current = recognition;
       recognition.start();
       return true;
     } catch {
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
       if (listeningRequestedRef.current) {
         setError("Reiniciando a escuta…");
         restartTimerRef.current = window.setTimeout(() => {

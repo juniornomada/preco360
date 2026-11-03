@@ -15,7 +15,7 @@ import {
   type PrintedReceiptDiscount,
   type PrintedReceiptItem,
 } from "@/lib/printedReceiptDiscounts";
-import { sanitizeAccessKeyDigits } from "@/lib/accessKeyVoice";
+import { appendAccessKeyZeroRun, sanitizeAccessKeyDigits } from "@/lib/accessKeyVoice";
 import { useAccessKeyVoice } from "@/hooks/useAccessKeyVoice";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +33,7 @@ type ParsedItem = PrintedReceiptItem & {
 };
 type ImportSource = "qr" | "key" | "image";
 const RECEIPT_CHANNEL = "preco360-receipt-import";
+const ZERO_SHORTCUT_COUNTS = [1, 2, 3, 4] as const;
 type Diagnostics = {
   htmlLength?: number;
   lineCount?: number;
@@ -1369,14 +1370,34 @@ export default function ReceiptImportPage() {
                 <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
                   <span>
                     {isKeyVoiceListening
-                      ? "Ouvindo… diga os números; para zeros seguidos, fale: quatro zeros."
+                      ? "Ouvindo… para inserir zeros pelo atalho, toque em Parar primeiro."
                       : isKeyVoiceSupported
-                        ? "Dite os números. Para quatro zeros seguidos, diga: quatro zeros."
-                        : "Ditado por voz indisponível neste navegador."}
+                        ? "O Chrome pode ouvir 'quatro zeros' como 40. Use os atalhos abaixo e retome o microfone."
+                        : "Use os atalhos para inserir zeros consecutivos com precisão."}
                   </span>
                   <span className="shrink-0 font-mono font-semibold">
                     {accessKeyDigits.length}/44
                   </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2" aria-label="Atalhos para zeros consecutivos">
+                  <span className="text-xs text-muted-foreground">Inserir no final:</span>
+                  {ZERO_SHORTCUT_COUNTS.map((count) => (
+                    <Button
+                      key={count}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="font-mono"
+                      disabled={loading || isKeyVoiceListening || accessKeyDigits.length + count > 44}
+                      aria-label={`Adicionar ${count} zero${count > 1 ? "s" : ""} à chave`}
+                      onClick={() => {
+                        clearKeyVoiceError();
+                        setAccessKey((previous) => appendAccessKeyZeroRun(previous, count));
+                      }}
+                    >
+                      +{"0".repeat(count)}
+                    </Button>
+                  ))}
                 </div>
                 {keyVoiceError && (
                   <p className="text-xs text-destructive">{keyVoiceError}</p>

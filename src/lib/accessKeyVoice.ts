@@ -152,3 +152,17 @@ export function accessKeyDigitsFromTranscript(value: string) {
 export function sanitizeAccessKeyDigits(value: string) {
   return value.replace(/\D/g, "").slice(0, 44);
 }
+
+/**
+ * Explicit manual fallback when native speech recognition collapses
+ * "quatro zeros" into the ambiguous number 40. Never reinterpret a spoken
+ * "40" automatically, because it might genuinely mean digits 4 and 0.
+ */
+export function appendAccessKeyZeroRun(
+  value: string,
+  count: 1 | 2 | 3 | 4,
+) {
+  const clean = sanitizeAccessKeyDigits(value);
+  if (clean.length + count > 44) return clean;
+  return clean + "0".repeat(count);
+}
