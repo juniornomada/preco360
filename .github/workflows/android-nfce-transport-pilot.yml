@@ -1,0 +1,54 @@
+name: Android NFC-e On-device Transport Pilot
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "capacitor.config.ts"
+      - "package.json"
+      - "package-lock.json"
+      - "src/lib/androidNfceTransport.ts"
+      - "src/lib/androidNfceTransport.test.ts"
+      - "src/pages/ReceiptImportPage.tsx"
+      - ".github/workflows/android-nfce-transport-pilot.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+      - name: Install Android build platform
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Install JavaScript dependencies
+        run: npm install --no-audit --no-fund
+      - name: Check native transport boundary tests
+        run: npx vitest run src/lib/androidNfceTransport.test.ts src/test/portalResponse.test.ts
+      - name: Build existing React frontend
+        run: npm run build
+      - name: Generate isolated Android test project
+        run: |
+          npx cap add android
+          npx cap sync android
+      - name: Compile debug-only Android APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: preco360-nfce-android-pilot-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 5
