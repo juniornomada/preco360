@@ -36,6 +36,11 @@ jobs:
       - name: Check native transport boundary tests
         run: npx vitest run src/lib/androidNfceTransport.test.ts src/test/portalResponse.test.ts
       - name: Build existing React frontend
+        env:
+          # Both VITE_ values are public client-side configuration, NOT secrets.
+          # Administrative/service role credentials must never be added here.
+          VITE_SUPABASE_URL: "https://hwpsnipdkwxvvjowomlo.supabase.co"
+          VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_IJNgGqzr6FLA-56hPEbTnA_TCtpd3f7"
         run: npm run build
       - name: Generate isolated Android test project
         run: |
