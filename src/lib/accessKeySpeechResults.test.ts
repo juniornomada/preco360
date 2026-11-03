@@ -197,6 +197,46 @@ describe("Android/Chrome revised cumulative hypotheses (second real trace)", () 
   });
 });
 
+describe("Explicit counted zeros (native ASR omission workaround)", () => {
+  it.each([
+    ["sete quatro zeros nove seis dois", "70000962"],
+    ["7 quatro zeros 9 6 2", "70000962"],
+    ["7 4 zeros 9 6 2", "70000962"],
+    ["7 quatro vezes zero 9 6 2", "70000962"],
+    ["7 zero quatro vezes 9 6 2", "70000962"],
+    ["7 QUATRO ZEROS 9 MEIA 2", "70000962"],
+    ["sete, quatro zeros, nove, seis, dois", "70000962"],
+  ])("expands %j to exact digits", (spoken, expected) => {
+    expect(accessKeyDigitsFromTranscript(spoken)).toBe(expected);
+  });
+
+  it("preserves natural independent single digits and spoken tens", () => {
+    expect(accessKeyDigitsFromTranscript("quatro zero")).toBe("40");
+    expect(accessKeyDigitsFromTranscript("4 zero")).toBe("40");
+    expect(accessKeyDigitsFromTranscript("quatro zeros")).toBe("0000");
+    expect(accessKeyDigitsFromTranscript("trinta e cinco")).toBe("35");
+    expect(accessKeyDigitsFromTranscript("cinquenta e dois seis")).toBe("526");
+    expect(accessKeyDigitsFromTranscript("zero zero zero zero")).toBe("0000");
+  });
+
+  it("supports more than one counted run without merging unrelated digits", () => {
+    expect(accessKeyDigitsFromTranscript("dois zeros cinco três zeros sete")).toBe("0050007");
+    expect(accessKeyDigitsFromTranscript("2 zeros 5 3 zeros 7")).toBe("0050007");
+  });
+
+  it("preserves counted zeros through the cumulative-result assembler", () => {
+    const slots = ["7", "7 quatro zeros", "7 quatro zeros nove seis dois"].map(
+      (transcript) => slot(transcript),
+    );
+    expect(assemble(slots).finalDigits).toBe("70000962");
+  });
+
+  it("does not invent zeros in transcripts that omit the count", () => {
+    expect(accessKeyDigitsFromTranscript("sete zero zero zero nove seis dois"))
+      .toBe("7000962");
+  });
+});
+
 describe("NFC-e spoken-number parsing", () => {
   it("keeps consecutive zeros in the same transcript", () => {
     expect(accessKeyDigitsFromTranscript("zero zero zero zero")).toBe("0000");
