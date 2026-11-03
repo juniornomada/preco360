@@ -16,6 +16,7 @@ import {
   type PrintedReceiptItem,
 } from "@/lib/printedReceiptDiscounts";
 import { appendAccessKeyZeroRun, sanitizeAccessKeyDigits } from "@/lib/accessKeyVoice";
+import { isReceiptServerTransportFailure, offersReceiptFileRecovery, receiptImportErrorDescription } from "@/lib/receiptImportNetworkRecovery";
 import { useAccessKeyVoice } from "@/hooks/useAccessKeyVoice";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -65,6 +66,7 @@ function blockedTitle(code: string) {
   if (code === "CAPTCHA_REQUIRED") return "A SEFAZ exige validação humana";
   if (code === "BLOCKED") return "A SEFAZ bloqueou a consulta automática";
   if (code === "PORTAL_REJECTED") return "A SEFAZ recusou a consulta automática";
+  if (code === "UPSTREAM_NETWORK") return "Servidor não conseguiu acessar a SEFAZ-SP";
   if (code === "NO_ITEMS") return "A página abriu, mas o layout ainda não foi reconhecido";
   if (code === "NOT_FOUND") return "Cupom não encontrado";
   if (code === "QR_FORMAT") return "Formato do QR Code rejeitado pela SEFAZ";
@@ -548,7 +550,7 @@ export default function ReceiptImportPage() {
       setBlocked(state);
       // The inline recovery card already explains this expected official-portal
       // denial. A second red toast only duplicates the message and covers the UI.
-      if (state.code !== "PORTAL_REJECTED") {
+      if (state.code !== "PORTAL_REJECTED" && !isReceiptServerTransportFailure(state.code)) {
         toast({
           title: blockedTitle(state.code),
           description: state.message,
@@ -798,6 +800,7 @@ export default function ReceiptImportPage() {
   const importUrl = async (url: string, importSource: ImportSource) => {
     setLoading(true);
     clearResult();
+    setSource(importSource);
     setLastUrl(url);
 
     if (importSource === "qr") {
@@ -810,11 +813,8 @@ export default function ReceiptImportPage() {
     try {
       const { data, error } = await supabase.functions.invoke("fetch-receipt-url", { body: { url } });
       if (error) throw error;
-      if (data?.error) {
-        const detail = String(data.error);
-        const trace = data.traceId ? ` (código: ${data.traceId})` : "";
-        throw new Error(detail + trace);
-      }
+      // Structured errors already contain code/trace ID and belong in the
+      // inline recovery panel. Throw only transport errors from the invocation.
       applyResult(data, importSource, extractAccessKey(url) ?? undefined);
     } catch (error: any) {
       toast({ title: "Erro ao consultar cupom", description: error?.message ?? "Falha na consulta.", variant: "destructive" });
@@ -1280,6 +1280,7 @@ export default function ReceiptImportPage() {
   };
 
   const d = blocked?.diagnostics;
+  const recoveryConsultationUrl = blocked?.url || (source === "qr" ? lastUrl : "");
 
   return (
     <div className="page-container mx-auto w-full max-w-3xl">
@@ -1591,13 +1592,20 @@ export default function ReceiptImportPage() {
         <Card className="mt-4 border-amber-500/30 bg-amber-500/5">
           <CardHeader className="pb-2"><CardTitle className="text-base">{blockedTitle(blocked.code)}</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">{blocked.message}</p>
+            <p className="text-sm text-muted-foreground">{receiptImportErrorDescription(blocked.code, blocked.message)}</p>
 
-            {blocked.code === "PORTAL_REJECTED" && (
+            {offersReceiptFileRecovery(blocked.code) && (
               <div className="space-y-2 rounded-lg border border-amber-500/20 bg-background/70 p-3">
-                <p className="text-sm font-semibold text-foreground">O QR Code foi lido. O bloqueio ocorreu no portal oficial.</p>
+                <p className="text-sm font-semibold text-foreground">
+                  {isReceiptServerTransportFailure(blocked.code)
+                    ? "O QR Code foi lido; a conexão do servidor falhou."
+                    : "O QR Code foi lido; o portal recusou a leitura automática."}
+                </p>
                 <p className="text-sm text-muted-foreground">
-                  O portal abre no Chrome, mas recusa a leitura feita pelo servidor. Abra a nota no navegador, salve um print ou PDF de todos os itens e selecione o arquivo abaixo. O Preço 360 tentará ler os produtos automaticamente; você revisará tudo antes de salvar.
+                  Se o cupom abre no Chrome, use o menu do navegador para imprimir e
+                  salvar em PDF (quando disponível), ou salve imagens de todos os
+                  itens. Selecione o arquivo aqui para o Preço 360 tentar extrair
+                  os produtos. Revise os dados antes de salvar.
                 </p>
                 <input
                   ref={blockedFileInputRef}
@@ -1636,10 +1644,12 @@ export default function ReceiptImportPage() {
             )}
 
             <div className="flex flex-wrap gap-2">
-              {blocked.url && (
-                <Button variant="outline" onClick={() => window.open(blocked.url, "_blank", "noopener,noreferrer")}> <ExternalLink className="mr-2 h-4 w-4" />Abrir consulta oficial</Button>
+              {recoveryConsultationUrl && (
+                <Button variant="outline" onClick={() => window.open(recoveryConsultationUrl, "_blank", "noopener,noreferrer")}>
+                  <ExternalLink className="mr-2 h-4 w-4" />Abrir consulta oficial
+                </Button>
               )}
-              {lastUrl && blocked.code !== "PORTAL_REJECTED" && (
+              {lastUrl && !offersReceiptFileRecovery(blocked.code) && (
                 <Button variant="outline" disabled={loading} onClick={() => void importUrl(lastUrl, source)}>
                   <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Tentar novamente
                 </Button>
