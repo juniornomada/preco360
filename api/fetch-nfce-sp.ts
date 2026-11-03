@@ -74,10 +74,18 @@ export default {
     if (request.method === "GET" &&
         process.env.VERCEL_ENV === "preview" &&
         new URL(request.url).searchParams.get("probe") === "1") {
-      const target = new URL(request.url).searchParams.get("url") ?? "";
+      const probeParams = new URL(request.url).searchParams;
+      const target = probeParams.get("url") ?? "";
       if (!isOfficialSpNfceQrUrl(target)) return reply({error: "INVALID_NFCE_SP_URL"}, 400);
+      const variant = probeParams.get("variant") || "canonical";
+      if (!["canonical", "short", "bare", "bare-short"].includes(variant)) {
+        return reply({ error: "INVALID_VARIANT" }, 400);
+      }
+      const probeUrl = new URL(target);
+      if (variant.includes("bare")) probeUrl.hostname = "nfce.fazenda.sp.gov.br";
+      if (variant.includes("short")) probeUrl.pathname = "/qrcode";
       try {
-        const response = await fetch(target, {
+        const response = await fetch(probeUrl, {
           redirect: "manual",
           signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
           headers: {accept: "text/html,application/xhtml+xml"},
@@ -92,10 +100,14 @@ export default {
           receiptOrValidationPage: /NFC-e|QR.Code|QRCode|documento|Nota Fiscal/i.test(html),
         });
       } catch (error) {
+        const cause = error instanceof Error ? (error as Error & {
+          cause?: { code?: unknown, name?: unknown },
+        }).cause : undefined;
         return reply({
-          probe: "preview-only", reached: false,
+          probe: "preview-only", reached: false, variant,
           errorType: error instanceof Error ? error.name : "unknown",
-          message: error instanceof Error ? error.message.slice(0, 140) : "fetch failed",
+          causeCode: typeof cause?.code === "string" ? cause.code.slice(0, 48) : "none",
+          causeName: typeof cause?.name === "string" ? cause.name.slice(0, 48) : "none",
         }, 502);
       }
     }
