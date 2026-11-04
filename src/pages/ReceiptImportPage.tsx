@@ -817,16 +817,26 @@ export default function ReceiptImportPage() {
 
     try {
       let attemptsMade = 0;
+      const parsedUrl = new URL(url);
+      const fastSpQr = importSource === "qr" &&
+        parsedUrl.protocol === "https:" &&
+        parsedUrl.hostname === "www.nfce.fazenda.sp.gov.br" &&
+        ["/qrcode", "/nfceconsultapublica/paginas/consultaqrcode.aspx"]
+          .includes(parsedUrl.pathname.toLowerCase()) &&
+        parsedUrl.searchParams.has("p");
       const invoke = () => {
         attemptsMade += 1;
-        // Only QR imports opt into one upstream network attempt per Edge
-        // invocation. Other import modes keep the established server policy.
+        // Single upstream fetch per invocation is enabled only for official SP
+        // QR URLs; other states retain the previous retry policy.
         return supabase.functions.invoke("fetch-receipt-url", {
-          body: importSource === "qr" ? { url, fastQrNetwork: true } : { url },
+          body: fastSpQr ? { url, fastQrNetwork: true } : { url },
         });
       };
       const { data, error } = importSource === "qr"
         ? await retryQrTransportFailure(invoke, {
+            // Do not multiply the existing three server-side attempts for
+            // non-SP portals by six new client invocations.
+            retryDelaysMs: fastSpQr ? undefined : [3500, 6500],
             onRetry: (retryNumber, totalRetries) => {
               setQrRetryStatus(
                 `SEFAZ instável. Tentando novamente (${retryNumber + 1} de ${totalRetries + 1}), sem reler o QR Code…`,
