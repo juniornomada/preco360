@@ -449,6 +449,7 @@ export default function ReceiptImportPage() {
   const [tab, setTab] = useState<ImportSource>("qr");
   const [scannerOpen, setScannerOpen] = useState(false);
   const [qrRetryStatus, setQrRetryStatus] = useState<string | null>(null);
+  const [qrRecoveryResult, setQrRecoveryResult] = useState<string | null>(null);
   const [accessKey, setAccessKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -802,6 +803,7 @@ export default function ReceiptImportPage() {
   const importUrl = async (url: string, importSource: ImportSource) => {
     setLoading(true);
     setQrRetryStatus(null);
+    setQrRecoveryResult(null);
     clearResult();
     setSource(importSource);
     setLastUrl(url);
@@ -814,12 +816,30 @@ export default function ReceiptImportPage() {
     }
 
     try {
-      const invoke = () => supabase.functions.invoke("fetch-receipt-url", { body: { url } });
+      let attemptsMade = 0;
+      const parsedUrl = new URL(url);
+      const fastSpQr = importSource === "qr" &&
+        parsedUrl.protocol === "https:" &&
+        parsedUrl.hostname === "www.nfce.fazenda.sp.gov.br" &&
+        ["/qrcode", "/nfceconsultapublica/paginas/consultaqrcode.aspx"]
+          .includes(parsedUrl.pathname.toLowerCase()) &&
+        parsedUrl.searchParams.has("p");
+      const invoke = () => {
+        attemptsMade += 1;
+        // Single upstream fetch per invocation is enabled only for official SP
+        // QR URLs; other states retain the previous retry policy.
+        return supabase.functions.invoke("fetch-receipt-url", {
+          body: fastSpQr ? { url, fastQrNetwork: true } : { url },
+        });
+      };
       const { data, error } = importSource === "qr"
         ? await retryQrTransportFailure(invoke, {
+            // Do not multiply the existing three server-side attempts for
+            // non-SP portals by six new client invocations.
+            retryDelaysMs: fastSpQr ? undefined : [3500, 6500],
             onRetry: (retryNumber, totalRetries) => {
               setQrRetryStatus(
-                `Conexão instável. Reconsultando automaticamente (${retryNumber}/${totalRetries}), sem reler o QR Code…`,
+                `SEFAZ instável. Tentando novamente (${retryNumber + 1} de ${totalRetries + 1}), sem reler o QR Code…`,
               );
             },
           })
@@ -830,6 +850,13 @@ export default function ReceiptImportPage() {
       // mask a successful second invocation or cause duplicate price records.
       // Refusals, CAPTCHA and invalid documents are never retried.
       applyResult(data, importSource, extractAccessKey(url) ?? undefined);
+      if (importSource === "qr" && Array.isArray(data?.items) && data.items.length > 0) {
+        setQrRecoveryResult(
+          attemptsMade === 1
+            ? "Consulta concluída na primeira tentativa."
+            : `Consulta concluída na ${attemptsMade}ª tentativa, sem reler o QR Code.`,
+        );
+      }
     } catch (error: any) {
       toast({ title: "Erro ao consultar cupom", description: error?.message ?? "Falha na consulta.", variant: "destructive" });
     } finally {
@@ -1335,6 +1362,12 @@ export default function ReceiptImportPage() {
               <span>{qrRetryStatus}</span>
             </div>
           )}
+          {!loading && qrRecoveryResult && items.length > 0 && (
+            <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+              {qrRecoveryResult}
+            </p>
+          )}
         </TabsContent>
 
         <TabsContent value="key" className="mt-4 space-y-3">
@@ -1615,6 +1648,17 @@ export default function ReceiptImportPage() {
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">{receiptImportErrorDescription(blocked.code, blocked.message)}</p>
 
+            {source === "qr" && lastUrl && isReceiptServerTransportFailure(blocked.code) && (
+              <Button
+                type="button"
+                className="w-full"
+                disabled={loading}
+                onClick={() => void importUrl(lastUrl, "qr")}
+              >
+                <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                Reconsultar este QR sem usar a câmera
+              </Button>
+            )}
             {offersReceiptFileRecovery(blocked.code) && (
               <div className="space-y-2 rounded-lg border border-amber-500/20 bg-background/70 p-3">
                 <p className="text-sm font-semibold text-foreground">

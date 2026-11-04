@@ -20,16 +20,28 @@ describe("fresh Edge Function invocation after a scanned NFC-e QR", () => {
 
     expect(result).toEqual(success());
     expect(invoke).toHaveBeenCalledTimes(2);
-    expect(wait).toHaveBeenCalledWith(3500);
-    expect(onRetry).toHaveBeenCalledWith(1, 2);
+    expect(wait).toHaveBeenCalledWith(1200);
+    expect(onRetry).toHaveBeenCalledWith(1, 5);
   });
 
-  it("allows at most two additional server invocations for persistent reset", async () => {
+  it("allows at most five additional fresh invocations, fewer than the old nine nested requests", async () => {
     const invoke = vi.fn().mockResolvedValue(reset());
     const wait = vi.fn().mockResolvedValue(undefined);
     const onRetry = vi.fn();
     const result = await retryQrTransportFailure(invoke, { wait, onRetry });
     expect(result.data?.code).toBe("UPSTREAM_NETWORK");
+    expect(invoke).toHaveBeenCalledTimes(6);
+    expect(wait.mock.calls).toEqual([[1200], [1800], [2500], [3500], [4500]]);
+    expect(onRetry.mock.calls).toEqual([[1, 5], [2, 5], [3, 5], [4, 5], [5, 5]]);
+  });
+
+  it("preserves two outer retries for portals without the SP fast QR policy", async () => {
+    const invoke = vi.fn().mockResolvedValue(reset());
+    const wait = vi.fn().mockResolvedValue(undefined);
+    const onRetry = vi.fn();
+    await retryQrTransportFailure(invoke, {
+      wait, onRetry, retryDelaysMs: [3500, 6500],
+    });
     expect(invoke).toHaveBeenCalledTimes(3);
     expect(wait.mock.calls).toEqual([[3500], [6500]]);
     expect(onRetry.mock.calls).toEqual([[1, 2], [2, 2]]);
@@ -45,6 +57,21 @@ describe("fresh Edge Function invocation after a scanned NFC-e QR", () => {
     });
     expect(result).toEqual(success());
     expect(invoke).toHaveBeenCalledTimes(3);
+  });
+
+  it("still succeeds without a second scan when the sixth fresh invocation works", async () => {
+    const invoke = vi.fn()
+      .mockResolvedValueOnce(reset())
+      .mockResolvedValueOnce(reset())
+      .mockResolvedValueOnce(reset())
+      .mockResolvedValueOnce(reset())
+      .mockResolvedValueOnce(reset())
+      .mockResolvedValueOnce(success());
+    const wait = vi.fn().mockResolvedValue(undefined);
+    const result = await retryQrTransportFailure(invoke, { wait });
+    expect(result).toEqual(success());
+    expect(invoke).toHaveBeenCalledTimes(6);
+    expect(wait).toHaveBeenCalledTimes(5);
   });
 
   it.each(["PORTAL_REJECTED", "CAPTCHA_REQUIRED", "BLOCKED", "HTTP_ERROR", "NO_ITEMS", "QR_FORMAT"])(

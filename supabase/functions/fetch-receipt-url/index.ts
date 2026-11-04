@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { isPortalAccessRejection, PORTAL_REJECTION_CODE } from "./portalResponse.ts";
+import { fiscalNetworkAttemptCount } from "./networkPolicy.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -424,17 +425,20 @@ function markerCode(html: string) {
   return null;
 }
 
-async function fetchFiscal(raw: string) {
+async function fetchFiscal(raw: string, fastQrNetwork = false) {
   const url = new URL(raw);
   if (!/^https?:$/.test(url.protocol) || !(url.hostname === "gov.br" || url.hostname.endsWith(".gov.br"))) {
     throw new ImportError("Endereço fiscal inválido.", "INVALID_URL");
   }
 
-  // Edge Runtime -> SEFAZ connections can fail transiently before an HTTP
-  // response exists (Deno SendRequest / connection errors). Retry those
-  // transport failures, but do not retry real HTTP responses such as 403/429.
+  // A Chrome QR import may start a new Edge invocation for each upstream
+  // ECONNRESET. Each failed Edge attempt already consumed ~2.2s in internal
+  // waits, and reusing that invocation did not help in observed receipts.
+  // Opt-in to a single network attempt ONLY for the official SP NFC-e QR
+  // endpoints; all other callers retain the existing three-attempt policy.
+  const maxAttempts = fiscalNetworkAttemptCount(url, fastQrNetwork);
   let lastNetworkError: unknown;
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const response = await fetch(url.toString(), {
         redirect: "follow",
@@ -457,7 +461,7 @@ async function fetchFiscal(raw: string) {
     } catch (error) {
       if (error instanceof ImportError) throw error;
       lastNetworkError = error;
-      if (attempt < 3) {
+      if (attempt < maxAttempts) {
         await new Promise((resolve) => setTimeout(resolve, attempt * 700));
       }
     }
@@ -465,11 +469,11 @@ async function fetchFiscal(raw: string) {
 
   console.error("[fetch-receipt-url] SEFAZ transport failure after retries", {
     host: url.host,
-    attempts: 3,
+    attempts: maxAttempts,
     cause: lastNetworkError instanceof Error ? lastNetworkError.message : String(lastNetworkError),
   });
   throw new ImportError(
-    "Não foi possível conectar ao servidor da SEFAZ-SP após 3 tentativas. Isso costuma ser uma instabilidade temporária na comunicação. Aguarde alguns segundos e tente novamente; se persistir, use a aba Arquivo com o PDF ou imagens do cupom.",
+    "Não foi possível conectar ao servidor da SEFAZ-SP. A comunicação pode estar temporariamente instável; o aplicativo pode tentar novamente sem reler o QR Code.",
     "UPSTREAM_NETWORK",
   );
 }
@@ -488,7 +492,7 @@ Deno.serve(async (req) => {
     if (typeof body?.pageText === "string" && body.pageText.trim()) {
       raw = body.pageText.trim();
     } else if (typeof body?.url === "string" && body.url.trim()) {
-      const loaded = await fetchFiscal(body.url.trim());
+      const loaded = await fetchFiscal(body.url.trim(), body?.fastQrNetwork === true);
       raw = loaded.html;
       finalUrl = loaded.finalUrl;
       diagnostics.upstreamAttempts = loaded.attempts;
