@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { isPortalAccessRejection, PORTAL_REJECTION_CODE } from "./portalResponse.ts";
+import { fiscalNetworkAttemptCount } from "./networkPolicy.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -435,10 +436,7 @@ async function fetchFiscal(raw: string, fastQrNetwork = false) {
   // waits, and reusing that invocation did not help in observed receipts.
   // Opt-in to a single network attempt ONLY for the official SP NFC-e QR
   // endpoints; all other callers retain the existing three-attempt policy.
-  const isSpQr = url.hostname === "www.nfce.fazenda.sp.gov.br" &&
-    ["/qrcode", "/nfceconsultapublica/paginas/consultaqrcode.aspx"]
-      .includes(url.pathname.toLowerCase());
-  const maxAttempts = fastQrNetwork && isSpQr ? 1 : 3;
+  const maxAttempts = fiscalNetworkAttemptCount(url, fastQrNetwork);
   let lastNetworkError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
