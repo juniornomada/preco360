@@ -35,6 +35,18 @@ describe("fresh Edge Function invocation after a scanned NFC-e QR", () => {
     expect(onRetry.mock.calls).toEqual([[1, 5], [2, 5], [3, 5], [4, 5], [5, 5]]);
   });
 
+  it("preserves two outer retries for portals without the SP fast QR policy", async () => {
+    const invoke = vi.fn().mockResolvedValue(reset());
+    const wait = vi.fn().mockResolvedValue(undefined);
+    const onRetry = vi.fn();
+    await retryQrTransportFailure(invoke, {
+      wait, onRetry, retryDelaysMs: [3500, 6500],
+    });
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(wait.mock.calls).toEqual([[3500], [6500]]);
+    expect(onRetry.mock.calls).toEqual([[1, 2], [2, 2]]);
+  });
+
   it("succeeds on the third try without showing the earlier transient failure", async () => {
     const invoke = vi.fn()
       .mockResolvedValueOnce(reset())
