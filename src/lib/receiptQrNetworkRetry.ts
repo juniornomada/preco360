@@ -22,6 +22,7 @@ export async function retryQrTransportFailure<T extends { code?: string }>(
   options: {
     wait?: (milliseconds: number) => Promise<void>;
     onRetry?: (retryNumber: number, totalRetries: number) => void;
+    retryDelaysMs?: readonly number[];
   } = {},
 ): Promise<FiscalQrResponse<T>> {
   const wait =
@@ -29,14 +30,15 @@ export async function retryQrTransportFailure<T extends { code?: string }>(
     ((milliseconds: number) =>
       new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
 
+  const retryDelays = options.retryDelaysMs ?? RETRY_DELAYS_MS;
   let result = await invoke();
 
-  for (let i = 0; i < RETRY_DELAYS_MS.length; i += 1) {
+  for (let i = 0; i < retryDelays.length; i += 1) {
     // Only the structured upstream network reset qualifies. Server responses
     // that require a human action must never be retried automatically.
     if (result.error || result.data?.code !== "UPSTREAM_NETWORK") break;
-    options.onRetry?.(i + 1, RETRY_DELAYS_MS.length);
-    await wait(RETRY_DELAYS_MS[i]);
+    options.onRetry?.(i + 1, retryDelays.length);
+    await wait(retryDelays[i]);
     result = await invoke();
   }
 
