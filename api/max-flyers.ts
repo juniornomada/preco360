@@ -104,12 +104,22 @@ function parseLooseOfferPayload(text:string){
   };
 }
 
-export async function getJson(url:string, attempts=3){
+// The Max offers service sometimes replies after the previous 9s deadline.
+// Keep the store-list policy unchanged; allow only the *offers* requests a
+// longer bounded window while reducing redundant attempts.
+export const MAX_OFFER_ATTEMPTS = 2;
+export const MAX_OFFER_TIMEOUT_MS = 16000;
+
+export async function getJson(url:string, attempts=3, timeoutMs=9000){
   let lastError:unknown=null;
 
   for(let attempt=1;attempt<=attempts;attempt++){
     const controller=new AbortController();
-    const timeout=setTimeout(()=>controller.abort(),9000);
+    let deadlineReached=false;
+    const timeout=setTimeout(()=>{
+      deadlineReached=true;
+      controller.abort();
+    },timeoutMs);
     try{
       const r=await fetch(url,{
         redirect:"follow",
@@ -155,7 +165,11 @@ export async function getJson(url:string, attempts=3){
         (preview ? ": " + preview : ""),
       );
     }catch(error){
-      lastError=error;
+      // Report our own deadline clearly instead of forwarding the opaque
+      // "This operation was aborted" message to the collection screen.
+      lastError=deadlineReached
+        ? new Error(`Serviço de ofertas do Max não respondeu em ${Math.round(timeoutMs/1000)} segundos (tentativa ${attempt}/${attempts}).`)
+        : error;
       if(attempt<attempts) await new Promise(resolve=>setTimeout(resolve,250*attempt));
     }finally{
       clearTimeout(timeout);
@@ -247,7 +261,7 @@ export default {
       stores.map(async(store:any)=>{
         const endpoint=OFFERS+"?action=getOffers&store="+encodeURIComponent(store.id);
         try{
-          const data=await getJson(endpoint,3);
+          const data=await getJson(endpoint,MAX_OFFER_ATTEMPTS,MAX_OFFER_TIMEOUT_MS);
           return {ok:true,store,rows:flyerRows(data,store),error:null};
         }catch(error){
           return {
