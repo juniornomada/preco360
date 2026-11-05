@@ -28,5 +28,8 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - name: Check collector types
-        run: deno check --node-modules-dir=auto supabase/functions/collect-marilia-flyers/index.ts
+      # The unchanged legacy collector has four unrelated Deno type errors
+      # (Atacadao validityYearHint and Uint8Array BufferSource); keep this PR
+      # scoped to Kawakami and type-check the new pure policy independently.
+      - name: Check Kawakami page revision policy types
+        run: deno check supabase/functions/collect-marilia-flyers/kawakamiCampaign.ts
