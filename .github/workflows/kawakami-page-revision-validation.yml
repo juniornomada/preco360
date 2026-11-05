@@ -1,0 +1,35 @@
+name: Kawakami Same-Campaign Page Revision Validation
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/functions/collect-marilia-flyers/**'
+      - 'src/test/kawakamiIncrementalCapture.test.ts'
+      - '.github/workflows/kawakami-page-revision-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-kawakami-pages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Verify that new pages force campaign reimport
+        run: npx vitest run src/test/kawakamiIncrementalCapture.test.ts
+      - name: Build frontend regressions
+        run: npm run build
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      # The unchanged legacy collector has four unrelated Deno type errors
+      # (Atacadao validityYearHint and Uint8Array BufferSource); keep this PR
+      # scoped to Kawakami and type-check the new pure policy independently.
+      - name: Check Kawakami page revision policy types
+        run: deno check supabase/functions/collect-marilia-flyers/kawakamiCampaign.ts

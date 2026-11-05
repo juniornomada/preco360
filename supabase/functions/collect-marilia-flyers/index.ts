@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { isUnchangedKawakamiCampaign } from "./kawakamiCampaign.ts";
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 
 const SOURCES = [
@@ -551,11 +552,15 @@ async function collectKawakami(db:any, report:any[]){
     }
   }
 
+  // Calculate the *current* hash BEFORE deciding that an already-imported
+  // campaign can be skipped. Kawakami may publish additional VIRTUAL_* sheets
+  // under the same dates. A matching date alone is not proof of completeness.
+  const combinedHash=await sha(new TextEncoder().encode(pages.map((p:any)=>String(p.hash)).join("|")));
   const sourceKey=`kawakami:marilia:${val.from}:${val.to}`;
   const title="Ofertas";
   const {data:known}=await db.from("flyer_source_registry").select("*").eq("user_id",USER_ID).eq("retailer","Kawakami").eq("city","Marília").eq("source_key",sourceKey).maybeSingle();
 
-  if((known?.status==="processed"||known?.status==="unchanged") && known?.file_hash && known?.valid_from===val.from && known?.valid_to===val.to){
+  if(isUnchangedKawakamiCampaign(known, {fileHash:combinedHash,validFrom:val.from,validTo:val.to})){
     const {data:existingFlyer}=await db.from("flyers").select("id").eq("user_id",USER_ID).eq("file_hash",known.file_hash).maybeSingle();
     let offerCount=0;
     if(existingFlyer?.id){
@@ -569,7 +574,6 @@ async function collectKawakami(db:any, report:any[]){
     }
   }
 
-  const combinedHash=await sha(new TextEncoder().encode(pages.map((p:any)=>String(p.hash)).join("|")));
   const [{data:saved},{data:jobs}]=await Promise.all([
     db.from("flyers").select("id,valid_from,valid_to").eq("user_id",USER_ID).eq("file_hash",combinedHash).limit(1),
     db.from("flyer_import_jobs").select("id,status,result,valid_from,valid_to").eq("user_id",USER_ID).eq("file_hash",combinedHash).in("status",["queued","processing","refining","completed"]).order("created_at",{ascending:false}).limit(1),
