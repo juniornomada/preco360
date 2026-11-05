@@ -3,12 +3,18 @@ const STORE_LIST =
 const OFFERS =
   "https://institucional.supermuffato.com.br/webtools/services/api/sm-rds-ofertas.php";
 
-function stripJsonp(text:string){
+/**
+ * Accept a genuine JavaScript JSONP wrapper (e.g. getStores({...})).
+ * NEVER strip arbitrary parentheses from valid JSON: the Max source has
+ * current flyer filenames like "0101flv--max--marilia-- (1).jpeg".
+ * Previously indexOf("(") cut the source at that filename and caused
+ * "Resposta inválida do serviço Max" for both Marília stores.
+ */
+export function stripJsonp(text:string){
   const value=text.trim();
-  const first=value.indexOf("(");
-  const last=value.lastIndexOf(")");
-  if(first>0 && last>first) return value.slice(first+1,last);
-  return value;
+  if(value.startsWith("{") || value.startsWith("[") || value.startsWith('"')) return value;
+  const wrapped=value.match(/^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(([\s\S]*)\)\s*;?\s*$/);
+  return wrapped ? wrapped[2].trim() : value;
 }
 
 function norm(value:unknown){
@@ -98,7 +104,7 @@ function parseLooseOfferPayload(text:string){
   };
 }
 
-async function getJson(url:string, attempts=3){
+export async function getJson(url:string, attempts=3){
   let lastError:unknown=null;
 
   for(let attempt=1;attempt<=attempts;attempt++){
@@ -159,7 +165,7 @@ async function getJson(url:string, attempts=3){
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-function flyerRows(data:any, store:any){
+export function flyerRows(data:any, store:any){
   const rows:any[]=[];
   for(const offer of (Array.isArray(data?.offers)?data.offers:[])){
     const pages=(offer?.flyer?.[0]?.item??[])
