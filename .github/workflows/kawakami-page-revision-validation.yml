@@ -1,0 +1,32 @@
+name: Kawakami Same-Campaign Page Revision Validation
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/functions/collect-marilia-flyers/**'
+      - 'src/test/kawakamiIncrementalCapture.test.ts'
+      - '.github/workflows/kawakami-page-revision-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-kawakami-pages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Verify that new pages force campaign reimport
+        run: npx vitest run src/test/kawakamiIncrementalCapture.test.ts
+      - name: Build frontend regressions
+        run: npm run build
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Check collector types
+        run: deno check --node-modules-dir=auto supabase/functions/collect-marilia-flyers/index.ts
