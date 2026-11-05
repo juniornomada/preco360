@@ -104,7 +104,7 @@ function parseLooseOfferPayload(text:string){
   };
 }
 
-async function getJson(url:string, attempts=3){
+export async function getJson(url:string, attempts=3){
   let lastError:unknown=null;
 
   for(let attempt=1;attempt<=attempts;attempt++){
@@ -165,7 +165,7 @@ async function getJson(url:string, attempts=3){
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-function flyerRows(data:any, store:any){
+export function flyerRows(data:any, store:any){
   const rows:any[]=[];
   for(const offer of (Array.isArray(data?.offers)?data.offers:[])){
     const pages=(offer?.flyer?.[0]?.item??[])
