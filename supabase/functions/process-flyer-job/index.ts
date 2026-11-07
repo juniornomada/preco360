@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { SINGLE_DAY_FLYER_VALIDITY_GUIDANCE } from "./singleDayValidityGuidance.ts";
 function canonicalRetailerName(value?: string | null) {
   const original = String(value ?? "").trim();
   if (!original) return original || null;
@@ -26,7 +27,9 @@ const FREE_GEMINI_MODELS = [
 ] as const;
 
 const EXTRACTION_PROMPT = `
-Você é o extrator visual do Radar 360. Leia o encarte como uma pessoa olhando cada página, não como texto corrido de OCR.
+Você é o extrator visual do Radar 360.
+
+${SINGLE_DAY_FLYER_VALIDITY_GUIDANCE} Leia o encarte como uma pessoa olhando cada página, não como texto corrido de OCR.
 
 OBJETIVO
 Faça uma varredura completa do documento e devolva todas as ofertas que conseguir identificar com segurança, em JSON estruturado.
@@ -56,6 +59,7 @@ REGRAS OBRIGATÓRIAS
 11. source_page é a página física do PDF, começando em 1.
 12. confidence vai de 0 a 1. Só devolva registros com confiança >= 0.72.
 13. Datas devem ser YYYY-MM-DD quando legíveis. Não deduza datas ausentes.
+13D. Para campanhas de um único dia, aplique a revisão específica de validade acima. Um título como "Dia M" não comprova, sozinho, a data final.
 13A. O campo retailer deve conter o NOME OFICIAL DA REDE/SUPERMERCADO, identificado principalmente pelo logotipo, assinatura institucional ou nome repetido como marca da loja. NÃO use como retailer o nome de campanha, slogan, evento promocional ou chamada publicitária.
 13B. Expressões como "Festival do...", "Semana...", "Mês...", "Real Gigante", "Ofertas Gigantes", "Aniversário", "Feirão" e semelhantes são campanhas/slogans quando aparecem destacadas junto da marca. Exemplo: se a peça mostra o logotipo "MAX Atacadista" e o título "Festival do REAL GIGANTE", retailer deve ser "Max Atacadista", nunca "Real Atacadista".
 13C. Quando houver dúvida entre um título promocional grande e uma marca/logotipo menor, prefira a marca/logotipo que identifica a rede. Antes de finalizar retailer, confira cabeçalho, rodapé, assinatura visual e outras páginas do mesmo tabloide.
