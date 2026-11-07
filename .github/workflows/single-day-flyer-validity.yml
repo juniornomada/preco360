@@ -1,0 +1,32 @@
+name: Single-day flyer validity extraction regression
+
+on:
+  pull_request:
+    paths:
+      - "supabase/functions/process-flyer-job/**"
+      - "src/test/singleDayFlyerValidity.test.ts"
+      - ".github/workflows/single-day-flyer-validity.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Validate missing and expired date safeguards
+        run: npx vitest run src/test/singleDayFlyerValidity.test.ts
+      - name: Build frontend regression
+        run: npm run build
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Type-check validity prompt module
+        run: deno check supabase/functions/process-flyer-job/singleDayValidityGuidance.ts
