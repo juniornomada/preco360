@@ -110,7 +110,7 @@ const PROCESSED_MEAT_RE =
   /(^| )(hamburguer|almondega|linguica|salsicha|bacon|jerked|lasanha|pizza|sanduiche|kibe)( |$)/;
 
 const BEEF_PRODUCT_HEAD_RE =
-  /^(carne bovin[oa]s?|miolo do acem|acem|patinho|alcatra|maminha|paleta|bife de coxao (?:mole|duro)|coxao (?:mole|duro)|contra ?file|picanha|fraldinha|lagarto|cupim|costela bovin[oa]s?|costelao bovin[oa]s?|ponta de peito|peito bovino|capa de file|carne moida|file mignon|musculo|ossobuco|osso buco)( |$)/;
+  /^(carne bovin[oa]s?|miolo (?:do acem|da alcatra)|acem|patinho|alcatra|maminha|paleta|bife de coxao (?:mole|duro)|coxao (?:mole|duro)|contra ?file|picanha|fraldinha|lagarto|cupim|costela bovin[oa]s?|costelao bovin[oa]s?|ponta de peito|peito bovino|capa de file|carne moida|file mignon|musculo|ossobuco|osso buco)( |$)/;
 
 export function isBeefOfferText(value: string) {
   const normalized = normalize(value);
