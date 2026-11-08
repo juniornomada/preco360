@@ -49,6 +49,7 @@ describe("animal protein search semantics", () => {
     [
       "Acém Fresco",
       "Miolo do Acém Fresco",
+      "Miolo da Alcatra Bovino fresco/ bife ou pedaço 1kg",
       "Patinho Bovino",
       "Carne Moída Bovina Resfriada Bandeja 500g",
       "Alcatra c/ Maminha",
