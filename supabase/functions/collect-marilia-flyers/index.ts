@@ -739,7 +739,7 @@ async function collectConfianca(db:any, report:any[]){
     const [{data:saved},{data:jobs}]=await Promise.all([
       db.from("flyers").select("id,valid_from,valid_to").eq("user_id",USER_ID).eq("file_hash",hash).limit(1),
       db.from("flyer_import_jobs").select("id,status,result,valid_from,valid_to").eq("user_id",USER_ID).eq("file_hash",hash)
-        .in("status",["queued","processing","refining","completed"]).order("created_at",{ascending:false}).limit(1),
+        .in("status",["queued","processing","refining","completed","failed"]).order("progress_current",{ascending:false}).limit(1),
     ]);
 
     if(saved?.length){
