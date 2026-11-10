@@ -1233,7 +1233,9 @@ async function collectSwift(report:any[]){
 async function recoverIncompleteScheduledFlyers(db:any, report:any[]) {
   const now=new Date();
   // A stalled page should be retried quickly enough for the 09:00 readiness target.
+  // Failed jobs can be retried sooner; active jobs retain the longer stall guard.
   const cutoff=new Date(now.getTime()-8*60*1000).toISOString();
+  const failedCutoff=new Date(now.getTime()-60*1000).toISOString();
   const recent=new Date(now.getTime()-7*24*60*60*1000).toISOString();
   const parts=new Intl.DateTimeFormat("en-US",{
     timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit",
@@ -1245,7 +1247,7 @@ async function recoverIncompleteScheduledFlyers(db:any, report:any[]) {
     .eq("user_id",USER_ID)
     .in("status",["failed","queued","processing","refining"])
     .gte("created_at",recent)
-    .lt("updated_at",cutoff)
+    .lt("updated_at",failedCutoff)
     .order("updated_at",{ascending:true})
     .limit(30);
   if(error){
@@ -1256,6 +1258,7 @@ async function recoverIncompleteScheduledFlyers(db:any, report:any[]) {
   let resumed=0;
   for(const job of jobs??[]){
     if(resumed>=8) break;
+    if(job.status!=="failed" && job.updated_at>=cutoff) continue;
     const oldResult=job.result??{};
     if(oldResult.auto_import!==true) continue;
     const validTo=String(oldResult.valid_to??job.valid_to??"");
