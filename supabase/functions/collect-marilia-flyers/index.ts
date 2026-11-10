@@ -661,7 +661,6 @@ async function collectConfianca(db:any, report:any[]){
   const discovered=confiancaPublications(html,used).filter((p)=>p.valid_to && p.valid_to>=today);
   const publications=[...discovered];
   const knownUrls=new Set(publications.map(p=>clean(p.url)));
-  const clock=new Date();
   const brazilToday=new Date(today+"T12:00:00-03:00");
   for(let offset=0;offset<5;offset++){
     const day=new Date(brazilToday.getTime()-offset*86400000);
@@ -673,7 +672,8 @@ async function collectConfianca(db:any, report:any[]){
     const candidate=`https://clienteconfianca.com.br/webshared/clienteconfianca.com.br/PDF_TABLOIDE/${month}${monthNames[day.getMonth()]}${yyyy}/tabloide-rede-${dd}${mm}-${yyyy}.pdf`;
     if(knownUrls.has(clean(candidate))) continue;
     try{
-      const probe=await fetchSafe(candidate,"HEAD");
+      let probe=await fetchSafe(candidate,"HEAD");
+      if(probe.status===405 || probe.status===403) probe=await fetchSafe(candidate);
       if(probe.ok && /pdf/i.test(probe.headers.get("content-type")||"application/pdf")){
         publications.push({url:candidate,valid_from:null,valid_to:null});
         knownUrls.add(clean(candidate));
