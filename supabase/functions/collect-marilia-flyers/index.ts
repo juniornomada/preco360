@@ -1277,11 +1277,11 @@ async function recoverIncompleteScheduledFlyers(db:any, report:any[]) {
       if(savedError||saved?.length) continue;
     }
 
-    const retries={...(oldResult.page_retry_counts??{})};
-    for(const page of pending) delete retries[String(page)];
+    // Preserve per-page failure counts across scheduled recoveries so a
+    // repeatedly overloaded model is not selected from scratch each time.
+    // The page worker uses these counts to rotate its preferred model.
     const nextResult={
       ...oldResult,
-      page_retry_counts:retries,
       scheduled_recovery_attempts:count+1,
       scheduled_recovery_at:now.toISOString(),
     };
