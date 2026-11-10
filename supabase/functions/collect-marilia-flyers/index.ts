@@ -655,7 +655,31 @@ async function collectConfianca(db:any, report:any[]){
   }
 
   const today=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
-  const publications=confiancaPublications(html,used).filter((p)=>p.valid_to && p.valid_to>=today);
+  // The official page can lag behind a newly published PDF. Probe only the
+  // publisher's documented date-based naming scheme, never arbitrary hosts.
+  // The PDF itself must be fetched and validated by the normal import path.
+  const discovered=confiancaPublications(html,used).filter((p)=>p.valid_to && p.valid_to>=today);
+  const publications=[...discovered];
+  const knownUrls=new Set(publications.map(p=>clean(p.url)));
+  const clock=new Date();
+  const brazilToday=new Date(today+"T12:00:00-03:00");
+  for(let offset=0;offset<5;offset++){
+    const day=new Date(brazilToday.getTime()-offset*86400000);
+    const dd=String(day.getDate()).padStart(2,"0");
+    const mm=String(day.getMonth()+1).padStart(2,"0");
+    const yyyy=day.getFullYear();
+    const month=String(day.getMonth()+1).padStart(2,"0");
+    const monthNames=["JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT","NOV","DEZ"];
+    const candidate=`https://clienteconfianca.com.br/webshared/clienteconfianca.com.br/PDF_TABLOIDE/${month}${monthNames[day.getMonth()]}${yyyy}/tabloide-rede-${dd}${mm}-${yyyy}.pdf`;
+    if(knownUrls.has(clean(candidate))) continue;
+    try{
+      const probe=await fetchSafe(candidate,"HEAD");
+      if(probe.ok && /pdf/i.test(probe.headers.get("content-type")||"application/pdf")){
+        publications.push({url:candidate,valid_from:null,valid_to:null});
+        knownUrls.add(clean(candidate));
+      }
+    }catch{/* A failed probe is retried on the next scheduled discovery. */}
+  }
   if(!publications.length){
     report.push({retailer:"Confiança",endpoint:used,result:"sem asset oficial obtível com segurança",files:0,offers:0});
     report.push({retailer:"Confiança",endpoint:used,result:"resumo",found:0,imported:0,unchanged:0,failed:0});
