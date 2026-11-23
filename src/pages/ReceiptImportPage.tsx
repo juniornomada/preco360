@@ -720,9 +720,42 @@ export default function ReceiptImportPage() {
           const partDiscounts = group.kind !== "html" && Array.isArray(data?.discounts)
             ? data.discounts
             : [];
+          // Positional discounts on receipts without numbered items must be
+          // applied within the same file/segment before pages are merged.
+          // Never guess which product a discount belongs to across segments.
+          const indexedDiscounts = partDiscounts.filter(
+            (row: any) => Number.isInteger(row?.itemIndex) &&
+              !row?.itemNumber && Number(row.itemIndex) >= 0,
+          );
+          if (indexedDiscounts.length && parsed.length) {
+            const usedNumbers = new Set(parsed.map((item) => item.itemNumber));
+            const temporary = new Map<number, string>();
+            const withNumbers = parsed.map((item, index) => {
+              if (item.itemNumber) return item;
+              const id = String(9000 + index);
+              if (usedNumbers.has(id) || index > 998) return item;
+              temporary.set(index, id);
+              return { ...item, itemNumber: id };
+            });
+            const positional = indexedDiscounts
+              .filter((row: any) => temporary.has(row.itemIndex))
+              .map((row: any) => ({
+                itemNumber: temporary.get(row.itemIndex)!,
+                amount: String(row.amount ?? ""),
+              }));
+            const applied = applyPrintedReceiptDiscounts(withNumbers, positional);
+            parsed.splice(0, parsed.length, ...applied.items.map((item, index) => ({
+              ...item,
+              itemNumber: temporary.has(index) ? undefined : item.itemNumber,
+            })));
+            if (applied.unresolved || positional.length !== indexedDiscounts.length) {
+              failures.push(`${file.name}: desconto sem vínculo seguro; revise o preço.`);
+            }
+          }
           for (const row of partDiscounts) {
+            if (!row?.itemNumber) continue;
             groupDiscounts.push({
-              itemNumber: String(row?.itemNumber ?? ""),
+              itemNumber: String(row.itemNumber),
               amount: String(row?.amount ?? ""),
             });
           }
