@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Tags } from "lucide-react";
+import { type ReactNode } from "react";
+import { Tags, Beef, Drumstick, Fish, Milk, CupSoda, Carrot, Apple, ShoppingBasket } from "lucide-react";
 import { productVisual } from "@/lib/productVisualResolver";
 
 function ProductVisualIcon({
@@ -245,7 +245,6 @@ function ProductVisualIcon({
 export default function ProductVisual({
   name,
   category,
-  imageUrl,
   compact = false,
 }: {
   name: string;
@@ -256,45 +255,22 @@ export default function ProductVisual({
   const safeName = typeof name === "string" ? name : String(name ?? "");
   const safeCategory =
     typeof category === "string" ? category : category == null ? null : String(category);
+  const text = (safeName + " " + (safeCategory ?? "")).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const visual = productVisual(safeName, safeCategory);
-  // A valid product image always wins. Visual rules are fallback-only.
-  // This prevents malformed DB values from breaking the whole search result.
-  const normalizedName = safeName.normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  const freshMandioquinha = /\b(?:mandioquinha|batata[\s-]+baroa)\b/.test(normalizedName) &&
-    !/\b(?:pure|chips|palha|sopa|frita|congelada|cozida|creme|nhoque)\b/.test(normalizedName);
-  const safeImageUrl =
-    typeof imageUrl === "string" && imageUrl.trim()
-      ? imageUrl.trim()
-      : freshMandioquinha ? "/product-images/mandioquinha.webp" : null;
-  const [imageFailed, setImageFailed] = useState(false);
-
-  useEffect(() => {
-    setImageFailed(false);
-  }, [safeImageUrl]);
-
-  const showImage = Boolean(safeImageUrl) && !imageFailed;
-  const isMarilanTeens54 = /marilan teens.*54g|teens.*54g/i.test(safeName);
-
+  const Icon = /\b(suino|suina|pernil|lombo|bacon|costelinha)\b/.test(text) ? Beef :
+    /\b(frango|aves|sobrecoxa|coxa|chester|peru)\b/.test(text) ? Drumstick :
+    /\b(bovino|bovina|coxao|patinho|acem|picanha|alcatra|carne)\b/.test(text) ? Beef :
+    /\b(peixe|tilapia|merluza|salmao|sardinha)\b/.test(text) ? Fish :
+    /\b(leite|iogurte|laticinios)\b/.test(text) ? Milk :
+    /\b(bebidas|suco|refrigerante|cerveja|agua)\b/.test(text) ? CupSoda :
+    /\b(higiene|limpeza|detergente|sabao|shampoo)\b/.test(text) ? ShoppingBasket :
+    /\b(hortifruti|verduras|legumes)\b/.test(text) ? Carrot :
+    /\b(frutas|maca|banana|laranja)\b/.test(text) ? Apple : null;
   return (
-    <div className={`flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-muted/50 ${isMarilanTeens54 ? "h-20 w-20 sm:h-24 sm:w-24" : compact ? "h-[52px] w-[52px] sm:h-14 sm:w-14" : "h-14 w-14"}`}>
-      {safeImageUrl ? (
-        <img
-          key={safeImageUrl}
-          src={safeImageUrl}
-          alt=""
-          loading="lazy"
-          className={`${showImage ? "block" : "hidden"} h-full w-full object-contain p-0.5 ${isMarilanTeens54 ? "scale-[1.55]" : ""}`}
-          onLoad={() => setImageFailed(false)}
-          onError={() => setImageFailed(true)}
-        />
-      ) : null}
-      <span
-        aria-hidden="true"
-        className={`${showImage ? "hidden" : "flex"} h-full w-full items-center justify-center`}
-      >
-        <ProductVisualIcon visual={visual} />
-      </span>
+    <div className={`flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-muted/50 ${compact ? "h-[52px] w-[52px] sm:h-14 sm:w-14" : "h-14 w-14"}`}>
+      {Icon ? <Icon aria-hidden="true" className="h-8 w-8 text-primary" /> :
+        visual?.startsWith("__") ? <ProductVisualIcon visual={visual} /> :
+        <ShoppingBasket aria-hidden="true" className="h-8 w-8 text-primary" />}
     </div>
   );
 }
